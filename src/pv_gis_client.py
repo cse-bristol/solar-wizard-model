@@ -1,12 +1,19 @@
 import csv
 import time
+import traceback
 from typing import List, Dict
+import multiprocessing as mp
 
 import requests
 
+from flatten import flatten
+
 _PI = 3.14159265359
 _API_RATE_LIMIT_SECONDS = 1 / 25
+_WORKERS = 4
+_API_RATE_LIMIT_SECONDS_PER_WORKER = _API_RATE_LIMIT_SECONDS * _WORKERS
 
+# PV-GIS API params, from https://ec.europa.eu/jrc/en/PVGIS/docs/noninteractive
 # Name 	                Type* 	Obligatory 	Default 	    Comments
 # lat           	    F 	    Yes 	    - 	            Latitude, in decimal degrees, south is negative.
 # lon 	                F 	    Yes 	    -       	    Longitude, in decimal degrees, west is negative.
@@ -77,22 +84,52 @@ def _single_solar_pv_estimate(lon: float,
     return body
 
 
-def solar_pv_estimate(csv_filename: str):
-    with open(csv_filename) as f:
-        csv_reader = csv.DictReader(f)
-        for row in csv_reader:
-            if int(row['x']) >= 110 and int(row['y']) >= 110:
-                lon, lat, horizon, angle, aspect, peakpower, loss = _csv_row_to_pv_gis_params(row)
-                start_time = time.time()
-                results = _single_solar_pv_estimate(lon, lat, horizon, angle, aspect, peakpower, loss)
-                kwh = results['outputs']['totals']['fixed']['E_y']
-                irr = results['outputs']['totals']['fixed']['H(i)_y']
-                time_taken = time.time() - start_time
-                print(f"{row['easting']}, {row['northing']}, {kwh} kWh/y, {irr} kWh/m2/y, {time_taken} seconds")
-                # Stay under the API rate limit:
-                if time_taken < _API_RATE_LIMIT_SECONDS:
-                    time.sleep(_API_RATE_LIMIT_SECONDS - time_taken)
+def _handle_row(row: Dict[str, str]):
+    try:
+        lon, lat, horizon, angle, aspect, peakpower, loss = _csv_row_to_pv_gis_params(row)
 
+        start_time = time.time()
+        results = _single_solar_pv_estimate(lon, lat, horizon, angle, aspect, peakpower, loss)
+        time_taken = time.time() - start_time
+        print(time_taken)
+        # Stay under the API rate limit:
+        if time_taken < _API_RATE_LIMIT_SECONDS_PER_WORKER:
+            time.sleep(_API_RATE_LIMIT_SECONDS_PER_WORKER - time_taken)
+
+        results = flatten(results['outputs'])
+        results.update({
+            'easting': row['easting'],
+            'northing': row['northing'],
+            'x': row['x'],
+            'y': row['y'],
+        })
+        return results
+    except Exception as e:
+        print('Caught exception in worker process:')
+        traceback.print_exc()
+        print()
+        raise e
+
+
+def solar_pv_estimate(csv_filename: str, out_filename: str):
+    with open(csv_filename) as f, open(out_filename, 'w') as out, mp.Pool(_WORKERS) as pool:
+        csv_reader = csv.DictReader(f)
+        csv_writer = None
+
+        # todo remove
+        start_time = time.time()
+        i = 0
+        for res in pool.imap_unordered(_handle_row, csv_reader, chunksize=10):
+            if csv_writer is None:
+                csv_writer = csv.DictWriter(out, res.keys())
+                csv_writer.writeheader()
+            csv_writer.writerow(res)
+            # todo remove
+            i += 1
+            if i == 100:
+                time_taken = time.time() - start_time
+                print(f"{time_taken} seconds to do 100")
+                exit(0)
 
 
 def _csv_row_to_pv_gis_params(row: Dict[str, str]) -> tuple:
@@ -136,4 +173,4 @@ def _easting_northing_to_lon_lat(easting, northing):
 
 
 if __name__ == '__main__':
-    solar_pv_estimate('../data/csv_out4.csv')
+    solar_pv_estimate('../data/csv_out4.csv', '../data/res.csv')
