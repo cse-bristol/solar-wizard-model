@@ -136,7 +136,7 @@ def _csv_row_to_pv_gis_params(row: Dict[str, str]) -> tuple:
     lon, lat = _easting_northing_to_lon_lat(row['easting'], row['northing'])
 
     # SAGA and PV-GIS both expect starting at North, moving clockwise
-    horizon = [_rad_to_deg(v) for k, v in row.items() if k.endswith('_angle_rad')]
+    horizon = [_rad_to_deg(v) for k, v in row.items() if 'angle_rad' in k]
 
     # angle: in degrees from horizontal
     # corresponds to slope field in patched SAGA csv output (in rads from horizontal)
@@ -173,4 +173,23 @@ def _easting_northing_to_lon_lat(easting, northing):
 
 
 if __name__ == '__main__':
-    solar_pv_estimate('../data/csv_out4.csv', '../data/res.csv')
+    # solar_pv_estimate('../data/csv_out4.csv', '../data/res.csv')
+    res = _handle_row({
+        'x': '2956',
+        'y': '1',
+        'easting': '374474.973649',
+        'northing': '161297.831967',
+        'slope': '1.055491',
+        'aspect': '3.275080',
+        'sky_view_factor': '0.719803',
+        'percent_visible': '63.753561',
+        '0_angle_rad': '1.290979',
+        '45_angle_rad': '1.293249',
+        '90_angle_rad': '0.542866',
+        '135_angle_rad': '0.000000',
+        '180_angle_rad': '0.000000',
+        '225_angle_rad': '0.000000',
+        '270_angle_rad': '0.139095',
+        '315_angle_rad': '1.28867',
+    })
+    print(res)

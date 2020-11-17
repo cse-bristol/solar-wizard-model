@@ -1,7 +1,7 @@
 with import<nixpkgs> {};
 
 stdenv.mkDerivation rec {
-  name = "albion-webapp";
+  name = "albion-solar-pv";
   version = 0.1;
 
   buildInputs = [
@@ -9,6 +9,7 @@ stdenv.mkDerivation rec {
       psycopg2
       requests
       gdal
+      numpy
     ]))
   ];
 
