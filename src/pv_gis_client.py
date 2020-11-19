@@ -1,7 +1,7 @@
 import csv
 import time
 import traceback
-from typing import List, Dict
+from typing import List, Dict, Iterable
 import multiprocessing as mp
 
 import requests
@@ -12,6 +12,18 @@ _PI = 3.14159265359
 _API_RATE_LIMIT_SECONDS = 1 / 25
 _WORKERS = 4
 _API_RATE_LIMIT_SECONDS_PER_WORKER = _API_RATE_LIMIT_SECONDS * _WORKERS
+
+
+def solar_pv_estimate(iterable: Iterable[dict], out_filename: str):
+    with open(out_filename, 'w') as out, mp.Pool(_WORKERS) as pool:
+        csv_writer = None
+
+        for res in pool.imap_unordered(_handle_row, iterable, chunksize=10):
+            if csv_writer is None:
+                csv_writer = csv.DictWriter(out, res.keys())
+                csv_writer.writeheader()
+            csv_writer.writerow(res)
+
 
 # PV-GIS API params, from https://ec.europa.eu/jrc/en/PVGIS/docs/noninteractive
 # Name 	                Type* 	Obligatory 	Default 	    Comments
@@ -86,7 +98,7 @@ def _single_solar_pv_estimate(lon: float,
 
 def _handle_row(row: Dict[str, str]):
     try:
-        lon, lat, horizon, angle, aspect, peakpower, loss = _csv_row_to_pv_gis_params(row)
+        lon, lat, horizon, angle, aspect, peakpower, loss = _row_to_pv_gis_params(row)
 
         start_time = time.time()
         results = _single_solar_pv_estimate(lon, lat, horizon, angle, aspect, peakpower, loss)
@@ -111,28 +123,7 @@ def _handle_row(row: Dict[str, str]):
         raise e
 
 
-def solar_pv_estimate(csv_filename: str, out_filename: str):
-    with open(csv_filename) as f, open(out_filename, 'w') as out, mp.Pool(_WORKERS) as pool:
-        csv_reader = csv.DictReader(f)
-        csv_writer = None
-
-        # todo remove
-        start_time = time.time()
-        i = 0
-        for res in pool.imap_unordered(_handle_row, csv_reader, chunksize=10):
-            if csv_writer is None:
-                csv_writer = csv.DictWriter(out, res.keys())
-                csv_writer.writeheader()
-            csv_writer.writerow(res)
-            # todo remove
-            i += 1
-            if i == 100:
-                time_taken = time.time() - start_time
-                print(f"{time_taken} seconds to do 100")
-                exit(0)
-
-
-def _csv_row_to_pv_gis_params(row: Dict[str, str]) -> tuple:
+def _row_to_pv_gis_params(row: dict) -> tuple:
     lon, lat = _easting_northing_to_lon_lat(row['easting'], row['northing'])
 
     # SAGA and PV-GIS both expect starting at North, moving clockwise

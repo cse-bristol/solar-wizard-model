@@ -1,4 +1,7 @@
-with import<nixpkgs> {};
+let
+  pkgs = import <nixpkgs> {};
+  saga_albion = (import ./320-albion-saga-gis/default.nix) { inherit pkgs; };
+in with pkgs;
 
 stdenv.mkDerivation rec {
   name = "albion-solar-pv";
@@ -11,6 +14,7 @@ stdenv.mkDerivation rec {
       gdal
       numpy
     ]))
+    saga_albion
   ];
 
   env = buildEnv {
