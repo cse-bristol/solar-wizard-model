@@ -3,6 +3,8 @@ import subprocess
 import psycopg2
 from psycopg2.sql import SQL, Identifier
 
+import tables
+
 
 def get_horizons(lidar_tif: str, mask_tif: str, csv_out: str, search_radius: int, slices: int):
     res = subprocess.run(
@@ -16,7 +18,6 @@ def get_horizons(lidar_tif: str, mask_tif: str, csv_out: str, search_radius: int
         f'-NDIRS {slices} ',
         capture_output=True, text=True, shell=True
     )
-    print(res.stdout)
     print(res.stderr)
     if res.returncode != 0:
         raise ValueError(res.stderr)
@@ -24,12 +25,13 @@ def get_horizons(lidar_tif: str, mask_tif: str, csv_out: str, search_radius: int
 
 def load_horizons_to_db(pg_uri: str, job_id: int, horizon_csv: str):
     pg_conn = psycopg2.connect(pg_uri)
-    table = f"horizons_job_{int(job_id)}"
+    schema = tables.schema(job_id)
+    pixel_horizons_table = tables.PIXEL_HORIZON_TABLE
 
     try:
         # todo won't work with horizon slices arg
         _sql(pg_conn, SQL("""
-            CREATE TABLE models.{table} (
+            CREATE TABLE {pixel_horizons} (
                 x bigint,
                 y bigint,
                 easting double precision,
@@ -47,15 +49,15 @@ def load_horizons_to_db(pg_uri: str, job_id: int, horizon_csv: str):
                 angle_rad_270 double precision,
                 angle_rad_315 double precision
             );
-        """).format(table=Identifier(table)))
+        """).format(pixel_horizons=Identifier(schema, pixel_horizons_table)))
 
-        _copy_csv(pg_conn, horizon_csv, f"models.{table}")
+        _copy_csv(pg_conn, horizon_csv, f"{schema}.{pixel_horizons_table}")
 
         _sql(pg_conn, SQL("""
-            ALTER TABLE models.{table} ADD COLUMN en geometry(Point, 27700);
-            UPDATE models.{table} p SET en = ST_SetSRID(ST_MakePoint(p.easting,p.northing), 27700);
-            CREATE INDEX ON models.{table} USING GIST (en);
-        """).format(table=Identifier(table)))
+            ALTER TABLE {pixel_horizons} ADD COLUMN en geometry(Point, 27700);
+            UPDATE {pixel_horizons} p SET en = ST_SetSRID(ST_MakePoint(p.easting,p.northing), 27700);
+            CREATE INDEX ON {pixel_horizons} USING GIST (en);
+        """).format(pixel_horizons=Identifier(schema, pixel_horizons_table)))
     finally:
         pg_conn.close()
 

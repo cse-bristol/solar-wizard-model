@@ -14,15 +14,19 @@ _WORKERS = 4
 _API_RATE_LIMIT_SECONDS_PER_WORKER = _API_RATE_LIMIT_SECONDS * _WORKERS
 
 
-def solar_pv_estimate(iterable: Iterable[dict], out_filename: str):
+def solar_pv_estimate(iterable: Iterable[dict], out_filename: str, log_frequency: int = 250):
     with open(out_filename, 'w') as out, mp.Pool(_WORKERS) as pool:
         csv_writer = None
+        processed: int = 0
 
         for res in pool.imap_unordered(_handle_row, iterable, chunksize=10):
             if csv_writer is None:
                 csv_writer = csv.DictWriter(out, res.keys())
                 csv_writer.writeheader()
             csv_writer.writerow(res)
+            processed += 1
+            if processed % log_frequency == 0 and log_frequency > 0 and processed > 0:
+                print(f"Sent {processed} queries.")
 
 
 # PV-GIS API params, from https://ec.europa.eu/jrc/en/PVGIS/docs/noninteractive
@@ -103,7 +107,6 @@ def _handle_row(row: Dict[str, str]):
         start_time = time.time()
         results = _single_solar_pv_estimate(lon, lat, horizon, angle, aspect, peakpower, loss)
         time_taken = time.time() - start_time
-        print(time_taken)
         # Stay under the API rate limit:
         if time_taken < _API_RATE_LIMIT_SECONDS_PER_WORKER:
             time.sleep(_API_RATE_LIMIT_SECONDS_PER_WORKER - time_taken)
@@ -112,8 +115,6 @@ def _handle_row(row: Dict[str, str]):
         results.update({
             'easting': row['easting'],
             'northing': row['northing'],
-            'x': row['x'],
-            'y': row['y'],
         })
         return results
     except Exception as e:
@@ -161,26 +162,3 @@ def _easting_northing_to_lon_lat(easting, northing):
     Point.AssignSpatialReference(InSR)
     Point.TransformTo(OutSR)
     return Point.GetY(), Point.GetX()
-
-
-if __name__ == '__main__':
-    # solar_pv_estimate('../data/csv_out4.csv', '../data/res.csv')
-    res = _handle_row({
-        'x': '2956',
-        'y': '1',
-        'easting': '374474.973649',
-        'northing': '161297.831967',
-        'slope': '1.055491',
-        'aspect': '3.275080',
-        'sky_view_factor': '0.719803',
-        'percent_visible': '63.753561',
-        '0_angle_rad': '1.290979',
-        '45_angle_rad': '1.293249',
-        '90_angle_rad': '0.542866',
-        '135_angle_rad': '0.000000',
-        '180_angle_rad': '0.000000',
-        '225_angle_rad': '0.000000',
-        '270_angle_rad': '0.139095',
-        '315_angle_rad': '1.28867',
-    })
-    print(res)

@@ -19,7 +19,7 @@ def model_solar_pv(pg_uri: str,
                    horizon_slices: int,
                    max_roof_slope_degrees: int,
                    min_roof_area_m: int,
-                   max_roof_degrees_from_north: int):
+                   min_roof_degrees_from_north: int):
 
     solar_dir = join(os.getenv("SOLAR_DIR"), f"job_{job_id}")
     os.makedirs(solar_dir, exist_ok=True)
@@ -46,7 +46,7 @@ def model_solar_pv(pg_uri: str,
 
     print("Polygonising aspect raster...")
     generate_aspect_polygons(mask_file, aspect_file, pg_uri, job_id, solar_dir)
-    filter_polygons(pg_uri, job_id, max_roof_slope_degrees, min_roof_area_m, max_roof_degrees_from_north)
+    filter_polygons(pg_uri, job_id, max_roof_slope_degrees, min_roof_area_m, min_roof_degrees_from_north)
 
     print("Sending data to PV-GIS...")
     solar_pv_csv = join(solar_dir, 'solar_pv.csv')
@@ -55,6 +55,8 @@ def model_solar_pv(pg_uri: str,
         with pg_conn.cursor() as cursor:
             cursor.execute("SELECT * FROM models.roof_horizons_job_24")
             rows = cursor.fetchall()
+            pg_conn.commit()
+            print(f"{len(rows)} queries to send:")
             pv_gis_client.solar_pv_estimate(rows, solar_pv_csv)
     finally:
         pg_conn.close()
@@ -221,6 +223,6 @@ if __name__ == '__main__':
         horizon_search_radius=200,
         horizon_slices=8,
         min_roof_area_m=10,
-        max_roof_degrees_from_north=45,
+        min_roof_degrees_from_north=45,
         max_roof_slope_degrees=70
     )

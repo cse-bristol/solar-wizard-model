@@ -4,8 +4,9 @@ from os.path import join
 import numpy as np
 from osgeo import gdal
 from psycopg2 import connect
-from psycopg2.sql import SQL
+from psycopg2.sql import SQL, Identifier
 
+import tables
 from src.crop import crop_to_mask
 
 
@@ -80,10 +81,12 @@ def _mask_raster(raster_to_mask: str, mask_tif: str, out_tif: str):
 
 
 def _polygonise(masked_tif: str, pg_uri: str, job_id: int):
-    job_id = int(job_id)
+    schema = tables.schema(job_id)
+    roof_polygon_table = tables.ROOF_POLYGON_TABLE
+
     res = subprocess.run(
         f'gdal_polygonize.py -b 1 -f PostgreSQL {masked_tif} '
-        f'PG:"{pg_uri}" models.roof_polygons_job_{job_id} aspect',
+        f'PG:"{pg_uri}" {schema}.{roof_polygon_table} aspect',
         capture_output=True, text=True, shell=True)
     print(res.stdout)
     print(res.stderr)
@@ -91,19 +94,25 @@ def _polygonise(masked_tif: str, pg_uri: str, job_id: int):
         raise ValueError(res.stderr)
 
 
-def filter_polygons(pg_uri: str, job_id: int, max_roof_slope_degrees: int, min_roof_area_m: int, max_roof_degrees_from_north: int):
+def filter_polygons(pg_uri: str,
+                    job_id: int,
+                    max_roof_slope_degrees: int,
+                    min_roof_area_m: int,
+                    min_roof_degrees_from_north: int,
+                    flat_roof_degrees: int):
     pg_conn = connect(pg_uri)
     try:
         with pg_conn.cursor() as cursor:
-            # todo table names
             # todo won't work with horizon slices arg
             cursor.execute(SQL("""
-            CREATE TABLE models.roof_horizons_job_24 AS
+            CREATE TABLE {roof_horizons} AS
             SELECT
                 c.ogc_fid,
                 c.wkb_geometry::geometry(Polygon, 27700),
                 avg(h.slope) AS slope,
                 avg(h.aspect) AS aspect,
+                avg(sky_view_factor) AS sky_view_factor,
+                avg(percent_visible) AS percent_visible,
                 ST_X(ST_SetSRID(ST_Centroid(c.wkb_geometry), 27700)) AS easting,
                 ST_Y(ST_SetSRID(ST_Centroid(c.wkb_geometry), 27700)) AS northing,
                 ST_Area(c.wkb_geometry) / cos(avg(h.slope)) as area,
@@ -117,18 +126,25 @@ def filter_polygons(pg_uri: str, job_id: int, max_roof_slope_degrees: int, min_r
                 max(h.angle_rad_270) AS angle_rad_270,
                 max(h.angle_rad_315) AS angle_rad_315
             FROM
-                models.roof_polygons_job_24 c
-                LEFT JOIN models.horizons_job_24 h ON ST_Contains(c.wkb_geometry, h.en)
+                {roof_polygons} c
+                LEFT JOIN {pixel_horizons} h ON ST_Contains(c.wkb_geometry, h.en)
             GROUP BY ogc_fid
             HAVING ST_Area(c.wkb_geometry) / cos(avg(h.slope)) >= %(min_roof_area_m)s;
             
-            DELETE FROM models.roof_horizons_job_24 WHERE degrees(slope) > %(max_roof_slope_degrees)s;
-            DELETE FROM models.roof_horizons_job_24 WHERE degrees(aspect) >= (360-%(max_roof_degrees_from_north)s) 
-                                                       OR degrees(aspect) <= %(max_roof_degrees_from_north)s;
-            """), {
+            DELETE FROM {roof_horizons} WHERE degrees(slope) > %(max_roof_slope_degrees)s;
+            DELETE FROM {roof_horizons} WHERE degrees(aspect) >= (360-%(min_roof_degrees_from_north)s)
+                                          AND degrees(slope) > 5;
+            DELETE FROM {roof_horizons} WHERE degrees(aspect) <= %(min_roof_degrees_from_north)s
+                                          AND degrees(slope) > 5;
+            """).format(
+                pixel_horizons=Identifier(tables.schema(job_id), tables.PIXEL_HORIZON_TABLE),
+                roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE),
+                roof_horizons=Identifier(tables.schema(job_id), tables.ROOF_HORIZON_TABLE),
+            ), {
                 "max_roof_slope_degrees": max_roof_slope_degrees,
                 "min_roof_area_m": min_roof_area_m,
-                "max_roof_degrees_from_north": max_roof_degrees_from_north,
+                "min_roof_degrees_from_north": min_roof_degrees_from_north,
+                "flat_roof_degrees": flat_roof_degrees,
             })
             pg_conn.commit()
     finally:
