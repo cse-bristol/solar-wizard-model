@@ -128,7 +128,7 @@ def _row_to_pv_gis_params(row: dict) -> tuple:
     lon, lat = _easting_northing_to_lon_lat(row['easting'], row['northing'])
 
     # SAGA and PV-GIS both expect starting at North, moving clockwise
-    horizon = [_rad_to_deg(v) for k, v in row.items() if 'angle_rad' in k]
+    horizon = [_rad_to_deg(v) for k, v in row.items() if 'horizon_slice' in k]
 
     # angle: in degrees from horizontal
     # corresponds to slope field in patched SAGA csv output (in rads from horizontal)

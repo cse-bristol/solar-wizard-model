@@ -23,13 +23,12 @@ def get_horizons(lidar_tif: str, mask_tif: str, csv_out: str, search_radius: int
         raise ValueError(res.stderr)
 
 
-def load_horizons_to_db(pg_uri: str, job_id: int, horizon_csv: str):
+def load_horizons_to_db(pg_uri: str, job_id: int, horizon_csv: str, horizon_slices: int):
     pg_conn = psycopg2.connect(pg_uri)
     schema = tables.schema(job_id)
     pixel_horizons_table = tables.PIXEL_HORIZON_TABLE
-
+    horizon_cols = ','.join([f'horizon_slice_{i} double precision' for i in range(0, horizon_slices)])
     try:
-        # todo won't work with horizon slices arg
         _sql(pg_conn, SQL("""
             CREATE TABLE {pixel_horizons} (
                 x bigint,
@@ -40,16 +39,7 @@ def load_horizons_to_db(pg_uri: str, job_id: int, horizon_csv: str):
                 aspect double precision,
                 sky_view_factor double precision,
                 percent_visible double precision,
-                angle_rad_0 double precision,
-                angle_rad_45 double precision,
-                angle_rad_90 double precision,
-                angle_rad_135 double precision,
-                angle_rad_180 double precision,
-                angle_rad_225 double precision,
-                angle_rad_270 double precision,
-                angle_rad_315 double precision
-            );
-        """).format(pixel_horizons=Identifier(schema, pixel_horizons_table)))
+        """ + horizon_cols + ");").format(pixel_horizons=Identifier(schema, pixel_horizons_table)))
 
         _copy_csv(pg_conn, horizon_csv, f"{schema}.{pixel_horizons_table}")
 

@@ -5,8 +5,10 @@ from typing import List
 
 import psycopg2
 import psycopg2.extras
+from psycopg2.sql import SQL, Identifier
 
-import pv_gis_client
+import src.pv_gis_client as pv_gis_client
+import src.tables as tables
 from src.crop import crop_to_mask
 from src.polygonize import generate_aspect_polygons, filter_polygons
 from src.horizons import get_horizons, load_horizons_to_db
@@ -19,7 +21,8 @@ def model_solar_pv(pg_uri: str,
                    horizon_slices: int,
                    max_roof_slope_degrees: int,
                    min_roof_area_m: int,
-                   min_roof_degrees_from_north: int):
+                   min_roof_degrees_from_north: int,
+                   flat_roof_degrees: int):
 
     solar_dir = join(os.getenv("SOLAR_DIR"), f"job_{job_id}")
     os.makedirs(solar_dir, exist_ok=True)
@@ -34,11 +37,14 @@ def model_solar_pv(pg_uri: str,
     print("Cropping lidar to mask dimensions...")
     crop_to_mask(vrt_file, mask_file, cropped_lidar)
 
+    print("Initialising postGIS schema...")
+    _init_schema(pg_uri, job_id)
+
     print("Using 320-albion-saga-gis to find horizons...")
     horizons_csv = join(solar_dir, 'horizons.csv')
     get_horizons(cropped_lidar, mask_file, horizons_csv, horizon_search_radius, horizon_slices)
     print("Loading horizon data into postGIS...")
-    load_horizons_to_db(pg_uri, job_id, horizons_csv)
+    load_horizons_to_db(pg_uri, job_id, horizons_csv, horizon_slices)
 
     print("Creating aspect raster...")
     aspect_file = join(solar_dir, 'aspect.tif')
@@ -46,20 +52,10 @@ def model_solar_pv(pg_uri: str,
 
     print("Polygonising aspect raster...")
     generate_aspect_polygons(mask_file, aspect_file, pg_uri, job_id, solar_dir)
-    filter_polygons(pg_uri, job_id, max_roof_slope_degrees, min_roof_area_m, min_roof_degrees_from_north)
+    filter_polygons(pg_uri, job_id, horizon_slices, max_roof_slope_degrees, min_roof_area_m, min_roof_degrees_from_north, flat_roof_degrees)
 
-    print("Sending data to PV-GIS...")
-    solar_pv_csv = join(solar_dir, 'solar_pv.csv')
-    pg_conn = psycopg2.connect(pg_uri, cursor_factory=psycopg2.extras.DictCursor)
-    try:
-        with pg_conn.cursor() as cursor:
-            cursor.execute("SELECT * FROM models.roof_horizons_job_24")
-            rows = cursor.fetchall()
-            pg_conn.commit()
-            print(f"{len(rows)} queries to send:")
-            pv_gis_client.solar_pv_estimate(rows, solar_pv_csv)
-    finally:
-        pg_conn.close()
+    print("Sending requests to PV-GIS...")
+    _pv_gis(pg_uri, job_id, solar_dir)
 
 
 def _run(command: str):
@@ -90,6 +86,44 @@ def _create_mask(job_id: int, solar_dir: str, pg_uri: str) -> str:
         {mask_file}
         """.replace("\n", " "))
     return mask_file
+
+
+def _init_schema(pg_uri: str, job_id: int):
+    pg_conn = psycopg2.connect(pg_uri, cursor_factory=psycopg2.extras.DictCursor)
+    try:
+        with pg_conn.cursor() as cursor:
+            cursor.execute(SQL("""
+                CREATE SCHEMA IF NOT EXISTS {schema} AUTHORIZATION albion_webapp;
+                GRANT USAGE ON SCHEMA {schema} TO research;
+                GRANT USAGE ON SCHEMA {schema} TO albion_ddl;
+                DROP TABLE IF EXISTS {pixel_horizons};
+                DROP TABLE IF EXISTS {roof_polygons};
+                DROP TABLE IF EXISTS {roof_horizons};
+            """).format(
+                schema=Identifier(tables.schema(job_id)),
+                pixel_horizons=Identifier(tables.schema(job_id), tables.PIXEL_HORIZON_TABLE),
+                roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE),
+                roof_horizons=Identifier(tables.schema(job_id), tables.ROOF_HORIZON_TABLE),
+            ))
+            pg_conn.commit()
+    finally:
+        pg_conn.close()
+
+
+def _pv_gis(pg_uri: str, job_id: int, solar_dir: str):
+    solar_pv_csv = join(solar_dir, 'solar_pv.csv')
+    pg_conn = psycopg2.connect(pg_uri, cursor_factory=psycopg2.extras.DictCursor)
+    try:
+        with pg_conn.cursor() as cursor:
+            cursor.execute(SQL("SELECT * FROM {roof_horizons}").format(
+                roof_horizons=Identifier(tables.schema(job_id), tables.ROOF_HORIZON_TABLE))
+            )
+            rows = cursor.fetchall()
+            pg_conn.commit()
+            print(f"{len(rows)} queries to send:")
+            pv_gis_client.solar_pv_estimate(rows, solar_pv_csv)
+    finally:
+        pg_conn.close()
 
 
 if __name__ == '__main__':
@@ -224,5 +258,6 @@ if __name__ == '__main__':
         horizon_slices=8,
         min_roof_area_m=10,
         min_roof_degrees_from_north=45,
-        max_roof_slope_degrees=70
+        max_roof_slope_degrees=70,
+        flat_roof_degrees=10,
     )

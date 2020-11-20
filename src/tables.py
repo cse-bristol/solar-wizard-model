@@ -1,6 +1,6 @@
 """Database schema and table names"""
 
-PIXEL_HORIZON_TABLE = 'horizons'
+PIXEL_HORIZON_TABLE = 'pixel_horizons'
 """Table to store the per-pixel horizon data from 320-albion-saga-gis"""
 
 ROOF_POLYGON_TABLE = 'roof_polygons'

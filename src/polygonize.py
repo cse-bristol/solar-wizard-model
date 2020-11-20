@@ -24,7 +24,7 @@ def generate_aspect_polygons(mask_path: str, aspect_path: str, pg_uri: str, job_
 def _bucket_raster(raster_to_bucket: str, out_tif: str, bucket_size):
     file = gdal.Open(raster_to_bucket)
     band = file.GetRasterBand(1)
-    nodata = band.GetNoDataValue()
+    nodata = band.GetNoDataValue() or -9999
     xsize = band.XSize
     ysize = band.YSize
     a = band.ReadAsArray()
@@ -96,14 +96,17 @@ def _polygonise(masked_tif: str, pg_uri: str, job_id: int):
 
 def filter_polygons(pg_uri: str,
                     job_id: int,
+                    horizon_slices: int,
                     max_roof_slope_degrees: int,
                     min_roof_area_m: int,
                     min_roof_degrees_from_north: int,
                     flat_roof_degrees: int):
     pg_conn = connect(pg_uri)
+
+    horizon_cols = ','.join([f'max(h.horizon_slice_{i}) AS horizon_slice_{i}' for i in range(0, horizon_slices)])
+
     try:
         with pg_conn.cursor() as cursor:
-            # todo won't work with horizon slices arg
             cursor.execute(SQL("""
             CREATE TABLE {roof_horizons} AS
             SELECT
@@ -117,14 +120,7 @@ def filter_polygons(pg_uri: str,
                 ST_Y(ST_SetSRID(ST_Centroid(c.wkb_geometry), 27700)) AS northing,
                 ST_Area(c.wkb_geometry) / cos(avg(h.slope)) as area,
                 ST_Area(c.wkb_geometry) as footprint,
-                max(h.angle_rad_0) AS angle_rad_0,
-                max(h.angle_rad_45) AS angle_rad_45,
-                max(h.angle_rad_90) AS angle_rad_90,
-                max(h.angle_rad_135) AS angle_rad_135,
-                max(h.angle_rad_180) AS angle_rad_180,
-                max(h.angle_rad_225) AS angle_rad_225,
-                max(h.angle_rad_270) AS angle_rad_270,
-                max(h.angle_rad_315) AS angle_rad_315
+            """ + horizon_cols + """
             FROM
                 {roof_polygons} c
                 LEFT JOIN {pixel_horizons} h ON ST_Contains(c.wkb_geometry, h.en)
