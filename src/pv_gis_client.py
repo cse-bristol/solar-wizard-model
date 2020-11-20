@@ -6,7 +6,7 @@ import multiprocessing as mp
 
 import requests
 
-from flatten import flatten
+from src.flatten import flatten
 
 _PI = 3.14159265359
 _API_RATE_LIMIT_SECONDS = 1 / 25
@@ -115,6 +115,8 @@ def _handle_row(row: Dict[str, str]):
         results.update({
             'easting': row['easting'],
             'northing': row['northing'],
+            'toid': row['toid'],
+            'roof_id': row['roof_id'],
         })
         return results
     except Exception as e:

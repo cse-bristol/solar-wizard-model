@@ -3,14 +3,14 @@ import subprocess
 from os.path import join
 from typing import List
 
-import psycopg2
 import psycopg2.extras
 from psycopg2.sql import SQL, Identifier
 
 import src.pv_gis_client as pv_gis_client
 import src.tables as tables
+from src.db_funcs import sql_script, connect
 from src.crop import crop_to_mask
-from src.polygonize import generate_aspect_polygons, filter_polygons
+from src.polygonize import generate_aspect_polygons, aggregate_horizons
 from src.horizons import get_horizons, load_horizons_to_db
 
 
@@ -52,7 +52,9 @@ def model_solar_pv(pg_uri: str,
 
     print("Polygonising aspect raster...")
     generate_aspect_polygons(mask_file, aspect_file, pg_uri, job_id, solar_dir)
-    filter_polygons(pg_uri, job_id, horizon_slices, max_roof_slope_degrees, min_roof_area_m, min_roof_degrees_from_north, flat_roof_degrees)
+
+    print("Intersecting roof polygons with buildings, aggregating horizon data and filtering...")
+    aggregate_horizons(pg_uri, job_id, horizon_slices, max_roof_slope_degrees, min_roof_area_m, min_roof_degrees_from_north, flat_roof_degrees)
 
     print("Sending requests to PV-GIS...")
     _pv_gis(pg_uri, job_id, solar_dir)
@@ -89,30 +91,22 @@ def _create_mask(job_id: int, solar_dir: str, pg_uri: str) -> str:
 
 
 def _init_schema(pg_uri: str, job_id: int):
-    pg_conn = psycopg2.connect(pg_uri, cursor_factory=psycopg2.extras.DictCursor)
+    pg_conn = connect(pg_uri, cursor_factory=psycopg2.extras.DictCursor)
     try:
-        with pg_conn.cursor() as cursor:
-            cursor.execute(SQL("""
-                CREATE SCHEMA IF NOT EXISTS {schema} AUTHORIZATION albion_webapp;
-                GRANT USAGE ON SCHEMA {schema} TO research;
-                GRANT USAGE ON SCHEMA {schema} TO albion_ddl;
-                DROP TABLE IF EXISTS {pixel_horizons};
-                DROP TABLE IF EXISTS {roof_polygons};
-                DROP TABLE IF EXISTS {roof_horizons};
-            """).format(
-                schema=Identifier(tables.schema(job_id)),
-                pixel_horizons=Identifier(tables.schema(job_id), tables.PIXEL_HORIZON_TABLE),
-                roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE),
-                roof_horizons=Identifier(tables.schema(job_id), tables.ROOF_HORIZON_TABLE),
-            ))
-            pg_conn.commit()
+        sql_script(
+            pg_conn, 'create.schema.sql',
+            schema=Identifier(tables.schema(job_id)),
+            pixel_horizons=Identifier(tables.schema(job_id), tables.PIXEL_HORIZON_TABLE),
+            roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE),
+            roof_horizons=Identifier(tables.schema(job_id), tables.ROOF_HORIZON_TABLE),
+        )
     finally:
         pg_conn.close()
 
 
 def _pv_gis(pg_uri: str, job_id: int, solar_dir: str):
     solar_pv_csv = join(solar_dir, 'solar_pv.csv')
-    pg_conn = psycopg2.connect(pg_uri, cursor_factory=psycopg2.extras.DictCursor)
+    pg_conn = connect(pg_uri, cursor_factory=psycopg2.extras.DictCursor)
     try:
         with pg_conn.cursor() as cursor:
             cursor.execute(SQL("SELECT * FROM {roof_horizons}").format(

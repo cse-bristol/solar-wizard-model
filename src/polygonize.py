@@ -3,10 +3,10 @@ from os.path import join
 
 import numpy as np
 from osgeo import gdal
-from psycopg2 import connect
 from psycopg2.sql import SQL, Identifier
 
-import tables
+import src.tables as tables
+from src.db_funcs import connect, sql_script_with_bindings
 from src.crop import crop_to_mask
 
 
@@ -94,54 +94,32 @@ def _polygonise(masked_tif: str, pg_uri: str, job_id: int):
         raise ValueError(res.stderr)
 
 
-def filter_polygons(pg_uri: str,
-                    job_id: int,
-                    horizon_slices: int,
-                    max_roof_slope_degrees: int,
-                    min_roof_area_m: int,
-                    min_roof_degrees_from_north: int,
-                    flat_roof_degrees: int):
+def aggregate_horizons(pg_uri: str,
+                       job_id: int,
+                       horizon_slices: int,
+                       max_roof_slope_degrees: int,
+                       min_roof_area_m: int,
+                       min_roof_degrees_from_north: int,
+                       flat_roof_degrees: int):
     pg_conn = connect(pg_uri)
 
+    schema = tables.schema(job_id)
     horizon_cols = ','.join([f'max(h.horizon_slice_{i}) AS horizon_slice_{i}' for i in range(0, horizon_slices)])
 
     try:
-        with pg_conn.cursor() as cursor:
-            cursor.execute(SQL("""
-            CREATE TABLE {roof_horizons} AS
-            SELECT
-                c.ogc_fid,
-                c.wkb_geometry::geometry(Polygon, 27700),
-                avg(h.slope) AS slope,
-                avg(h.aspect) AS aspect,
-                avg(sky_view_factor) AS sky_view_factor,
-                avg(percent_visible) AS percent_visible,
-                ST_X(ST_SetSRID(ST_Centroid(c.wkb_geometry), 27700)) AS easting,
-                ST_Y(ST_SetSRID(ST_Centroid(c.wkb_geometry), 27700)) AS northing,
-                ST_Area(c.wkb_geometry) / cos(avg(h.slope)) as area,
-                ST_Area(c.wkb_geometry) as footprint,
-            """ + horizon_cols + """
-            FROM
-                {roof_polygons} c
-                LEFT JOIN {pixel_horizons} h ON ST_Contains(c.wkb_geometry, h.en)
-            GROUP BY ogc_fid
-            HAVING ST_Area(c.wkb_geometry) / cos(avg(h.slope)) >= %(min_roof_area_m)s;
-            
-            DELETE FROM {roof_horizons} WHERE degrees(slope) > %(max_roof_slope_degrees)s;
-            DELETE FROM {roof_horizons} WHERE degrees(aspect) >= (360-%(min_roof_degrees_from_north)s)
-                                          AND degrees(slope) > 5;
-            DELETE FROM {roof_horizons} WHERE degrees(aspect) <= %(min_roof_degrees_from_north)s
-                                          AND degrees(slope) > 5;
-            """).format(
-                pixel_horizons=Identifier(tables.schema(job_id), tables.PIXEL_HORIZON_TABLE),
-                roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE),
-                roof_horizons=Identifier(tables.schema(job_id), tables.ROOF_HORIZON_TABLE),
-            ), {
+        sql_script_with_bindings(
+            pg_conn, 'create.roof-horizons.sql',
+            {
                 "max_roof_slope_degrees": max_roof_slope_degrees,
                 "min_roof_area_m": min_roof_area_m,
                 "min_roof_degrees_from_north": min_roof_degrees_from_north,
                 "flat_roof_degrees": flat_roof_degrees,
-            })
-            pg_conn.commit()
+            },
+            schema=Identifier(schema),
+            pixel_horizons=Identifier(schema, tables.PIXEL_HORIZON_TABLE),
+            roof_polygons=Identifier(schema, tables.ROOF_POLYGON_TABLE),
+            roof_horizons=Identifier(schema, tables.ROOF_HORIZON_TABLE),
+            horizon_cols=SQL(horizon_cols),
+        )
     finally:
         pg_conn.close()
