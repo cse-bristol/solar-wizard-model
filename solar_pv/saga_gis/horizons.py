@@ -2,8 +2,8 @@ import subprocess
 
 from psycopg2.sql import SQL, Identifier
 
-import src.tables as tables
-from src.db_funcs import sql_script, copy_csv, connect
+import solar_pv.tables as tables
+from solar_pv.db_funcs import sql_script, copy_csv, connect
 
 
 def get_horizons(lidar_tif: str, mask_tif: str, csv_out: str, search_radius: int, slices: int):

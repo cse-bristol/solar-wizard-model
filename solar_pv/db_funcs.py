@@ -3,7 +3,7 @@ from os.path import join
 import psycopg2
 from psycopg2.sql import SQL, Identifier
 
-from src.paths import SQL_DIR
+from solar_pv.paths import SQL_DIR
 
 PG_NULL = "\\N"
 

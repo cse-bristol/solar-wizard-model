@@ -7,12 +7,12 @@ from typing import List
 import psycopg2.extras
 from psycopg2.sql import SQL, Identifier
 
-import src.pv_gis_client as pv_gis_client
-import src.tables as tables
-from src.db_funcs import sql_script, connect
-from src.crop import crop_to_mask
-from src.polygonize import generate_aspect_polygons, aggregate_horizons
-from src.horizons import get_horizons, load_horizons_to_db
+import solar_pv.pv_gis.pv_gis_client as pv_gis_client
+import solar_pv.tables as tables
+from solar_pv.db_funcs import sql_script, connect
+from solar_pv.crop import crop_to_mask
+from solar_pv.polygonize import generate_aspect_polygons, aggregate_horizons
+from solar_pv.saga_gis.horizons import get_horizons, load_horizons_to_db
 
 
 def model_solar_pv(pg_uri: str,

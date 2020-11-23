@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 
 def flatten(tree: Dict[str, Any]) -> Dict[str, any]:

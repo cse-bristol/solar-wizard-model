@@ -6,7 +6,7 @@ import multiprocessing as mp
 
 import requests
 
-from src.flatten import flatten
+from solar_pv.pv_gis.flatten import flatten
 
 _PI = 3.14159265359
 _API_RATE_LIMIT_SECONDS = 1 / 25

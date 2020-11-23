@@ -5,9 +5,9 @@ import numpy as np
 from osgeo import gdal
 from psycopg2.sql import SQL, Identifier
 
-import src.tables as tables
-from src.db_funcs import connect, sql_script_with_bindings
-from src.crop import crop_to_mask
+import solar_pv.tables as tables
+from solar_pv.db_funcs import connect, sql_script_with_bindings
+from solar_pv.crop import crop_to_mask
 
 
 def generate_aspect_polygons(mask_path: str, aspect_path: str, pg_uri: str, job_id: int, out_dir: str):
@@ -110,6 +110,7 @@ def aggregate_horizons(pg_uri: str,
         sql_script_with_bindings(
             pg_conn, 'create.roof-horizons.sql',
             {
+                "job_id": job_id,
                 "max_roof_slope_degrees": max_roof_slope_degrees,
                 "min_roof_area_m": min_roof_area_m,
                 "min_roof_degrees_from_north": min_roof_degrees_from_north,

@@ -11,7 +11,7 @@ SELECT
     ST_SetSrid(ST_Transform(geom_4326, 27700),27700)::geometry(polygon,27700) as geom_27700
 FROM mastermap.building
 WHERE ST_Intersects(geom_4326, ST_Transform((
-    SELECT bounds FROM models.job_queue WHERE job_id=24 LIMIT 1
+    SELECT bounds FROM models.job_queue WHERE job_id=%(job_id)s LIMIT 1
 ), 4326));
 
 -- fix any invalid roof polygons:

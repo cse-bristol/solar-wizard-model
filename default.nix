@@ -5,7 +5,7 @@ in with pkgs;
 
 stdenv.mkDerivation rec {
   name = "albion-solar-pv";
-  version = 0.1;
+  version = "0.1";
 
   buildInputs = [
     (python37.withPackages (pps: with pps; [
