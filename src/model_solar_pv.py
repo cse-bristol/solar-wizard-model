@@ -1,3 +1,4 @@
+import argparse
 import os
 import subprocess
 from os.path import join
@@ -15,6 +16,7 @@ from src.horizons import get_horizons, load_horizons_to_db
 
 
 def model_solar_pv(pg_uri: str,
+                   root_solar_dir: str,
                    job_id: int,
                    lidar_paths: List[str],
                    horizon_search_radius: int,
@@ -24,7 +26,7 @@ def model_solar_pv(pg_uri: str,
                    min_roof_degrees_from_north: int,
                    flat_roof_degrees: int):
 
-    solar_dir = join(os.getenv("SOLAR_DIR"), f"job_{job_id}")
+    solar_dir = join(root_solar_dir, f"job_{job_id}")
     os.makedirs(solar_dir, exist_ok=True)
 
     print("Creating vrt...")
@@ -69,6 +71,10 @@ def _run(command: str):
 
 
 def _create_mask(job_id: int, solar_dir: str, pg_uri: str) -> str:
+    """
+    Create a raster mask from OS mastermap buildings that fall within the bounds
+    of the job. Pixels inside a building will be 1, otherwise 0.
+    """
     job_id = int(job_id)
     mask_sql = f"""
         SELECT ST_Transform(geom_4326, 27700) 
@@ -121,137 +127,34 @@ def _pv_gis(pg_uri: str, job_id: int, solar_dir: str):
 
 
 if __name__ == '__main__':
+    desc = "Model solar PV"
+    parser = argparse.ArgumentParser(description=desc)
+
+    parser.add_argument("--pg_uri", metavar="URI", required=True,
+                        help="Postgres connection URI. See "
+                             "https://www.postgresql.org/docs/current/libpq-connect.html#id-1.7.3.8.3.6 "
+                             "for formatting details")
+    parser.add_argument("--solar_dir", metavar="DIR", required=True, help="Directory where temporary files and outputs are stored")
+    parser.add_argument("--job_id", metavar="ID", required=True, type=int, help="Albion job ID")
+    parser.add_argument("--lidar_paths", metavar="FILE", required=True, action='append', help="All lidar tiles required for modelling")
+    parser.add_argument("--horizon_search_radius", default=1000, type=int, metavar="INT", help="Horizon search radius in metres (default 1000)")
+    parser.add_argument("--horizon_slices", default=8, type=int, metavar="INT", help="Horizon compass slices (default 8)")
+    parser.add_argument("--max_roof_slope_degrees", default=80, type=int, metavar="INT", help="Maximum roof slope for PV (default 80)")
+    parser.add_argument("--min_roof_area_m", default=10, type=int, metavar="INT", help="Minimum roof area m² for PV installation (default 10)")
+    parser.add_argument("--min_roof_degrees_from_north", default=45, type=int, metavar="INT", help="Minimum degree distance from North for PV (default 45)")
+    parser.add_argument("--flat_roof_degrees", default=10, type=int, metavar="INT", help="Angle (degrees) to mount panels on flat roofs (default 10)")
+
+    args = parser.parse_args()
+
     model_solar_pv(
-        os.getenv("PG_URI"),
-        24,
-        [
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7060_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7061_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7062_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7063_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7064_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7065_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7066_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7067_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7068_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7069_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7160_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7161_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7162_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7163_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7164_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7165_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7166_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7167_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7168_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7169_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7260_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7261_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7262_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7263_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7264_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7265_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7266_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7267_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7360_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7361_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7362_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7363_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7364_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7365_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7366_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7460_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7461_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7462_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7463_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7464_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7465_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7466_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7467_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7468_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7469_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7560_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7561_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7562_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7563_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7564_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7565_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7566_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7567_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7568_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7569_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7660_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7661_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7662_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7663_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7665_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7666_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7667_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7668_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7669_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7760_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7761_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7762_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7763_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7764_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7765_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7766_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7767_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7768_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7769_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7860_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7861_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7862_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7863_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7864_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7865_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7866_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7867_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7868_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7869_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7960_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7961_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7962_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7963_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7964_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7965_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7966_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7967_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7968_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st7969_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st8060_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st8061_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st8062_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st8065_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st8066_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st8067_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st8068_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st8069_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st8160_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st8161_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st8162_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st8166_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st8167_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st8168_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st8169_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st8260_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st8261_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st8267_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st8268_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st8269_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st8360_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st8361_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st8368_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st8369_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st8460_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st8461_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st8462_DSM_1M.tiff",
-            "/home/neil/git/320-albion-webapp/lidar/2017_st8463_DSM_1M.tiff",
-        ],
-        horizon_search_radius=200,
-        horizon_slices=8,
-        min_roof_area_m=10,
-        min_roof_degrees_from_north=45,
-        max_roof_slope_degrees=70,
-        flat_roof_degrees=10,
+        pg_uri=args.pg_uri,
+        root_solar_dir=args.solar_dir,
+        job_id=args.job_id,
+        lidar_paths=args.lidar_paths,
+        horizon_search_radius=args.horizon_search_radius,
+        horizon_slices=args.horizon_slices,
+        max_roof_slope_degrees=args.max_roof_slope_degrees,
+        min_roof_area_m=args.min_roof_area_m,
+        min_roof_degrees_from_north=args.min_roof_degrees_from_north,
+        flat_roof_degrees=args.flat_roof_degrees,
     )
