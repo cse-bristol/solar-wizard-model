@@ -9,6 +9,9 @@ ROOF_POLYGON_TABLE = 'roof_polygons'
 ROOF_HORIZON_TABLE = 'roof_horizons'
 """Table to store the horizon data joined with the polygons which represent planar areas of roof"""
 
+SOLAR_PV_TABLE = 'solar_pv'
+"""Table to store the raw solar PV data received from PV-GIS"""
+
 
 def schema(job_id: int) -> str:
     """Get the solar PV schema given a job_id."""

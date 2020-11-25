@@ -8,7 +8,7 @@ from psycopg2.sql import SQL, Identifier
 
 import solar_pv.pv_gis.pv_gis_client as pv_gis_client
 import solar_pv.tables as tables
-from solar_pv.db_funcs import sql_script, connect
+from solar_pv.db_funcs import sql_script, connect, copy_csv, sql_script_with_bindings
 from solar_pv.crop import crop_to_mask
 from solar_pv.polygonize import generate_aspect_polygons, aggregate_horizons
 from solar_pv.saga_gis.horizons import get_horizons, load_horizons_to_db
@@ -60,7 +60,10 @@ def model_solar_pv(pg_uri: str,
     aggregate_horizons(pg_uri, job_id, horizon_slices, max_roof_slope_degrees, min_roof_area_m, min_roof_degrees_from_north, flat_roof_degrees)
 
     print("Sending requests to PV-GIS...")
-    _pv_gis(pg_uri, job_id, peak_power_per_m2, pv_tech, solar_dir)
+    solar_pv_csv = _pv_gis(pg_uri, job_id, peak_power_per_m2, pv_tech, solar_dir)
+
+    print("Loading PV data into albion...")
+    _write_results_to_db(pg_uri, job_id, solar_pv_csv)
 
 
 def _run(command: str):
@@ -111,7 +114,7 @@ def _init_schema(pg_uri: str, job_id: int):
         pg_conn.close()
 
 
-def _pv_gis(pg_uri: str, job_id: int, peak_power_per_m2: float, pv_tech: str, solar_dir: str):
+def _pv_gis(pg_uri: str, job_id: int, peak_power_per_m2: float, pv_tech: str, solar_dir: str) -> str:
     solar_pv_csv = join(solar_dir, 'solar_pv.csv')
     pg_conn = connect(pg_uri, cursor_factory=psycopg2.extras.DictCursor)
     try:
@@ -123,5 +126,20 @@ def _pv_gis(pg_uri: str, job_id: int, peak_power_per_m2: float, pv_tech: str, so
             pg_conn.commit()
             print(f"{len(rows)} queries to send:")
             pv_gis_client.solar_pv_estimate(rows, peak_power_per_m2, pv_tech, solar_pv_csv)
+    finally:
+        pg_conn.close()
+    return solar_pv_csv
+
+
+def _write_results_to_db(pg_uri: str, job_id: int, csv_file: str):
+    pg_conn = connect(pg_uri)
+    try:
+        sql_script(pg_conn, 'create.solar-pv.sql', solar_pv=Identifier(tables.schema(job_id), tables.SOLAR_PV_TABLE))
+        copy_csv(pg_conn, csv_file, f'{tables.schema(job_id)}.{tables.SOLAR_PV_TABLE}')
+        sql_script_with_bindings(
+            pg_conn, 'post-load.solar-pv.sql', {"job_id": job_id},
+            solar_pv=Identifier(tables.schema(job_id), tables.SOLAR_PV_TABLE),
+            roof_horizons=Identifier(tables.schema(job_id), tables.ROOF_HORIZON_TABLE),
+        )
     finally:
         pg_conn.close()
