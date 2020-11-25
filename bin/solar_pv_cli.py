@@ -18,6 +18,8 @@ if __name__ == '__main__':
     parser.add_argument("--min-roof-area-m", default=10, type=int, metavar="INT", help="Minimum roof area m² for PV installation (default 10)")
     parser.add_argument("--min-roof-degrees-from-north", default=45, type=int, metavar="INT", help="Minimum degree distance from North for PV (default 45)")
     parser.add_argument("--flat-roof-degrees", default=10, type=int, metavar="INT", help="Angle (degrees) to mount panels on flat roofs (default 10)")
+    parser.add_argument("--peak-power-per-m2", default=0.120, type=float, metavar="FLOAT", help="Nominal peak power (kWp) per m² of roof (default 0.120)")
+    parser.add_argument("--pv-tech", default="crystSi", metavar="STR", choices=["crystSi", "CIS", "CdTe"], help="PV technology (default crystSi)")
 
     args = parser.parse_args()
     model_solar_pv(
@@ -31,4 +33,6 @@ if __name__ == '__main__':
         min_roof_area_m=args.min_roof_area_m,
         min_roof_degrees_from_north=args.min_roof_degrees_from_north,
         flat_roof_degrees=args.flat_roof_degrees,
+        peak_power_per_m2=args.peak_power_per_m2,
+        pv_tech=args.pv_tech,
     )

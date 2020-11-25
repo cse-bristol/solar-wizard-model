@@ -23,7 +23,9 @@ def model_solar_pv(pg_uri: str,
                    max_roof_slope_degrees: int,
                    min_roof_area_m: int,
                    min_roof_degrees_from_north: int,
-                   flat_roof_degrees: int):
+                   flat_roof_degrees: int,
+                   peak_power_per_m2: float,
+                   pv_tech: str):
 
     solar_dir = join(root_solar_dir, f"job_{job_id}")
     os.makedirs(solar_dir, exist_ok=True)
@@ -43,7 +45,7 @@ def model_solar_pv(pg_uri: str,
 
     print("Using 320-albion-saga-gis to find horizons...")
     horizons_csv = join(solar_dir, 'horizons.csv')
-    get_horizons(cropped_lidar, mask_file, horizons_csv, horizon_search_radius, horizon_slices)
+    get_horizons(cropped_lidar, solar_dir, mask_file, horizons_csv, horizon_search_radius, horizon_slices)
     print("Loading horizon data into postGIS...")
     load_horizons_to_db(pg_uri, job_id, horizons_csv, horizon_slices)
 
@@ -58,7 +60,7 @@ def model_solar_pv(pg_uri: str,
     aggregate_horizons(pg_uri, job_id, horizon_slices, max_roof_slope_degrees, min_roof_area_m, min_roof_degrees_from_north, flat_roof_degrees)
 
     print("Sending requests to PV-GIS...")
-    _pv_gis(pg_uri, job_id, solar_dir)
+    _pv_gis(pg_uri, job_id, peak_power_per_m2, pv_tech, solar_dir)
 
 
 def _run(command: str):
@@ -109,7 +111,7 @@ def _init_schema(pg_uri: str, job_id: int):
         pg_conn.close()
 
 
-def _pv_gis(pg_uri: str, job_id: int, solar_dir: str):
+def _pv_gis(pg_uri: str, job_id: int, peak_power_per_m2: float, pv_tech: str, solar_dir: str):
     solar_pv_csv = join(solar_dir, 'solar_pv.csv')
     pg_conn = connect(pg_uri, cursor_factory=psycopg2.extras.DictCursor)
     try:
@@ -120,6 +122,6 @@ def _pv_gis(pg_uri: str, job_id: int, solar_dir: str):
             rows = cursor.fetchall()
             pg_conn.commit()
             print(f"{len(rows)} queries to send:")
-            pv_gis_client.solar_pv_estimate(rows, solar_pv_csv)
+            pv_gis_client.solar_pv_estimate(rows, peak_power_per_m2, pv_tech, solar_pv_csv)
     finally:
         pg_conn.close()

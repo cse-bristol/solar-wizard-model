@@ -1,4 +1,5 @@
 import subprocess
+from os.path import join
 
 from psycopg2.sql import SQL, Identifier
 
@@ -6,12 +7,12 @@ import solar_pv.tables as tables
 from solar_pv.db_funcs import sql_script, copy_csv, connect
 
 
-def get_horizons(lidar_tif: str, mask_tif: str, csv_out: str, search_radius: int, slices: int):
+def get_horizons(lidar_tif: str, solar_dir: str, mask_tif: str, csv_out: str, search_radius: int, slices: int):
     res = subprocess.run(
         f'saga_cmd ta_lighting 3 '
         f'-DEM {lidar_tif} '
-        f'-VISIBLE vis_out.tiff '
-        f'-SVF svf_out.tiff '
+        f'-VISIBLE {join(solar_dir, "vis_out.tiff")} '
+        f'-SVF {join(solar_dir, "svf_out.tiff")} '
         f'-CSV {csv_out} '
         f'-MASK {mask_tif} '
         f'-RADIUS {search_radius} '

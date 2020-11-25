@@ -14,12 +14,15 @@ _WORKERS = 4
 _API_RATE_LIMIT_SECONDS_PER_WORKER = _API_RATE_LIMIT_SECONDS * _WORKERS
 
 
-def solar_pv_estimate(iterable: Iterable[dict], out_filename: str, log_frequency: int = 250):
+def solar_pv_estimate(iterable: Iterable[dict], peak_power_per_m2: float, pv_tech: str, out_filename: str, log_frequency: int = 250):
     with open(out_filename, 'w') as out, mp.Pool(_WORKERS) as pool:
         csv_writer = None
         processed: int = 0
 
-        for res in pool.imap_unordered(_handle_row, iterable, chunksize=10):
+        wrapped_iterable: Iterable[dict] = (dict(row,
+                                                 peak_power_per_m2=peak_power_per_m2,
+                                                 pv_tech=pv_tech) for row in iterable)
+        for res in pool.imap_unordered(_handle_row, wrapped_iterable, chunksize=10):
             if csv_writer is None:
                 csv_writer = csv.DictWriter(out, res.keys())
                 csv_writer.writeheader()
@@ -80,7 +83,7 @@ def _single_solar_pv_estimate(lon: float,
                               aspect: float,
                               peakpower: float,
                               loss: float,
-                              pvtechchoice: str = 'crystSi'):
+                              pvtechchoice: str):
     url = 'https://re.jrc.ec.europa.eu/api/PVcalc'
     res = requests.get(url, params={
         "outputformat":  "json",
@@ -102,10 +105,10 @@ def _single_solar_pv_estimate(lon: float,
 
 def _handle_row(row: Dict[str, str]):
     try:
-        lon, lat, horizon, angle, aspect, peakpower, loss = _row_to_pv_gis_params(row)
+        lon, lat, horizon, angle, aspect, peakpower, loss, pv_tech = _row_to_pv_gis_params(row)
 
         start_time = time.time()
-        results = _single_solar_pv_estimate(lon, lat, horizon, angle, aspect, peakpower, loss)
+        results = _single_solar_pv_estimate(lon, lat, horizon, angle, aspect, peakpower, loss, pv_tech)
         time_taken = time.time() - start_time
         # Stay under the API rate limit:
         if time_taken < _API_RATE_LIMIT_SECONDS_PER_WORKER:
@@ -137,13 +140,14 @@ def _row_to_pv_gis_params(row: dict) -> tuple:
     angle = _rad_to_deg(row['slope'])
 
     # aspect: in degrees clockwise from south
-    # corresponds to aspect field in patched SAGA csv output (in rads clockwise from north)
+    # aspect field in patched SAGA csv output: in rads clockwise from north
     aspect = _rad_to_deg(row['aspect']) - 180.0
 
-    peakpower = 1
+    peakpower = float(row['peak_power_per_m2']) * float(row['area'])
     loss = 14
+    pv_tech = row['pv_tech']
 
-    return lon, lat, horizon, angle, aspect, peakpower, loss
+    return lon, lat, horizon, angle, aspect, peakpower, loss, pv_tech
 
 
 def _rad_to_deg(rad):
@@ -164,3 +168,29 @@ def _easting_northing_to_lon_lat(easting, northing):
     Point.AssignSpatialReference(InSR)
     Point.TransformTo(OutSR)
     return Point.GetY(), Point.GetX()
+
+
+# if __name__ == '__main__':
+#     res = _handle_row({
+#         'x': '2956',
+#         'y': '1',
+#         'easting': '374474.973649',
+#         'northing': '161297.831967',
+#         'slope': '1.055491',
+#         'aspect': '3.275080',
+#         'sky_view_factor': '0.719803',
+#         'percent_visible': '63.753561',
+#         'horizon_slice_0': '1.290979',
+#         'horizon_slice_45': '1.293249',
+#         'horizon_slice_90': '0.542866',
+#         'horizon_slice_135': '0.000000',
+#         'horizon_slice_180': '0.000000',
+#         'horizon_slice_225': '0.000000',
+#         'horizon_slice_270': '0.139095',
+#         'horizon_slice_315': '1.28867',
+#         'area': '15',
+#         'peak_power_per_m2': '0.120',
+#         'pv_tech': 'crystSi',
+#
+#     })
+#     print(res)
