@@ -1,4 +1,5 @@
 import csv
+import math
 import time
 import traceback
 from typing import List, Dict, Iterable
@@ -144,6 +145,11 @@ def _row_to_pv_gis_params(row: dict) -> tuple:
     aspect = _rad_to_deg(row['aspect']) - 180.0
 
     peakpower = float(row['peak_power_per_m2']) * float(row['area'])
+    # Round down to nearest .5 as it's unlikely you can buy an installation
+    # with a peak power of 1.232536 kWp... Also reflects the fact that installations
+    # can't cover the whole roof for various reasons.
+    peakpower = math.floor(peakpower * 2) / 2
+
     loss = 14
     pv_tech = row['pv_tech']
 

@@ -79,4 +79,10 @@ DELETE FROM {roof_horizons} WHERE degrees(aspect) >= (360-%(min_roof_degrees_fro
 DELETE FROM {roof_horizons} WHERE degrees(aspect) <= %(min_roof_degrees_from_north)s
                               AND degrees(slope) > 5;
 
+UPDATE {roof_horizons} SET
+    slope = radians(%(flat_roof_degrees)s)
+    aspect = radians(180)
+    area = (footprint / cos(radians(%(flat_roof_degrees)s::real))) * (1 - (%(flat_roof_degrees)s::real / 100) )
+WHERE degrees(slope) <= 5;
+
 DROP TABLE {schema}.building_roofs;

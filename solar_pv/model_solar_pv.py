@@ -27,6 +27,8 @@ def model_solar_pv(pg_uri: str,
                    peak_power_per_m2: float,
                    pv_tech: str):
 
+    _validate_params(horizon_search_radius, horizon_slices, max_roof_slope_degrees, min_roof_area_m, min_roof_degrees_from_north, flat_roof_degrees, peak_power_per_m2)
+
     solar_dir = join(root_solar_dir, f"job_{job_id}")
     os.makedirs(solar_dir, exist_ok=True)
 
@@ -143,3 +145,26 @@ def _write_results_to_db(pg_uri: str, job_id: int, csv_file: str):
         )
     finally:
         pg_conn.close()
+
+
+def _validate_params(horizon_search_radius: int,
+                     horizon_slices: int,
+                     max_roof_slope_degrees: int,
+                     min_roof_area_m: int,
+                     min_roof_degrees_from_north: int,
+                     flat_roof_degrees: int,
+                     peak_power_per_m2: float):
+    if horizon_search_radius < 0 or horizon_search_radius > 10000:
+        raise ValueError(f"horizon search radius must be between 0 and 10000, was {horizon_search_radius}")
+    if horizon_slices > 64 or horizon_slices < 8:
+        raise ValueError(f"horizon slices must be between 8 and 64, was {horizon_slices}")
+    if max_roof_slope_degrees < 0 or max_roof_slope_degrees > 90:
+        raise ValueError(f"max_roof_slope_degrees must be between 0 and 90, was {max_roof_slope_degrees}")
+    if min_roof_area_m < 0:
+        raise ValueError(f"min_roof_area_m must be greater than or equal to 0, was {min_roof_area_m}")
+    if min_roof_degrees_from_north < 0 or min_roof_degrees_from_north > 180:
+        raise ValueError(f"min_roof_degrees_from_north must be between 0 and 180, was {min_roof_degrees_from_north}")
+    if flat_roof_degrees < 0 or flat_roof_degrees > 90:
+        raise ValueError(f"flat_roof_degrees must be between 0 and 90, was {flat_roof_degrees}")
+    if peak_power_per_m2 < 0:
+        raise ValueError(f"peak_power_per_m2 must be greater than or equal to 0, was {peak_power_per_m2}")

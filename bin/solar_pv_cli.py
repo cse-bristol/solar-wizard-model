@@ -22,6 +22,7 @@ if __name__ == '__main__':
     parser.add_argument("--pv-tech", default="crystSi", metavar="STR", choices=["crystSi", "CIS", "CdTe"], help="PV technology (default crystSi)")
 
     args = parser.parse_args()
+
     model_solar_pv(
         pg_uri=args.pg_uri,
         root_solar_dir=args.solar_dir,
