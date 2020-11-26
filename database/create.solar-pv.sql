@@ -87,5 +87,6 @@ CREATE TABLE {solar_pv} (
     easting double precision,
     northing double precision,
     toid text,
-    roof_id int
+    roof_id int,
+    peak_power real
 );

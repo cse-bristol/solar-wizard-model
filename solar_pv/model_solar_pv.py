@@ -22,12 +22,13 @@ def model_solar_pv(pg_uri: str,
                    horizon_slices: int,
                    max_roof_slope_degrees: int,
                    min_roof_area_m: int,
+                   roof_area_percent_usable: int,
                    min_roof_degrees_from_north: int,
                    flat_roof_degrees: int,
                    peak_power_per_m2: float,
                    pv_tech: str):
 
-    _validate_params(horizon_search_radius, horizon_slices, max_roof_slope_degrees, min_roof_area_m, min_roof_degrees_from_north, flat_roof_degrees, peak_power_per_m2)
+    _validate_params(horizon_search_radius, horizon_slices, max_roof_slope_degrees, min_roof_area_m, roof_area_percent_usable, min_roof_degrees_from_north, flat_roof_degrees, peak_power_per_m2)
 
     solar_dir = join(root_solar_dir, f"job_{job_id}")
     os.makedirs(solar_dir, exist_ok=True)
@@ -62,7 +63,7 @@ def model_solar_pv(pg_uri: str,
     aggregate_horizons(pg_uri, job_id, horizon_slices, max_roof_slope_degrees, min_roof_area_m, min_roof_degrees_from_north, flat_roof_degrees)
 
     print("Sending requests to PV-GIS...")
-    solar_pv_csv = _pv_gis(pg_uri, job_id, peak_power_per_m2, pv_tech, solar_dir)
+    solar_pv_csv = _pv_gis(pg_uri, job_id, peak_power_per_m2, pv_tech, roof_area_percent_usable, solar_dir)
 
     print("Loading PV data into albion...")
     _write_results_to_db(pg_uri, job_id, solar_pv_csv)
@@ -116,7 +117,7 @@ def _init_schema(pg_uri: str, job_id: int):
         pg_conn.close()
 
 
-def _pv_gis(pg_uri: str, job_id: int, peak_power_per_m2: float, pv_tech: str, solar_dir: str) -> str:
+def _pv_gis(pg_uri: str, job_id: int, peak_power_per_m2: float, pv_tech: str, roof_area_percent_usable: int, solar_dir: str) -> str:
     solar_pv_csv = join(solar_dir, 'solar_pv.csv')
     pg_conn = connect(pg_uri, cursor_factory=psycopg2.extras.DictCursor)
     try:
@@ -127,7 +128,7 @@ def _pv_gis(pg_uri: str, job_id: int, peak_power_per_m2: float, pv_tech: str, so
             rows = cursor.fetchall()
             pg_conn.commit()
             print(f"{len(rows)} queries to send:")
-            pv_gis_client.solar_pv_estimate(rows, peak_power_per_m2, pv_tech, solar_pv_csv)
+            pv_gis_client.solar_pv_estimate(rows, peak_power_per_m2, pv_tech, roof_area_percent_usable, solar_pv_csv)
     finally:
         pg_conn.close()
     return solar_pv_csv
@@ -151,6 +152,7 @@ def _validate_params(horizon_search_radius: int,
                      horizon_slices: int,
                      max_roof_slope_degrees: int,
                      min_roof_area_m: int,
+                     roof_area_percent_usable: int,
                      min_roof_degrees_from_north: int,
                      flat_roof_degrees: int,
                      peak_power_per_m2: float):
@@ -162,6 +164,8 @@ def _validate_params(horizon_search_radius: int,
         raise ValueError(f"max_roof_slope_degrees must be between 0 and 90, was {max_roof_slope_degrees}")
     if min_roof_area_m < 0:
         raise ValueError(f"min_roof_area_m must be greater than or equal to 0, was {min_roof_area_m}")
+    if roof_area_percent_usable < 0 or roof_area_percent_usable > 100:
+        raise ValueError(f"roof_area_percent_usable must be between 0 and 100, was {roof_area_percent_usable}")
     if min_roof_degrees_from_north < 0 or min_roof_degrees_from_north > 180:
         raise ValueError(f"min_roof_degrees_from_north must be between 0 and 180, was {min_roof_degrees_from_north}")
     if flat_roof_degrees < 0 or flat_roof_degrees > 90:

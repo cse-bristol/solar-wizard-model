@@ -15,14 +15,20 @@ _WORKERS = 4
 _API_RATE_LIMIT_SECONDS_PER_WORKER = _API_RATE_LIMIT_SECONDS * _WORKERS
 
 
-def solar_pv_estimate(iterable: Iterable[dict], peak_power_per_m2: float, pv_tech: str, out_filename: str, log_frequency: int = 250):
+def solar_pv_estimate(iterable: Iterable[dict],
+                      peak_power_per_m2: float,
+                      pv_tech: str,
+                      roof_area_percent_usable: int,
+                      out_filename: str,
+                      log_frequency: int = 250):
     with open(out_filename, 'w') as out, mp.Pool(_WORKERS) as pool:
         csv_writer = None
         processed: int = 0
 
-        wrapped_iterable: Iterable[dict] = (dict(row,
-                                                 peak_power_per_m2=peak_power_per_m2,
-                                                 pv_tech=pv_tech) for row in iterable)
+        wrapped_iterable = (dict(row,
+                                 peak_power_per_m2=peak_power_per_m2,
+                                 pv_tech=pv_tech,
+                                 roof_area_percent_usable=roof_area_percent_usable) for row in iterable)
         for res in pool.imap_unordered(_handle_row, wrapped_iterable, chunksize=10):
             if csv_writer is None:
                 csv_writer = csv.DictWriter(out, res.keys())
@@ -109,18 +115,19 @@ def _handle_row(row: Dict[str, str]):
         lon, lat, horizon, angle, aspect, peakpower, loss, pv_tech = _row_to_pv_gis_params(row)
 
         start_time = time.time()
-        results = _single_solar_pv_estimate(lon, lat, horizon, angle, aspect, peakpower, loss, pv_tech)
+        response = _single_solar_pv_estimate(lon, lat, horizon, angle, aspect, peakpower, loss, pv_tech)
         time_taken = time.time() - start_time
         # Stay under the API rate limit:
         if time_taken < _API_RATE_LIMIT_SECONDS_PER_WORKER:
             time.sleep(_API_RATE_LIMIT_SECONDS_PER_WORKER - time_taken)
 
-        results = flatten(results['outputs'])
+        results = flatten(response['outputs'])
         results.update({
             'easting': row['easting'],
             'northing': row['northing'],
             'toid': row['toid'],
             'roof_id': row['roof_id'],
+            'peak_power': response['inputs']['pv_module']['peak_power']
         })
         return results
     except Exception as e:
@@ -144,11 +151,10 @@ def _row_to_pv_gis_params(row: dict) -> tuple:
     # aspect field in patched SAGA csv output: in rads clockwise from north
     aspect = _rad_to_deg(row['aspect']) - 180.0
 
-    peakpower = float(row['peak_power_per_m2']) * float(row['area'])
-    # Round down to nearest .5 as it's unlikely you can buy an installation
-    # with a peak power of 1.232536 kWp... Also reflects the fact that installations
-    # can't cover the whole roof for various reasons.
-    peakpower = math.floor(peakpower * 2) / 2
+    roof_area_percent_usable = int(row['roof_area_percent_usable']) / 100
+    area = float(row['area'])
+    area *= roof_area_percent_usable
+    peakpower = float(row['peak_power_per_m2']) * area
 
     loss = 14
     pv_tech = row['pv_tech']
