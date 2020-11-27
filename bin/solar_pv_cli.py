@@ -13,7 +13,7 @@ if __name__ == '__main__':
     parser.add_argument("--job-id", metavar="ID", required=True, type=int, help="Albion job ID")
     parser.add_argument("--lidar-path", metavar="FILE", required=True, action='append', help="All lidar tiles required for modelling")
     parser.add_argument("--horizon-search-radius", default=1000, type=int, metavar="INT", help="Horizon search radius in metres (default 1000)")
-    parser.add_argument("--horizon-slices", default=8, type=int, metavar="INT", help="Horizon compass slices (default 8)")
+    parser.add_argument("--horizon-slices", default=16, type=int, metavar="INT", help="Horizon compass slices (default 16)")
     parser.add_argument("--max-roof-slope-degrees", default=80, type=int, metavar="INT", help="Maximum roof slope for PV (default 80)")
     parser.add_argument("--min-roof-area-m", default=10, type=int, metavar="INT", help="Minimum roof area m² for PV installation (default 10)")
     parser.add_argument("--roof-area-percent-usable", default=75, type=int, metavar="INT", help="Percentage of a roof plane usable for mounting panels (default 75)")

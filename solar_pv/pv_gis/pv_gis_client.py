@@ -40,6 +40,7 @@ def solar_pv_estimate(iterable: Iterable[dict],
 
 
 # PV-GIS API params, from https://ec.europa.eu/jrc/en/PVGIS/docs/noninteractive
+# More detail on them is in the user manual https://ec.europa.eu/jrc/en/PVGIS/docs/usermanual
 # Name 	                Type* 	Obligatory 	Default 	    Comments
 # lat           	    F 	    Yes 	    - 	            Latitude, in decimal degrees, south is negative.
 # lon 	                F 	    Yes 	    -       	    Longitude, in decimal degrees, west is negative.
@@ -99,7 +100,7 @@ def _single_solar_pv_estimate(lon: float,
         "lon": lon,
         "lat": lat,
         "peakpower": peakpower,
-        "mountingplace": "building",
+        "mountingplace": "free",
         "loss": loss,
         "angle": angle,
         "aspect": aspect,

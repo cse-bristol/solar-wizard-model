@@ -46,7 +46,7 @@ def pv_gis(lon, lat, peakpower, slope, aspect, horizon):
         "lon": lon,
         "lat": lat,
         "peakpower": peakpower,
-        "mountingplace": "building",
+        "mountingplace": "free",
         "loss": 14,
         "angle": slope,
         "aspect": aspect,
