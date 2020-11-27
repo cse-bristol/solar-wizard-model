@@ -8,7 +8,8 @@ from psycopg2.sql import SQL, Identifier
 
 import solar_pv.pv_gis.pv_gis_client as pv_gis_client
 import solar_pv.tables as tables
-from solar_pv.db_funcs import sql_script, connect, copy_csv, sql_script_with_bindings
+from solar_pv.db_funcs import sql_script, connect, copy_csv, sql_script_with_bindings, \
+    process_pg_uri
 from solar_pv.crop import crop_to_mask
 from solar_pv.polygonize import generate_aspect_polygons, aggregate_horizons
 from solar_pv.saga_gis.horizons import get_horizons, load_horizons_to_db
@@ -28,7 +29,10 @@ def model_solar_pv(pg_uri: str,
                    peak_power_per_m2: float,
                    pv_tech: str):
 
-    _validate_params(horizon_search_radius, horizon_slices, max_roof_slope_degrees, min_roof_area_m, roof_area_percent_usable, min_roof_degrees_from_north, flat_roof_degrees, peak_power_per_m2)
+    pg_uri = process_pg_uri(pg_uri)
+    _validate_params(
+        horizon_search_radius, horizon_slices, max_roof_slope_degrees, min_roof_area_m,
+        roof_area_percent_usable, min_roof_degrees_from_north, flat_roof_degrees, peak_power_per_m2)
 
     solar_dir = join(root_solar_dir, f"job_{job_id}")
     os.makedirs(solar_dir, exist_ok=True)
