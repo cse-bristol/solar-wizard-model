@@ -74,6 +74,8 @@ def model_solar_pv(pg_uri: str,
 
 
 def _run(command: str):
+    print("Running command:")
+    print(command)
     res = subprocess.run(command, capture_output=True, text=True, shell=True)
     print(res.stdout)
     print(res.stderr)
