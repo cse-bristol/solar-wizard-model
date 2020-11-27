@@ -74,8 +74,6 @@ def model_solar_pv(pg_uri: str,
 
 
 def _run(command: str):
-    print("Running command:")
-    print(command)
     res = subprocess.run(command, capture_output=True, text=True, shell=True)
     print(res.stdout)
     print(res.stderr)
@@ -90,11 +88,11 @@ def _create_mask(job_id: int, solar_dir: str, pg_uri: str) -> str:
     """
     job_id = int(job_id)
     mask_sql = f"""
-        SELECT ST_Transform(geom_4326, 27700) 
-        FROM mastermap.building 
-        WHERE ST_Intersects(geom_4326, ST_Transform((
-            SELECT bounds FROM models.job_queue WHERE job_id={job_id} LIMIT 1
-        ), 4326))
+        SELECT ST_Transform(b.geom_4326, 27700) 
+        FROM mastermap.building b 
+        LEFT JOIN models.job_queue q 
+        ON ST_Intersects(b.geom_4326, ST_Transform(q.bounds, 4326)) 
+        WHERE q.job_id={job_id}
     """
     mask_file = join(solar_dir, 'mask.tif')
     _run(f"""
