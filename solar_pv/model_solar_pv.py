@@ -147,6 +147,7 @@ def _write_results_to_db(pg_uri: str, job_id: int, csv_file: str):
             pg_conn, 'post-load.solar-pv.sql', {"job_id": job_id},
             solar_pv=Identifier(tables.schema(job_id), tables.SOLAR_PV_TABLE),
             roof_horizons=Identifier(tables.schema(job_id), tables.ROOF_HORIZON_TABLE),
+            job_view=Identifier(f"solar_pv_job_{job_id}")
         )
     finally:
         pg_conn.close()
