@@ -21,7 +21,7 @@ END;
 INSERT INTO models.solar_pv
 SELECT
     pv.*,
-    ST_SetSrid(h.roof_geom_27700, 27700)::geometry(polygon, 27700) AS roof_geom_27700,
+    ST_SetSrid(ST_Transform(h.roof_geom_27700, 4326), 4326)::geometry(polygon, 4326) AS roof_geom_4326,
     h.slope,
     h.aspect,
     h.sky_view_factor,
