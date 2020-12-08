@@ -5,9 +5,9 @@ import numpy as np
 from osgeo import gdal
 from psycopg2.sql import SQL, Identifier
 
-import solar_pv.tables as tables
-from solar_pv.db_funcs import connect, sql_script_with_bindings
-from solar_pv.crop import crop_to_mask
+import albion_models.solar_pv.tables as tables
+from albion_models.db_funcs import connect, sql_script_with_bindings
+from albion_models.solar_pv.crop import crop_to_mask
 
 
 def generate_aspect_polygons(mask_path: str, aspect_path: str, pg_uri: str, job_id: int, out_dir: str):

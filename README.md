@@ -1,6 +1,16 @@
-# Albion solar PV modelling
+# Albion models
 
-### Approach
+This repository contains code for
+* Hard/soft dig modelling
+* LIDAR downloading
+* Heat demand modelling
+* Solar PV modelling
+
+This project uses [git-lfs](https://git-lfs.github.com/) for large file storage (currently just the thermos jar for heat demand estimation), so install that and run `git lfs pull` in the root of this repo after cloning.
+
+This project also contains a submodule, so run `git submodule update --init --recursive` after cloning.
+
+## Albion solar PV modelling
 
 required inputs:
 * LIDAR data for the relevant area.

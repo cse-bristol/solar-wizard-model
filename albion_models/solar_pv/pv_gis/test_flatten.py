@@ -1,7 +1,7 @@
 import unittest
 from typing import List
 
-from solar_pv.pv_gis.flatten import flatten
+from albion_models.solar_pv.pv_gis.flatten import flatten
 
 
 class FlattenTestCase(unittest.TestCase):

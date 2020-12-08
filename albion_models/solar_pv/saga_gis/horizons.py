@@ -3,8 +3,8 @@ from os.path import join
 
 from psycopg2.sql import SQL, Identifier
 
-import solar_pv.tables as tables
-from solar_pv.db_funcs import sql_script, copy_csv, connect
+import albion_models.solar_pv.tables as tables
+from albion_models.db_funcs import sql_script, copy_csv, connect
 
 
 def get_horizons(lidar_tif: str, solar_dir: str, mask_tif: str, csv_out: str, search_radius: int, slices: int):

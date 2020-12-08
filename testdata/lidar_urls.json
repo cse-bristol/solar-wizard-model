@@ -1,0 +1,317 @@
+{
+	"status": 0,
+	"fileSizeMB": null,
+	"startedTimestamp": "2020-10-19 10:29:59.773000",
+	"featureTileCount": 63,
+	"reason": null,
+	"queueStatus": null,
+	"data": [{
+		"years": [{
+			"resolutions": [{
+				"tiles": [{
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARCOMP/LIDAR-DSM-2M-TL35ne.zip",
+					"tileName": "LIDAR-DSM-2M-TL35ne"
+				}],
+				"resolutionName": "DSM 2M"
+			}, {
+				"tiles": [{
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARCOMP/LIDAR-DSM-1M-TL35ne.zip",
+					"tileName": "LIDAR-DSM-1M-TL35ne"
+				}],
+				"resolutionName": "DSM 1M"
+			}],
+			"year": "2017"
+		}, {
+			"resolutions": [{
+				"tiles": [{
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f0X8900ea8d94dfdaa345872/LIDARCOMP/LIDAR-DSM-2M-TL35ne.zip",
+					"tileName": "LIDAR-DSM-2M-TL35ne"
+				}],
+				"resolutionName": "DSM 2M"
+			}, {
+				"tiles": [{
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f04X900ea8d94dfdaa345872/LIDARCOMP/LIDAR-DSM-1M-TL35ne.zip",
+					"tileName": "LIDAR-DSM-1M-TL35ne"
+				}],
+				"resolutionName": "DSM 1M"
+			}],
+			"year": "2015"
+		}],
+		"productName": "LIDAR Composite DSM"
+	}, {
+		"years": [{
+			"resolutions": [{
+				"tiles": [{
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARCOMP/LIDAR-DTM-2M-TL35ne.zip",
+					"tileName": "LIDAR-DTM-2M-TL35ne"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARCOMP/LIDAR-DTM-2M-TL35se.zip",
+					"tileName": "LIDAR-DTM-2M-TL35se"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARCOMP/LIDAR-DTM-2M-TL36ne.zip",
+					"tileName": "LIDAR-DTM-2M-TL36ne"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARCOMP/LIDAR-DTM-2M-TL36se.zip",
+					"tileName": "LIDAR-DTM-2M-TL36se"
+				}],
+				"resolutionName": "DTM 2M"
+			}, {
+				"tiles": [{
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARCOMP/LIDAR-DTM-1M-TL35ne.zip",
+					"tileName": "LIDAR-DTM-1M-TL35ne"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARCOMP/LIDAR-DTM-1M-TL35se.zip",
+					"tileName": "LIDAR-DTM-1M-TL35se"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARCOMP/LIDAR-DTM-1M-TL36ne.zip",
+					"tileName": "LIDAR-DTM-1M-TL36ne"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARCOMP/LIDAR-DTM-1M-TL36se.zip",
+					"tileName": "LIDAR-DTM-1M-TL36se"
+				}],
+				"resolutionName": "DTM 1M"
+			}],
+			"year": "2017"
+		}, {
+			"resolutions": [{
+				"tiles": [{
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARCOMP/LIDAR-DTM-2m-2019-TL35ne.zip",
+					"tileName": "LIDAR-DTM-2m-2019-TL35ne"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARCOMP/LIDAR-DTM-2m-2019-TL35se.zip",
+					"tileName": "LIDAR-DTM-2m-2019-TL35se"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARCOMP/LIDAR-DTM-2m-2019-TL36ne.zip",
+					"tileName": "LIDAR-DTM-2m-2019-TL36ne"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARCOMP/LIDAR-DTM-2m-2019-TL36se.zip",
+					"tileName": "LIDAR-DTM-2m-2019-TL36se"
+				}],
+				"resolutionName": "DTM 2M"
+			}, {
+				"tiles": [{
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARCOMP/LIDAR-DTM-1m-2019-TL35ne.zip",
+					"tileName": "LIDAR-DTM-1m-2019-TL35ne"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARCOMP/LIDAR-DTM-1m-2019-TL35se.zip",
+					"tileName": "LIDAR-DTM-1m-2019-TL35se"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARCOMP/LIDAR-DTM-1m-2019-TL36ne.zip",
+					"tileName": "LIDAR-DTM-1m-2019-TL36ne"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARCOMP/LIDAR-DTM-1m-2019-TL36se.zip",
+					"tileName": "LIDAR-DTM-1m-2019-TL36se"
+				}],
+				"resolutionName": "DTM 1M"
+			}],
+			"year": "2019"
+		}],
+		"productName": "LIDAR Composite DTM"
+	}, {
+		"years": [{
+			"resolutions": [{
+				"tiles": [{
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARPC/LIDAR-LAZ-2010-TL36ne.zip",
+					"tileName": "LIDAR-LAZ-2010-TL36ne"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARPC/LIDAR-LAZ-2010-TL36se.zip",
+					"tileName": "LIDAR-LAZ-2010-TL36se"
+				}],
+				"resolutionName": "N/A"
+			}],
+			"year": "2010"
+		}, {
+			"resolutions": [{
+				"tiles": [{
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARPC/LIDAR-LAZ-2012-TL35ne.zip",
+					"tileName": "LIDAR-LAZ-2012-TL35ne"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARPC/LIDAR-LAZ-2012-TL35se.zip",
+					"tileName": "LIDAR-LAZ-2012-TL35se"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARPC/LIDAR-LAZ-2012-TL36ne.zip",
+					"tileName": "LIDAR-LAZ-2012-TL36ne"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARPC/LIDAR-LAZ-2012-TL36se.zip",
+					"tileName": "LIDAR-LAZ-2012-TL36se"
+				}],
+				"resolutionName": "N/A"
+			}],
+			"year": "2012"
+		}, {
+			"resolutions": [{
+				"tiles": [{
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARPC/LIDAR-LAZ-2017-TL35ne.zip",
+					"tileName": "LIDAR-LAZ-2017-TL35ne"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARPC/LIDAR-LAZ-2017-TL35se.zip",
+					"tileName": "LIDAR-LAZ-2017-TL35se"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARPC/LIDAR-LAZ-2017-TL36se.zip",
+					"tileName": "LIDAR-LAZ-2017-TL36se"
+				}],
+				"resolutionName": "N/A"
+			}],
+			"year": "2017"
+		}],
+		"productName": "LIDAR Point Cloud"
+	}, {
+		"years": [{
+			"resolutions": [{
+				"tiles": [{
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARTSR/LIDAR-DSM-2M-1999-TL36ne.zip",
+					"tileName": "LIDAR-DSM-2M-1999-TL36ne"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARTSR/LIDAR-DSM-2M-1999-TL36se.zip",
+					"tileName": "LIDAR-DSM-2M-1999-TL36se"
+				}],
+				"resolutionName": "DSM 2M"
+			}],
+			"year": "1999"
+		}, {
+			"resolutions": [{
+				"tiles": [{
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARTSR/LIDAR-DSM-2M-2003-TL35ne.zip",
+					"tileName": "LIDAR-DSM-2M-2003-TL35ne"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARTSR/LIDAR-DSM-2M-2003-TL35se.zip",
+					"tileName": "LIDAR-DSM-2M-2003-TL35se"
+				}],
+				"resolutionName": "DSM 2M"
+			}],
+			"year": "2003"
+		}, {
+			"resolutions": [{
+				"tiles": [{
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARTSR/LIDAR-DSM-1M-2009-TL35ne.zip",
+					"tileName": "LIDAR-DSM-1M-2009-TL35ne"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARTSR/LIDAR-DSM-1M-2009-TL35se.zip",
+					"tileName": "LIDAR-DSM-1M-2009-TL35se"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARTSR/LIDAR-DSM-1M-2009-TL36ne.zip",
+					"tileName": "LIDAR-DSM-1M-2009-TL36ne"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARTSR/LIDAR-DSM-1M-2009-TL36se.zip",
+					"tileName": "LIDAR-DSM-1M-2009-TL36se"
+				}],
+				"resolutionName": "DSM 1M"
+			}],
+			"year": "2009"
+		}, {
+			"resolutions": [{
+				"tiles": [{
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARTSR/LIDAR-DSM-1M-2010-TL35se.zip",
+					"tileName": "LIDAR-DSM-1M-2010-TL35se"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARTSR/LIDAR-DSM-1M-2010-TL36ne.zip",
+					"tileName": "LIDAR-DSM-1M-2010-TL36ne"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARTSR/LIDAR-DSM-1M-2010-TL36se.zip",
+					"tileName": "LIDAR-DSM-1M-2010-TL36se"
+				}],
+				"resolutionName": "DSM 1M"
+			}],
+			"year": "2010"
+		}, {
+			"resolutions": [{
+				"tiles": [{
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARTSR/LIDAR-DSM-1M-2017-TL35ne.zip",
+					"tileName": "LIDAR-DSM-1M-2017-TL35ne"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARTSR/LIDAR-DSM-1M-2017-TL35se.zip",
+					"tileName": "LIDAR-DSM-1M-2017-TL35se"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARTSR/LIDAR-DSM-1M-2017-TL36ne.zip",
+					"tileName": "LIDAR-DSM-1M-2017-TL36ne"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARTSR/LIDAR-DSM-1M-2017-TL36se.zip",
+					"tileName": "LIDAR-DSM-1M-2017-TL36se"
+				}],
+				"resolutionName": "DSM 1M"
+			}],
+			"year": "2017"
+		}],
+		"productName": "LIDAR Tiles DSM"
+	}, {
+		"years": [{
+			"resolutions": [{
+				"tiles": [{
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARTSR/LIDAR-DTM-2M-1999-TL36ne.zip",
+					"tileName": "LIDAR-DTM-2M-1999-TL36ne"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARTSR/LIDAR-DTM-2M-1999-TL36se.zip",
+					"tileName": "LIDAR-DTM-2M-1999-TL36se"
+				}],
+				"resolutionName": "DTM 2M"
+			}],
+			"year": "1999"
+		}, {
+			"resolutions": [{
+				"tiles": [{
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARTSR/LIDAR-DTM-2M-2003-TL35ne.zip",
+					"tileName": "LIDAR-DTM-2M-2003-TL35ne"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARTSR/LIDAR-DTM-2M-2003-TL35se.zip",
+					"tileName": "LIDAR-DTM-2M-2003-TL35se"
+				}],
+				"resolutionName": "DTM 2M"
+			}],
+			"year": "2003"
+		}, {
+			"resolutions": [{
+				"tiles": [{
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARTSR/LIDAR-DTM-1M-2009-TL35ne.zip",
+					"tileName": "LIDAR-DTM-1M-2009-TL35ne"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARTSR/LIDAR-DTM-1M-2009-TL35se.zip",
+					"tileName": "LIDAR-DTM-1M-2009-TL35se"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARTSR/LIDAR-DTM-1M-2009-TL36ne.zip",
+					"tileName": "LIDAR-DTM-1M-2009-TL36ne"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARTSR/LIDAR-DTM-1M-2009-TL36se.zip",
+					"tileName": "LIDAR-DTM-1M-2009-TL36se"
+				}],
+				"resolutionName": "DTM 1M"
+			}],
+			"year": "2009"
+		}, {
+			"resolutions": [{
+				"tiles": [{
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARTSR/LIDAR-DTM-1M-2010-TL35se.zip",
+					"tileName": "LIDAR-DTM-1M-2010-TL35se"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARTSR/LIDAR-DTM-1M-2010-TL36ne.zip",
+					"tileName": "LIDAR-DTM-1M-2010-TL36ne"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARTSR/LIDAR-DTM-1M-2010-TL36se.zip",
+					"tileName": "LIDAR-DTM-1M-2010-TL36se"
+				}],
+				"resolutionName": "DTM 1M"
+			}],
+			"year": "2010"
+		}, {
+			"resolutions": [{
+				"tiles": [{
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARTSR/LIDAR-DTM-1M-2017-TL35ne.zip",
+					"tileName": "LIDAR-DTM-1M-2017-TL35ne"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARTSR/LIDAR-DTM-1M-2017-TL35se.zip",
+					"tileName": "LIDAR-DTM-1M-2017-TL35se"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARTSR/LIDAR-DTM-1M-2017-TL36ne.zip",
+					"tileName": "LIDAR-DTM-1M-2017-TL36ne"
+				}, {
+					"url": "https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARTSR/LIDAR-DTM-1M-2017-TL36se.zip",
+					"tileName": "LIDAR-DTM-1M-2017-TL36se"
+				}],
+				"resolutionName": "DTM 1M"
+			}],
+			"year": "2017"
+		}],
+		"productName": "LIDAR Tiles DTM"
+	}],
+	"maxDownloadFeaturesReached": null,
+	"completedTimestamp": "2020-10-19 10:30:19.209000"
+}

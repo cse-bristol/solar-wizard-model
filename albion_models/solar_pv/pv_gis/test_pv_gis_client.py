@@ -1,7 +1,7 @@
 import unittest
 from typing import List
 
-from solar_pv.pv_gis.pv_gis_client import _easting_northing_to_lon_lat, _rad_to_deg, _PI
+from albion_models.solar_pv.pv_gis.pv_gis_client import _easting_northing_to_lon_lat, _rad_to_deg, _PI
 
 
 class PvGisClientTestCase(unittest.TestCase):

@@ -6,13 +6,13 @@ from typing import List
 import psycopg2.extras
 from psycopg2.sql import SQL, Identifier
 
-import solar_pv.pv_gis.pv_gis_client as pv_gis_client
-import solar_pv.tables as tables
-from solar_pv.db_funcs import sql_script, connect, copy_csv, sql_script_with_bindings, \
+import albion_models.solar_pv.pv_gis.pv_gis_client as pv_gis_client
+import albion_models.solar_pv.tables as tables
+from albion_models.db_funcs import sql_script, connect, copy_csv, sql_script_with_bindings, \
     process_pg_uri
-from solar_pv.crop import crop_to_mask
-from solar_pv.polygonize import generate_aspect_polygons, aggregate_horizons
-from solar_pv.saga_gis.horizons import get_horizons, load_horizons_to_db
+from albion_models.solar_pv.crop import crop_to_mask
+from albion_models.solar_pv.polygonize import generate_aspect_polygons, aggregate_horizons
+from albion_models.solar_pv.saga_gis.horizons import get_horizons, load_horizons_to_db
 
 
 def model_solar_pv(pg_uri: str,
