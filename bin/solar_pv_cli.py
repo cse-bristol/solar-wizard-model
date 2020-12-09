@@ -1,6 +1,6 @@
 import argparse
 
-from solar_pv.model_solar_pv import model_solar_pv
+from albion_models.solar_pv.model_solar_pv import model_solar_pv
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Model solar PV")

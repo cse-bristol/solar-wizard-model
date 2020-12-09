@@ -3,9 +3,9 @@ from typing import List
 
 import requests
 
-from paths import PROJECT_ROOT
-from pv_gis.flatten import flatten
-from solar_pv.db_funcs import copy_csv, connect
+from albion_models.paths import PROJECT_ROOT
+from albion_models.solar_pv.pv_gis.flatten import flatten
+from albion_models.db_funcs import copy_csv, connect
 
 
 def import_csv(pg_uri: str, filename: str):
