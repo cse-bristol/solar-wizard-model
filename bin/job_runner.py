@@ -1,7 +1,7 @@
 import logging
 import os
 import time
-from typing import Optional
+from typing import Optional, List
 
 import psycopg2
 import psycopg2.extras
@@ -32,6 +32,7 @@ def main_loop():
                 pg_conn.rollback()
                 err_message = "Job failed: {0}. Arguments:\n{1!r}".format(type(e).__name__, e.args)
                 _set_job_status(pg_conn, job['job_id'], 'FAILED', err_message)
+                _send_failure_email(job['email'], job['job_id'], job['project'], err_message)
                 raise
         time.sleep(60)
 
@@ -82,10 +83,11 @@ def _set_job_status(pg_conn, job_id: int, status: str, error: str = None):
 
 
 def _handle_job(pg_conn, job: dict) -> bool:
-    logging.info(f"Handling job {job['job_id']}, project {job['project']}")
     job_id: int = job['job_id']
+    project: str = job['project']
     bounds: str = job['bounds']
     params: dict = job['params']
+    logging.info(f"Handling job {job_id}, project {project}")
 
     if job['soft_dig']:
         soft_ground_buffer_metres = params.get('soft_ground_buffer_metres', 10)
@@ -124,8 +126,73 @@ def _handle_job(pg_conn, job: dict) -> bool:
                 peak_power_per_m2=peak_power_per_m2,
                 pv_tech=pv_tech)
 
-    logging.info(f"Completed job {job_id}, project {job['project']}")
+    logging.info(f"Completed job {job_id}, project {project}")
+    _send_success_email(job['email'], job_id, project)
     return True
+
+
+def _send_failure_email(to_email: str, job_id: int, project: str, error: str):
+    all_recipients = []
+    notify_on_failure = os.environ.get("EMAIL_TO_NOTIFY_ON_FAILURE")
+    if to_email:
+        all_recipients.append(to_email)
+    if notify_on_failure:
+        all_recipients.append(notify_on_failure)
+    if len(all_recipients) == 0:
+        return
+
+    _send_email(
+        from_email=os.environ.get("SMTP_FROM"),
+        to_email=all_recipients,
+        password=os.environ.get("SMTP_PASS"),
+        subject=f"Albion result extraction job '{project}' failed",
+        body=
+        f"""
+        Hello,
+
+        Unfortunately your Albion job '{project}', ID {job_id} has failed.
+
+        Error: {error}
+        """,
+    )
+
+
+def _send_success_email(to_email: str, job_id: int, project: str):
+    if not to_email:
+        return
+
+    _send_email(
+        from_email=os.environ.get("SMTP_FROM"),
+        to_email=[to_email],
+        password=os.environ.get("SMTP_PASS"),
+        subject=f"Albion job '{project}' complete",
+        body=
+        f"""
+        Hello,
+
+        Your Albion job '{project}', ID {job_id} has completed and can be viewed here:
+
+        http://albion.r.cse.org.uk/completed-jobs
+
+        You can now extract the results here: http://albion.r.cse.org.uk/extract-results
+        """,
+    )
+
+
+def _send_email(from_email: str, to_email: List[str], password: str, subject: str, body: str):
+    import smtplib
+    from email.message import EmailMessage
+    msg = EmailMessage()
+    msg['Subject'] = subject
+    msg['From'] = from_email
+    msg['To'] = ', '.join(to_email)
+    msg.set_content(body)
+
+    with smtplib.SMTP('smtp.office365.com', 587) as mailserver:
+        mailserver.ehlo()
+        mailserver.starttls()
+        mailserver.login(from_email, password)
+        mailserver.send_message(msg)
 
 
 if __name__ == "__main__":
