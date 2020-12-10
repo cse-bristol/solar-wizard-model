@@ -1,5 +1,7 @@
 import logging
 import os
+import textwrap
+
 import time
 from typing import Optional, List
 
@@ -146,14 +148,14 @@ def _send_failure_email(to_email: str, job_id: int, project: str, error: str):
         to_email=all_recipients,
         password=os.environ.get("SMTP_PASS"),
         subject=f"Albion result extraction job '{project}' failed",
-        body=
-        f"""
-        Hello,
-
-        Unfortunately your Albion job '{project}', ID {job_id} has failed.
-
-        Error: {error}
-        """,
+        body=textwrap.dedent(
+            f"""
+            Hello,
+    
+            Unfortunately your Albion job '{project}', ID {job_id} has failed.
+    
+            Error: {error}
+            """),
     )
 
 
@@ -166,16 +168,15 @@ def _send_success_email(to_email: str, job_id: int, project: str):
         to_email=[to_email],
         password=os.environ.get("SMTP_PASS"),
         subject=f"Albion job '{project}' complete",
-        body=
-        f"""
-        Hello,
-
-        Your Albion job '{project}', ID {job_id} has completed and can be viewed here:
-
-        http://albion.r.cse.org.uk/completed-jobs
-
-        You can now extract the results here: http://albion.r.cse.org.uk/extract-results
-        """,
+        body=textwrap.dedent(f"""
+            Hello,
+    
+            Your Albion job '{project}', ID {job_id} has completed and can be viewed here:
+    
+            http://albion.r.cse.org.uk/completed-jobs
+    
+            You can now extract the results here: http://albion.r.cse.org.uk/extract-results
+            """),
     )
 
 
