@@ -48,7 +48,7 @@ SELECT geom FROM (
 ) a;
 
 INSERT INTO {temp_schema}.soft_ground
-SELECT ST_Union(geom_4326) AS geom_4326 FROM {temp_schema}.raw_soft_ground;
+SELECT ST_Multi(ST_Union(geom_4326)) AS geom_4326 FROM {temp_schema}.raw_soft_ground;
 
 --
 -- Define grid and chop up the hard and soft ground based on the gridlines:
