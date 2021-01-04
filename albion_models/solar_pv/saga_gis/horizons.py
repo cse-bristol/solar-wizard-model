@@ -7,21 +7,24 @@ import albion_models.solar_pv.tables as tables
 from albion_models.db_funcs import sql_script, copy_csv, connect
 
 
-def get_horizons(lidar_tif: str, solar_dir: str, mask_tif: str, csv_out: str, search_radius: int, slices: int):
-    res = subprocess.run(
-        f'saga_cmd ta_lighting 3 '
-        f'-DEM {lidar_tif} '
-        f'-VISIBLE {join(solar_dir, "vis_out.tiff")} '
-        f'-SVF {join(solar_dir, "svf_out.tiff")} '
-        f'-CSV {csv_out} '
-        f'-MASK {mask_tif} '
-        f'-RADIUS {search_radius} '
-        f'-NDIRS {slices} ',
-        capture_output=True, text=True, shell=True
-    )
+def get_horizons(lidar_tif: str, solar_dir: str, mask_tif: str, csv_out: str, search_radius: int, slices: int, retrying: bool = False):
+    command = f'saga_cmd ta_lighting 3 '
+    f'-DEM {lidar_tif} '
+    f'-VISIBLE {join(solar_dir, "vis_out.tiff")} '
+    f'-SVF {join(solar_dir, "svf_out.tiff")} '
+    f'-CSV {csv_out} '
+    f'-MASK {mask_tif} '
+    f'-RADIUS {search_radius} '
+    f'-NDIRS {slices} '
+
+    res = subprocess.run(command, capture_output=True, text=True, shell=True)
     print(res.stderr)
     if res.returncode != 0:
-        raise ValueError(res.stderr)
+        # Seems like SAGA GIS very rarely crashes during cleanup due to some c++ use-after-free bug:
+        if "corrupted double-linked list" in res.stderr and not retrying:
+            get_horizons(lidar_tif, solar_dir, mask_tif, csv_out, search_radius, slices, True)
+        else:
+            raise ValueError(res.stderr)
 
 
 def load_horizons_to_db(pg_uri: str, job_id: int, horizon_csv: str, horizon_slices: int):
@@ -44,4 +47,3 @@ def load_horizons_to_db(pg_uri: str, job_id: int, horizon_csv: str, horizon_slic
         )
     finally:
         pg_conn.close()
-
