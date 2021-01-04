@@ -10,34 +10,56 @@ from typing import List
 
 from osgeo import gdal, osr
 import requests
+from psycopg2.sql import SQL, Identifier
+
+from albion_models.paths import SQL_DIR
 
 
 def get_all_lidar(pg_conn, job_id, lidar_dir: str) -> List[str]:
+    """
+    Download LIDAR tiles unless already present, or if newer/better resolution
+    than those already downloaded.
+    """
+    gridded_bounds = _get_gridded_bounds(pg_conn, job_id)
+    tiff_paths = []
+    logging.info(f"{len(gridded_bounds)} LIDAR jobs to run")
+    for rings in gridded_bounds:
+        tiff_paths.extend(_get_lidar(rings=rings, lidar_dir=lidar_dir))
+    return tiff_paths
+
+
+def _get_gridded_bounds(pg_conn, job_id: int) -> List[List[List[float]]]:
+    """
+    Cut the job polygon into 20km by 20km squares - otherwise the defra API rejects
+    the request as covering too large an area.
+
+    Also takes the convex hull of the polygon to simplify the request.
+    """
     with pg_conn.cursor() as cursor:
-        cursor.execute(
-            "SELECT "
-            "ST_Xmin(ST_Envelope(geom)) as xmin, "
-            "ST_Ymin(ST_Envelope(geom)) as ymin, "
-            "ST_Xmax(ST_Envelope(geom)) as xmax, "
-            "ST_Ymax(ST_Envelope(geom)) as ymax "
-            "FROM (SELECT (ST_Dump(bounds)).geom FROM models.job_queue WHERE job_id = %(job_id)s) a ",
-            {'job_id': job_id}
-        )
-        bboxes = cursor.fetchall()
-        tiff_paths = []
-        for bbox in bboxes:
-            tiff_paths.extend(get_lidar(
-                xmin=bbox['xmin'],
-                ymin=bbox['ymin'],
-                xmax=bbox['xmax'],
-                ymax=bbox['ymax'],
-                lidar_dir=lidar_dir,
-            ))
-        pg_conn.commit()
-        return tiff_paths
+        with open(join(SQL_DIR, 'grid-for-lidar.sql')) as schema_file:
+            cursor.execute(SQL(schema_file.read()).format(
+                grid_table=Identifier(f'lidar_grid_{job_id}')), {'job_id': job_id})
+            rows = cursor.fetchall()
+            pg_conn.commit()
+            return [_wkt_to_rings(row[0]) for row in rows]
 
 
-def get_lidar(xmin: float, ymin: float, xmax: float, ymax: float, lidar_dir: str) -> List[str]:
+def _wkt_to_rings(wkt: str) -> List[List[float]]:
+    if wkt.startswith("POLYGON"):
+        pairs = wkt.replace("POLYGON", "").replace("(", "").replace(")", "").split(",")
+        rings = []
+        for pair in pairs:
+            split = pair.split()
+            rings.append([float(split[0].strip()), float(split[1].strip())])
+        return rings
+    else:
+        logging.warning(f"LIDAR area was not a polygon. Occasional points and "
+                        f"linestrings might be possible results of intersecting "
+                        f"the grid with the bounding polygon: {wkt}")
+        return []
+
+
+def _get_lidar(rings: List[List[float]], lidar_dir: str) -> List[str]:
     """
     Get Lidar data from the defra internal API.
 
@@ -45,7 +67,7 @@ def get_lidar(xmin: float, ymin: float, xmax: float, ymax: float, lidar_dir: str
     """
     os.makedirs(lidar_dir, exist_ok=True)
 
-    lidar_job_id = _start_job(xmin, ymin, xmax, ymax)
+    lidar_job_id = _start_job(rings)
     logging.info(f"Submitted lidar job {lidar_job_id}")
 
     status = _wait_for_job(lidar_job_id)
@@ -58,7 +80,7 @@ def get_lidar(xmin: float, ymin: float, xmax: float, ymax: float, lidar_dir: str
     return tiff_paths
 
 
-def _start_job(xmin: float, ymin: float, xmax: float, ymax: float) -> str:
+def _start_job(rings: List[List[float]]) -> str:
     url = 'https://environment.data.gov.uk/arcgis/rest/services/gp/DataDownload/GPServer/DataDownload/submitJob'
     res = requests.get(url, params={
         "f":  "json",
@@ -68,12 +90,7 @@ def _start_job(xmin: float, ymin: float, xmax: float, ymax: float) -> str:
             "geometryType": "esriGeometryPolygon",
             "features": [{
                     "geometry": {
-                        "rings": [[
-                            [xmin, ymax],
-                            [xmax, ymax],
-                            [xmax, ymin],
-                            [xmin, ymin],
-                            [xmin, ymax]]],
+                        "rings": [rings],
                         "spatialReference": {
                             "wkid": 27700,
                             "latestWkid": 27700

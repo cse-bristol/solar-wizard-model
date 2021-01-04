@@ -8,7 +8,7 @@ import unittest
 from typing import List
 from unittest import mock
 
-from albion_models.lidar.get_lidar import get_lidar, _find_best
+from albion_models.lidar.get_lidar import _get_lidar, _find_best, _wkt_to_rings
 from albion_models.paths import PROJECT_ROOT
 
 _lidar_dir = join(PROJECT_ROOT, "tmp")
@@ -54,7 +54,7 @@ class LidarTestCase(unittest.TestCase):
 
     @mock.patch('requests.get', side_effect=mocked_requests_get)
     def test_create_tiffs(self, mock_get):
-        tiffs = get_lidar(0, 0, 0, 0, _lidar_dir)
+        tiffs = _get_lidar([[]], _lidar_dir)
         self._assert_tiffs(["tl3555_DSM_1M.tiff", "tl3556_DSM_2M.tiff"], tiffs)
 
     @mock.patch('requests.get', side_effect=mocked_requests_get)
@@ -62,7 +62,7 @@ class LidarTestCase(unittest.TestCase):
         os.makedirs(_lidar_dir, exist_ok=True)
         self._create_zip_file("2017-LIDAR-DSM-1M-TL35ne.zip")
 
-        tiffs = get_lidar(0, 0, 0, 0, _lidar_dir)
+        tiffs = _get_lidar([[]], _lidar_dir)
 
         self.assertNotIn(
             mock.call('https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARCOMP/LIDAR-DSM-1M-TL35ne.zip'),
@@ -74,7 +74,7 @@ class LidarTestCase(unittest.TestCase):
         os.makedirs(_lidar_dir, exist_ok=True)
         self._create_zip_file("2018-LIDAR-DSM-1M-TL35ne.zip")
 
-        tiffs = get_lidar(0, 0, 0, 0, _lidar_dir)
+        tiffs = _get_lidar([[]], _lidar_dir)
 
         self.assertNotIn(
             mock.call('https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARCOMP/LIDAR-DSM-1M-TL35ne.zip'),
@@ -88,7 +88,7 @@ class LidarTestCase(unittest.TestCase):
         self._create_file("2018_tl3555_DSM_1M.tiff")
         self._create_file("2018_tl3556_DSM_1M.tiff")
 
-        tiffs = get_lidar(0, 0, 0, 0, _lidar_dir)
+        tiffs = _get_lidar([[]], _lidar_dir)
 
         self.assertNotIn(
             mock.call('https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARCOMP/LIDAR-DSM-1M-TL35ne.zip'),
@@ -97,7 +97,7 @@ class LidarTestCase(unittest.TestCase):
 
     @mock.patch('requests.get', side_effect=mocked_requests_get)
     def test_prefer_1m(self, mock_get):
-        get_lidar(0, 0, 0, 0, _lidar_dir)
+        _get_lidar([[]], _lidar_dir)
 
         self.assertIn(
             mock.call('https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARCOMP/LIDAR-DSM-1M-TL35ne.zip'),
@@ -117,6 +117,18 @@ class LidarTestCase(unittest.TestCase):
             (['2014-LIDAR-DSM-2M-TL35ne.zip', '2015-LIDAR-DSM-2M-TL35ne.zip'], '2015-LIDAR-DSM-2M-TL35ne.zip'),
             (['2014-LIDAR-DSM-1M-TL35ne.zip', '2015-LIDAR-DSM-2M-TL35ne.zip'], '2014-LIDAR-DSM-1M-TL35ne.zip'),
         ], _find_best)
+
+    def test_wkt_to_rings(self):
+        self._parameterised_test([
+            ('POLYGON((417649.533067673 206504.504705884,417649.533067673 226504.504705884,426447.445894151 226504.504705884,417649.533067673 206504.504705884))',
+             [
+                [417649.533067673, 206504.504705884],
+                [417649.533067673, 226504.504705884],
+                [426447.445894151, 226504.504705884],
+                [417649.533067673, 206504.504705884],
+             ]),
+            ('POINT(0 1)', [])
+        ], _wkt_to_rings)
 
     def _create_file(self, name: str):
         open(join(_lidar_dir, name), 'w').close()
