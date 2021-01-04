@@ -31,7 +31,7 @@ def model_solar_pv(pg_uri: str,
 
     pg_uri = process_pg_uri(pg_uri)
     _validate_params(
-        horizon_search_radius, horizon_slices, max_roof_slope_degrees, min_roof_area_m,
+        lidar_paths, horizon_search_radius, horizon_slices, max_roof_slope_degrees, min_roof_area_m,
         roof_area_percent_usable, min_roof_degrees_from_north, flat_roof_degrees, peak_power_per_m2)
 
     solar_dir = join(root_solar_dir, f"job_{job_id}")
@@ -153,7 +153,8 @@ def _write_results_to_db(pg_uri: str, job_id: int, csv_file: str):
         pg_conn.close()
 
 
-def _validate_params(horizon_search_radius: int,
+def _validate_params(lidar_paths: List[str],
+                     horizon_search_radius: int,
                      horizon_slices: int,
                      max_roof_slope_degrees: int,
                      min_roof_area_m: int,
@@ -161,6 +162,8 @@ def _validate_params(horizon_search_radius: int,
                      min_roof_degrees_from_north: int,
                      flat_roof_degrees: int,
                      peak_power_per_m2: float):
+    if not lidar_paths or len(lidar_paths) == 0:
+        raise ValueError(f"No LIDAR tiles available, cannot run solar PV modelling.")
     if horizon_search_radius < 0 or horizon_search_radius > 10000:
         raise ValueError(f"horizon search radius must be between 0 and 10000, was {horizon_search_radius}")
     if horizon_slices > 64 or horizon_slices < 8:
