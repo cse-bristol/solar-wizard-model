@@ -12,6 +12,9 @@ ROOF_HORIZON_TABLE = 'roof_horizons'
 SOLAR_PV_TABLE = 'solar_pv'
 """Table to store the raw solar PV data received from PV-GIS"""
 
+BOUNDS_TABLE = 'bounds_4326'
+"""Table with the job bounds transformed to SRID 4326"""
+
 
 def schema(job_id: int) -> str:
     """Get the solar PV schema given a job_id."""

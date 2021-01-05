@@ -120,6 +120,7 @@ def aggregate_horizons(pg_uri: str,
             pixel_horizons=Identifier(schema, tables.PIXEL_HORIZON_TABLE),
             roof_polygons=Identifier(schema, tables.ROOF_POLYGON_TABLE),
             roof_horizons=Identifier(schema, tables.ROOF_HORIZON_TABLE),
+            bounds_4326=Identifier(schema, tables.BOUNDS_TABLE),
             horizon_cols=SQL(horizon_cols),
         )
     finally:

@@ -4,7 +4,7 @@ from os.path import join
 from typing import List
 
 import psycopg2.extras
-from psycopg2.sql import SQL, Identifier
+from psycopg2.sql import SQL, Identifier, Literal
 
 import albion_models.solar_pv.pv_gis.pv_gis_client as pv_gis_client
 import albion_models.solar_pv.tables as tables
@@ -41,14 +41,14 @@ def model_solar_pv(pg_uri: str,
     vrt_file = join(solar_dir, 'tiles.vrt')
     _run(f"gdalbuildvrt {vrt_file} {' '.join(lidar_paths)}")
 
+    print("Initialising postGIS schema...")
+    _init_schema(pg_uri, job_id)
+
     print("Creating raster mask from mastermap.buildings polygon...")
     mask_file = _create_mask(job_id, solar_dir, pg_uri)
     cropped_lidar = join(solar_dir, 'cropped_lidar.tif')
     print("Cropping lidar to mask dimensions...")
     crop_to_mask(vrt_file, mask_file, cropped_lidar)
-
-    print("Initialising postGIS schema...")
-    _init_schema(pg_uri, job_id)
 
     print("Using 320-albion-saga-gis to find horizons...")
     horizons_csv = join(solar_dir, 'horizons.csv')
@@ -86,14 +86,32 @@ def _create_mask(job_id: int, solar_dir: str, pg_uri: str) -> str:
     Create a raster mask from OS mastermap buildings that fall within the bounds
     of the job. Pixels inside a building will be 1, otherwise 0.
     """
-    job_id = int(job_id)
-    mask_sql = f"""
-        SELECT ST_Transform(b.geom_4326, 27700) 
-        FROM mastermap.building b 
-        LEFT JOIN models.job_queue q 
-        ON ST_Intersects(b.geom_4326, ST_Transform(q.bounds, 4326)) 
-        WHERE q.job_id={job_id}
-    """
+    pg_conn = connect(pg_uri, cursor_factory=psycopg2.extras.DictCursor)
+    try:
+        with pg_conn.cursor() as cursor:
+            cursor.execute(SQL(
+                """
+                CREATE TABLE {bounds_4326} AS 
+                SELECT job_id, ST_Transform(bounds, 4326) AS bounds 
+                FROM models.job_queue;
+                CREATE INDEX ON {bounds_4326} using gist (bounds);
+                """).format(
+                    bounds_4326=Identifier(tables.schema(job_id), tables.BOUNDS_TABLE)))
+
+            pg_conn.commit()
+        mask_sql = SQL(
+            """
+            SELECT ST_Transform(b.geom_4326, 27700) 
+            FROM mastermap.building b 
+            LEFT JOIN {bounds_4326} q 
+            ON ST_Intersects(b.geom_4326, q.bounds) 
+            WHERE q.job_id={job_id}
+            """).format(
+                bounds_4326=Identifier(tables.schema(job_id), tables.BOUNDS_TABLE),
+                job_id=Literal(job_id)).as_string(pg_conn)
+    finally:
+        pg_conn.close()
+
     mask_file = join(solar_dir, 'mask.tif')
     _run(f"""
         gdal_rasterize 
