@@ -8,16 +8,17 @@ from albion_models.db_funcs import sql_script, copy_csv, connect
 
 
 def get_horizons(lidar_tif: str, solar_dir: str, mask_tif: str, csv_out: str, search_radius: int, slices: int, retrying: bool = False):
-    command = f'saga_cmd ta_lighting 3 '
-    f'-DEM {lidar_tif} '
-    f'-VISIBLE {join(solar_dir, "vis_out.tiff")} '
-    f'-SVF {join(solar_dir, "svf_out.tiff")} '
-    f'-CSV {csv_out} '
-    f'-MASK {mask_tif} '
-    f'-RADIUS {search_radius} '
-    f'-NDIRS {slices} '
+    command = f'saga_cmd ta_lighting 3 ' \
+              f'-DEM {lidar_tif} ' \
+              f'-VISIBLE {join(solar_dir, "vis_out.tiff")} ' \
+              f'-SVF {join(solar_dir, "svf_out.tiff")} ' \
+              f'-CSV {csv_out} ' \
+              f'-MASK {mask_tif} ' \
+              f'-RADIUS {search_radius} ' \
+              f'-NDIRS {slices} '
 
     res = subprocess.run(command, capture_output=True, text=True, shell=True)
+    print(res.stdout)
     print(res.stderr)
     if res.returncode != 0:
         # Seems like SAGA GIS very rarely crashes during cleanup due to some c++ use-after-free bug:
