@@ -1,4 +1,5 @@
 
+DROP TABLE IF EXISTS {solar_pv};
 CREATE TABLE {solar_pv} (
     jan_month int,
     jan_avg_energy_prod_kwh_per_day real,

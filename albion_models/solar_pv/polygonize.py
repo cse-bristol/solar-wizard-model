@@ -7,16 +7,13 @@ from psycopg2.sql import SQL, Identifier
 
 import albion_models.solar_pv.tables as tables
 from albion_models.db_funcs import connect, sql_script_with_bindings
-from albion_models.solar_pv.crop import crop_to_mask
 
 
 def generate_aspect_polygons(mask_path: str, aspect_path: str, pg_uri: str, job_id: int, out_dir: str):
-    cropped = join(out_dir, 'aspect_cropped.tif')
     bucketed = join(out_dir, 'aspect_bucketed.tif')
     masked = join(out_dir, 'aspect_masked.tif')
 
-    crop_to_mask(aspect_path, mask_path, cropped)
-    _bucket_raster(cropped, bucketed, 30)
+    _bucket_raster(aspect_path, bucketed, 30)
     _mask_raster(bucketed, mask_path, masked)
     _polygonise(masked, pg_uri, job_id)
 
@@ -102,9 +99,8 @@ def aggregate_horizons(pg_uri: str,
                        min_roof_degrees_from_north: int,
                        flat_roof_degrees: int):
     pg_conn = connect(pg_uri)
-
     schema = tables.schema(job_id)
-    horizon_cols = ','.join([f'max(h.horizon_slice_{i}) AS horizon_slice_{i}' for i in range(0, horizon_slices)])
+    horizon_cols = _get_horizon_cols(horizon_slices, 'avg')
 
     try:
         sql_script_with_bindings(
@@ -125,3 +121,35 @@ def aggregate_horizons(pg_uri: str,
         )
     finally:
         pg_conn.close()
+
+
+def aggregate_user_submitted_polygon_horizons(pg_uri: str,
+                                              job_id: int,
+                                              horizon_slices: int,
+                                              flat_roof_degrees: int,
+                                              aggregate_fn: str):
+    pg_conn = connect(pg_uri)
+    schema = tables.schema(job_id)
+    horizon_cols = _get_horizon_cols(horizon_slices, aggregate_fn)
+
+    try:
+        sql_script_with_bindings(
+            pg_conn, 'create.user-submitted-polygon-horizons.sql',
+            {
+                "job_id": job_id,
+                "flat_roof_degrees": flat_roof_degrees,
+            },
+            schema=Identifier(schema),
+            pixel_horizons=Identifier(schema, tables.PIXEL_HORIZON_TABLE),
+            roof_horizons=Identifier(schema, tables.ROOF_HORIZON_TABLE),
+            horizon_cols=SQL(horizon_cols),
+        )
+    finally:
+        pg_conn.close()
+
+
+def _get_horizon_cols(horizon_slices: int, aggregate_fn: str) -> str:
+    horizon_slices = int(horizon_slices)
+    if aggregate_fn not in ("avg", "min", "max"):
+        raise ValueError(f"Invalid horizon aggregate function '{aggregate_fn}")
+    return ','.join([f'{aggregate_fn}(h.horizon_slice_{i}) AS horizon_slice_{i}' for i in range(0, horizon_slices)])

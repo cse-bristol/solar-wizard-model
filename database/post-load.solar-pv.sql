@@ -34,5 +34,5 @@ LEFT JOIN {roof_horizons} h ON pv.roof_id = h.roof_id;
 
 DROP TABLE {solar_pv};
 
-CREATE VIEW models.{job_view} AS
+CREATE OR REPLACE VIEW models.{job_view} AS
 SELECT * FROM models.solar_pv WHERE job_id = %(job_id)s;

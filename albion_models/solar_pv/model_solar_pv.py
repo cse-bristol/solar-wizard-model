@@ -1,18 +1,20 @@
+import logging
 import os
-import subprocess
 from os.path import join
 from typing import List
 
 import psycopg2.extras
-from psycopg2.sql import SQL, Identifier, Literal
+from psycopg2.sql import SQL, Identifier
 
 import albion_models.solar_pv.pv_gis.pv_gis_client as pv_gis_client
+import albion_models.solar_pv.mask as mask
 import albion_models.solar_pv.tables as tables
 from albion_models.db_funcs import sql_script, connect, copy_csv, sql_script_with_bindings, \
     process_pg_uri
-from albion_models.solar_pv.crop import crop_to_mask
-from albion_models.solar_pv.polygonize import generate_aspect_polygons, aggregate_horizons
+from albion_models.solar_pv.polygonize import generate_aspect_polygons, \
+    aggregate_horizons
 from albion_models.solar_pv.saga_gis.horizons import get_horizons, load_horizons_to_db
+from albion_models.solar_pv import gdal_helpers
 
 
 def model_solar_pv(pg_uri: str,
@@ -31,98 +33,53 @@ def model_solar_pv(pg_uri: str,
 
     pg_uri = process_pg_uri(pg_uri)
     _validate_params(
-        lidar_paths, horizon_search_radius, horizon_slices, max_roof_slope_degrees, min_roof_area_m,
-        roof_area_percent_usable, min_roof_degrees_from_north, flat_roof_degrees, peak_power_per_m2)
+        lidar_paths,
+        horizon_search_radius,
+        horizon_slices,
+        max_roof_slope_degrees,
+        min_roof_area_m,
+        roof_area_percent_usable,
+        min_roof_degrees_from_north,
+        flat_roof_degrees,
+        peak_power_per_m2)
 
     solar_dir = join(root_solar_dir, f"job_{job_id}")
     os.makedirs(solar_dir, exist_ok=True)
 
-    print("Creating vrt...")
     vrt_file = join(solar_dir, 'tiles.vrt')
-    _run(f"gdalbuildvrt {vrt_file} {' '.join(lidar_paths)}")
+    gdal_helpers.create_vrt(lidar_paths, vrt_file)
 
-    print("Initialising postGIS schema...")
+    logging.info("Initialising postGIS schema...")
     _init_schema(pg_uri, job_id)
 
-    print("Creating raster mask from mastermap.buildings polygon...")
-    mask_file = _create_mask(job_id, solar_dir, pg_uri)
-    cropped_lidar = join(solar_dir, 'cropped_lidar.tif')
-    print("Cropping lidar to mask dimensions...")
-    crop_to_mask(vrt_file, mask_file, cropped_lidar)
+    logging.info("Creating raster mask from mastermap.buildings polygon...")
+    mask_file = mask.create_buildings_mask(job_id, solar_dir, pg_uri, resolution_metres=1)
 
-    print("Using 320-albion-saga-gis to find horizons...")
+    logging.info("Cropping lidar to mask dimensions...")
+    cropped_lidar = join(solar_dir, 'cropped_lidar.tif')
+    gdal_helpers.crop_or_expand(mask_file, vrt_file, mask_file, adjust_resolution=False)
+    gdal_helpers.crop_or_expand(vrt_file, mask_file, cropped_lidar, adjust_resolution=True)
+
+    logging.info("Using 320-albion-saga-gis to find horizons...")
     horizons_csv = join(solar_dir, 'horizons.csv')
     get_horizons(cropped_lidar, solar_dir, mask_file, horizons_csv, horizon_search_radius, horizon_slices)
-    print("Loading horizon data into postGIS...")
     load_horizons_to_db(pg_uri, job_id, horizons_csv, horizon_slices)
 
-    print("Creating aspect raster...")
+    logging.info("Creating aspect raster...")
     aspect_file = join(solar_dir, 'aspect.tif')
-    _run(f"gdaldem aspect {cropped_lidar} {aspect_file} -of GTiff -b 1 -zero_for_flat")
+    gdal_helpers.aspect(cropped_lidar, aspect_file)
 
-    print("Polygonising aspect raster...")
+    logging.info("Polygonising aspect raster...")
     generate_aspect_polygons(mask_file, aspect_file, pg_uri, job_id, solar_dir)
 
-    print("Intersecting roof polygons with buildings, aggregating horizon data and filtering...")
+    logging.info("Intersecting roof polygons with buildings, aggregating horizon data and filtering...")
     aggregate_horizons(pg_uri, job_id, horizon_slices, max_roof_slope_degrees, min_roof_area_m, min_roof_degrees_from_north, flat_roof_degrees)
 
-    print("Sending requests to PV-GIS...")
+    logging.info("Sending requests to PV-GIS...")
     solar_pv_csv = _pv_gis(pg_uri, job_id, peak_power_per_m2, pv_tech, roof_area_percent_usable, solar_dir)
 
-    print("Loading PV data into albion...")
+    logging.info("Loading PV data into albion...")
     _write_results_to_db(pg_uri, job_id, solar_pv_csv)
-
-
-def _run(command: str):
-    res = subprocess.run(command, capture_output=True, text=True, shell=True)
-    print(res.stdout)
-    print(res.stderr)
-    if res.returncode != 0:
-        raise ValueError(res.stderr)
-
-
-def _create_mask(job_id: int, solar_dir: str, pg_uri: str) -> str:
-    """
-    Create a raster mask from OS mastermap buildings that fall within the bounds
-    of the job. Pixels inside a building will be 1, otherwise 0.
-    """
-    pg_conn = connect(pg_uri, cursor_factory=psycopg2.extras.DictCursor)
-    try:
-        with pg_conn.cursor() as cursor:
-            cursor.execute(SQL(
-                """
-                CREATE TABLE {bounds_4326} AS 
-                SELECT job_id, ST_Transform(bounds, 4326) AS bounds 
-                FROM models.job_queue;
-                CREATE INDEX ON {bounds_4326} using gist (bounds);
-                """).format(
-                    bounds_4326=Identifier(tables.schema(job_id), tables.BOUNDS_TABLE)))
-
-            pg_conn.commit()
-        mask_sql = SQL(
-            """
-            SELECT ST_Transform(b.geom_4326, 27700) 
-            FROM mastermap.building b 
-            LEFT JOIN {bounds_4326} q 
-            ON ST_Intersects(b.geom_4326, q.bounds) 
-            WHERE q.job_id={job_id}
-            """).format(
-                bounds_4326=Identifier(tables.schema(job_id), tables.BOUNDS_TABLE),
-                job_id=Literal(job_id)).as_string(pg_conn)
-    finally:
-        pg_conn.close()
-
-    mask_file = join(solar_dir, 'mask.tif')
-    _run(f"""
-        gdal_rasterize 
-        -sql '{mask_sql}' 
-        -burn 1 -tr 1 1 
-        -init 0 -ot Int16 
-        -of GTiff -a_srs EPSG:27700 
-        "PG:{pg_uri}" 
-        {mask_file}
-        """.replace("\n", " "))
-    return mask_file
 
 
 def _init_schema(pg_uri: str, job_id: int):
@@ -149,7 +106,7 @@ def _pv_gis(pg_uri: str, job_id: int, peak_power_per_m2: float, pv_tech: str, ro
             )
             rows = cursor.fetchall()
             pg_conn.commit()
-            print(f"{len(rows)} queries to send:")
+            logging.info(f"{len(rows)} queries to send:")
             pv_gis_client.solar_pv_estimate(rows, peak_power_per_m2, pv_tech, roof_area_percent_usable, solar_pv_csv)
     finally:
         pg_conn.close()
