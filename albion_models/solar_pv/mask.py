@@ -18,7 +18,7 @@ def create_buildings_mask(job_id: int, solar_dir: str, pg_uri: str, resolution_m
         with pg_conn.cursor() as cursor:
             cursor.execute(SQL(
                 """
-                CREATE TABLE {bounds_4326} AS 
+                CREATE TABLE IF NOT EXISTS {bounds_4326} AS 
                 SELECT job_id, ST_Transform(bounds, 4326) AS bounds 
                 FROM models.job_queue;
                 CREATE INDEX ON {bounds_4326} using gist (bounds);
@@ -28,7 +28,7 @@ def create_buildings_mask(job_id: int, solar_dir: str, pg_uri: str, resolution_m
             pg_conn.commit()
         mask_sql = SQL(
             """
-            SELECT ST_Transform(b.geom_4326, 27700) 
+            SELECT ST_Buffer(ST_Transform(b.geom_4326, 27700), 3) 
             FROM mastermap.building b 
             LEFT JOIN {bounds_4326} q 
             ON ST_Intersects(b.geom_4326, q.bounds) 

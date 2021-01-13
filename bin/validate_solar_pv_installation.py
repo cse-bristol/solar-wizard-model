@@ -60,7 +60,7 @@ def print_results(pg_conn, job_ids):
         pg_conn.commit()
         rows = cursor.fetchall()
         for row in rows:
-            print(','.join(row))
+            print(','.join([str(cell) for cell in row]))
 
         cursor.execute(
             """
@@ -80,12 +80,11 @@ def print_results(pg_conn, job_ids):
                 SUM(dec_energy_std_dev_m)
             FROM models.solar_pv s
             LEFT JOIN models.job_queue q ON q.job_id = s.job_id 
-            WHERE s.job_id IN %s
-            GROUP BY q.job_id""", (tuple(job_ids),))
+            WHERE s.job_id IN %s GROUP BY q.job_id""", (tuple(job_ids),))
         pg_conn.commit()
         rows = cursor.fetchall()
         for row in rows:
-            print(','.join(row))
+            print(','.join([str(cell) for cell in row]))
 
 
 def model(geojson: dict, project_name: str, params: dict):
@@ -191,33 +190,135 @@ def pvoutput_16188():
 def pvoutput_9047():
     model(project_name='pvoutput test 9047',
           params={
-              "peak_power_per_m2": 0.140,
+              "peak_power_per_m2": 0.118,
           },
           geojson={
               "type": "MultiPolygon",
               "coordinates": [
                   [[
-                      [-0.11612993, 51.175583],
-                      [-0.11609238, 51.175582],
-                      [-0.11609774, 51.175558],
-                      [-0.11611518, 51.175558],
-                      [-0.11611585, 51.175540],
-                      [-0.11610042, 51.175540],
-                      [-0.11610243, 51.175532],
-                      [-0.11613395, 51.175534],
-                      [-0.11612993, 51.175583],
+                      [-0.11615993, 51.175583],
+                      [-0.11612238, 51.175582],
+                      [-0.11612774, 51.175558],
+                      [-0.11614518, 51.175558],
+                      [-0.11614585, 51.175540],
+                      [-0.11613042, 51.175540],
+                      [-0.11613243, 51.175532],
+                      [-0.11616395, 51.175534],
+                      [-0.11615993, 51.175583],
                   ]],
                   [[
-                      [-0.11603873, 51.175576],
-                      [-0.11604074, 51.175528],
-                      [-0.11607897, 51.175531],
-                      [-0.11607762, 51.175540],
-                      [-0.11606019, 51.175539],
-                      [-0.11605751, 51.175556],
-                      [-0.11607494, 51.175558],
-                      [-0.11607025, 51.175580],
-                      [-0.11603873, 51.175576],
+                      [-0.11606873, 51.175576],
+                      [-0.11608074, 51.175528],
+                      [-0.11611897, 51.175531],
+                      [-0.11611762, 51.175540],
+                      [-0.11609019, 51.175539],
+                      [-0.11608751, 51.175556],
+                      [-0.11610494, 51.175558],
+                      [-0.11610025, 51.175580],
+                      [-0.11606873, 51.175576],
                   ]],
+              ]
+          })
+
+
+def pvoutput_12406():
+    model(project_name='pvoutput test 12406',
+          params={
+              "peak_power_per_m2": 0.134,
+          },
+          geojson={
+              "type": "MultiPolygon",
+              "coordinates": [
+                  [[
+                      [-1.5599697, 50.913349],
+                      [-1.5599523, 50.913342],
+                      [-1.5600294, 50.913284],
+                      [-1.5600448, 50.913294],
+                      [-1.5599697, 50.913349],
+                  ]],
+                  [[
+                      [-1.5599429, 50.913335],
+                      [-1.5599268, 50.913328],
+                      [-1.5599986, 50.913272],
+                      [-1.5600180, 50.913279],
+                      [-1.5599429, 50.913335],
+                  ]],
+              ]
+          })
+
+
+def pvoutput_7986():
+    model(project_name='pvoutput test 7986',
+          params={
+              "peak_power_per_m2": 0.129,
+          },
+          geojson={
+              "type": "Polygon",
+              "coordinates": [
+                  [
+                      [-0.15629936, 51.117137],
+                      [-0.15629869, 51.117101],
+                      [-0.15633289, 51.117101],
+                      [-0.15633222, 51.117138],
+                      [-0.15629936, 51.117137],
+                  ]
+              ]
+          })
+
+
+def pvoutput_8602():
+    model(project_name='pvoutput test 8602',
+          params={
+              "peak_power_per_m2": 0.101,
+          },
+          geojson={
+              "type": "Polygon",
+              "coordinates": [
+                  [
+                      [-1.0332774, 51.472468],
+                      [-1.0331862, 51.472421],
+                      [-1.0332144, 51.472394],
+                      [-1.0333002, 51.472437],
+                      [-1.0332774, 51.472468],
+                  ]
+              ]
+          })
+
+
+def pvoutput_7321a():
+    model(project_name='pvoutput test 7321a',
+          params={
+              "peak_power_per_m2": 0.106,
+          },
+          geojson={
+              "type": "Polygon",
+              "coordinates": [
+                  [
+                      [0.32830607, 50.795894],
+                      [0.32833625, 50.795886],
+                      [0.32831211, 50.795853],
+                      [0.32827992, 50.795862],
+                      [0.32830607, 50.795894],
+                  ]
+              ]
+          })
+
+
+def pvoutput_7321b():
+    model(project_name='pvoutput test 7321b',
+          params={
+              "peak_power_per_m2": 0.120,
+          },
+          geojson={
+              "type": "Polygon",
+              "coordinates": [
+                  [
+                      [0.32829534, 50.795914],
+                      [0.32832351, 50.795948],
+                      [0.32836374, 50.795941],
+                      [0.32832820, 50.795902],
+                      [0.32829534, 50.795914],
+                  ]
               ]
           })
 
@@ -226,4 +327,10 @@ if __name__ == '__main__':
     # pvoutput_81195()
     # pvoutput_6717()
     # pvoutput_16188()
-    pvoutput_9047()
+    # pvoutput_9047()
+    # pvoutput_12406()
+    # pvoutput_7986()
+    # pvoutput_8602()
+    # pvoutput_7321a()
+    # pvoutput_7321b()
+    pass
