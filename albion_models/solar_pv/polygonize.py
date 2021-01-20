@@ -1,5 +1,6 @@
 import subprocess
 from os.path import join
+from typing import List
 
 import numpy as np
 from osgeo import gdal
@@ -101,7 +102,7 @@ def aggregate_horizons(pg_uri: str,
                        max_avg_southerly_horizon_degrees: int):
     pg_conn = connect(pg_uri)
     schema = tables.schema(job_id)
-    horizon_cols = _get_horizon_cols(horizon_slices, 'avg')
+    aggregated_horizon_cols = _aggregated_horizon_cols(horizon_slices, 'avg')
 
     try:
         sql_script_with_bindings(
@@ -119,8 +120,10 @@ def aggregate_horizons(pg_uri: str,
             roof_polygons=Identifier(schema, tables.ROOF_POLYGON_TABLE),
             roof_horizons=Identifier(schema, tables.ROOF_HORIZON_TABLE),
             bounds_4326=Identifier(schema, tables.BOUNDS_TABLE),
-            horizon_cols=SQL(horizon_cols),
+            aggregated_horizon_cols=SQL(aggregated_horizon_cols),
             avg_southerly_horizon_rads=SQL(_avg_southerly_horizon_rads(horizon_slices)),
+            horizon_cols=SQL(','.join(_horizon_cols(horizon_slices))),
+            southerly_horizon_cols=SQL(','.join(_southerly_horizon_cols(horizon_slices))),
         )
     finally:
         pg_conn.close()
@@ -133,7 +136,7 @@ def aggregate_user_submitted_polygon_horizons(pg_uri: str,
                                               aggregate_fn: str):
     pg_conn = connect(pg_uri)
     schema = tables.schema(job_id)
-    horizon_cols = _get_horizon_cols(horizon_slices, aggregate_fn)
+    aggregated_horizon_cols = _aggregated_horizon_cols(horizon_slices, aggregate_fn)
 
     try:
         sql_script_with_bindings(
@@ -145,27 +148,46 @@ def aggregate_user_submitted_polygon_horizons(pg_uri: str,
             schema=Identifier(schema),
             pixel_horizons=Identifier(schema, tables.PIXEL_HORIZON_TABLE),
             roof_horizons=Identifier(schema, tables.ROOF_HORIZON_TABLE),
-            horizon_cols=SQL(horizon_cols),
+            aggregated_horizon_cols=SQL(aggregated_horizon_cols),
         )
     finally:
         pg_conn.close()
 
 
-def _get_horizon_cols(horizon_slices: int, aggregate_fn: str) -> str:
+def _aggregated_horizon_cols(horizon_slices: int, aggregate_fn: str) -> str:
     horizon_slices = int(horizon_slices)
     if aggregate_fn not in ("avg", "min", "max"):
         raise ValueError(f"Invalid horizon aggregate function '{aggregate_fn}")
     return ','.join([f'{aggregate_fn}(h.horizon_slice_{i}) AS horizon_slice_{i}' for i in range(0, horizon_slices)])
 
 
-def _avg_southerly_horizon_rads(horizon_slices: int, degrees_around_centre: int = 135) -> str:
+def _horizon_cols(horizon_slices: int) -> List[str]:
+    horizon_slices = int(horizon_slices)
+    return [f'h.horizon_slice_{i}' for i in range(0, horizon_slices)]
+
+
+def _southerly_horizon_cols(horizon_slices: int, degrees_around_south: int = 135) -> List[str]:
+    """
+    Get horizon cols which count as southerly.
+    By default southerly is defined as the 135 degrees between ESE and WSW inclusive.
+    """
+    horizon_slices = int(horizon_slices)
+    degrees_around_south = int(degrees_around_south)
+
+    centre = horizon_slices / 2  # South
+    segment_size = 360 / horizon_slices
+    segment_start = centre - (degrees_around_south / 2 / segment_size)
+    segment_end = centre + (degrees_around_south / 2 / segment_size)
+    return [f'h.horizon_slice_{i}' for i in range(0, horizon_slices) if segment_start <= i <= segment_end]
+
+
+def _avg_southerly_horizon_rads(horizon_slices: int, degrees_around_south: int = 135) -> str:
     """
     Get the SQL for calculating the average southerly horizon radians.
     By default southerly is defined as the 135 degrees between ESE and WSW inclusive.
     """
-    centre = horizon_slices / 2  # South
-    segment_size = 360 / horizon_slices
-    segment_start = centre - (degrees_around_centre / 2 / segment_size)
-    segment_end = centre + (degrees_around_centre / 2 / segment_size)
-    cols = [f'h.horizon_slice_{i}' for i in range(0, horizon_slices) if segment_start <= i <= segment_end]
+    horizon_slices = int(horizon_slices)
+    degrees_around_south = int(degrees_around_south)
+
+    cols = _southerly_horizon_cols(horizon_slices, degrees_around_south)
     return f"({' + '.join(cols)}) / {len(cols)}"

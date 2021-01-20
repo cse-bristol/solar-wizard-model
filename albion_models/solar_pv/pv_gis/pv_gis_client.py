@@ -127,7 +127,9 @@ def _handle_row(row: Dict[str, str]):
             'northing': row['northing'],
             'toid': row['toid'],
             'roof_id': row['roof_id'],
-            'peak_power': response['inputs']['pv_module']['peak_power']
+            'peak_power': response['inputs']['pv_module']['peak_power'],
+            'horizon_sd': row['horizon_sd'],
+            'southerly_horizon_sd': row['southerly_horizon_sd'],
         })
         return results
     except Exception as e:

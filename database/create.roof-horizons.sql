@@ -70,14 +70,36 @@ SELECT
     ST_Y(ST_SetSRID(ST_Centroid(c.roof_geom_27700), 27700)) AS northing,
     count(*) / cos(avg(h.slope)) as area,
     count(*) as footprint,
-    {horizon_cols}
+    {aggregated_horizon_cols}
 FROM
     {schema}.building_roofs c
     LEFT JOIN {pixel_horizons} h ON ST_Contains(c.roof_geom_27700, h.en)
 GROUP BY c.roof_id
 HAVING count(*) / cos(avg(h.slope)) >= %(min_roof_area_m)s;
 
+-- Add horizon standard deviation info:
+
+ALTER TABLE {roof_horizons} ADD COLUMN horizon_sd double precision;
+ALTER TABLE {roof_horizons} ADD COLUMN southerly_horizon_sd double precision;
+
+WITH sd AS (
+	  SELECT
+	      roof_id,
+	      stddev(horizon) AS horizon_sd,
+	      stddev(southerly_horizon) AS southerly_horizon_sd
+    FROM (
+        SELECT
+            roof_id,
+            unnest(array[{horizon_cols}]) AS horizon,
+            unnest(array[{southerly_horizon_cols}]) AS southerly_horizon
+        FROM {roof_horizons} h) sub
+	  GROUP BY roof_id)
+UPDATE {roof_horizons} SET horizon_sd = sd.horizon_sd, southerly_horizon_sd = sd.southerly_horizon_sd
+FROM sd
+WHERE {roof_horizons}.roof_id = sd.roof_id;
+
 -- Remove any roof polygons that are unsuitable for panels:
+
 DELETE FROM {roof_horizons} WHERE degrees(slope) > %(max_roof_slope_degrees)s;
 DELETE FROM {roof_horizons} WHERE degrees(aspect) >= (360-%(min_roof_degrees_from_north)s)
                               AND degrees(slope) > 5;

@@ -27,7 +27,7 @@ SELECT
     ST_Y(ST_SetSRID(ST_Centroid(c.roof_geom_27700), 27700)) AS northing,
     ST_Area(c.roof_geom_27700) / cos(avg(h.slope)) as area,
     ST_Area(c.roof_geom_27700) as footprint,
-    {horizon_cols}
+    {aggregated_horizon_cols}
 FROM
     {schema}.installations c
     LEFT JOIN {pixel_horizons} h ON ST_Contains(c.roof_geom_27700, h.en)
