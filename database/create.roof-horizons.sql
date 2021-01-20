@@ -51,6 +51,10 @@ DROP TABLE {roof_polygons};
 DROP TABLE {schema}.buildings;
 DROP TABLE {schema}.building_roofs_multi;
 
+-- Remove pixels with bad horizons:
+
+DELETE FROM {schema}.pixel_horizons h WHERE {avg_southerly_horizon_rads} > radians(%(max_avg_southerly_horizon_degrees)s);
+
 -- Aggregate the per-pixel horizon data by roof polygon:
 
 CREATE TABLE {roof_horizons} AS
@@ -64,14 +68,14 @@ SELECT
     avg(percent_visible) AS percent_visible,
     ST_X(ST_SetSRID(ST_Centroid(c.roof_geom_27700), 27700)) AS easting,
     ST_Y(ST_SetSRID(ST_Centroid(c.roof_geom_27700), 27700)) AS northing,
-    ST_Area(c.roof_geom_27700) / cos(avg(h.slope)) as area,
-    ST_Area(c.roof_geom_27700) as footprint,
+    count(*) / cos(avg(h.slope)) as area,
+    count(*) as footprint,
     {horizon_cols}
 FROM
     {schema}.building_roofs c
     LEFT JOIN {pixel_horizons} h ON ST_Contains(c.roof_geom_27700, h.en)
 GROUP BY c.roof_id
-HAVING ST_Area(c.roof_geom_27700) / cos(avg(h.slope)) >= %(min_roof_area_m)s;
+HAVING count(*) / cos(avg(h.slope)) >= %(min_roof_area_m)s;
 
 -- Remove any roof polygons that are unsuitable for panels:
 DELETE FROM {roof_horizons} WHERE degrees(slope) > %(max_roof_slope_degrees)s;

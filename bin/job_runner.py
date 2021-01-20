@@ -113,6 +113,7 @@ def _handle_job(pg_conn, job: dict) -> bool:
             peak_power_per_m2 = params.get('peak_power_per_m2', 0.120)
             pv_tech = params.get('pv_tech', 'crystSi')
             roof_area_percent_usable = params.get('roof_area_percent_usable', 75)
+            max_avg_southerly_horizon_degrees = params.get('max_avg_southerly_horizon_degrees', 35)
             model_solar_pv(
                 pg_uri=os.environ.get("PG_URI"),
                 root_solar_dir=os.environ.get("SOLAR_DIR"),
@@ -126,7 +127,8 @@ def _handle_job(pg_conn, job: dict) -> bool:
                 min_roof_degrees_from_north=min_roof_degrees_from_north,
                 flat_roof_degrees=flat_roof_degrees,
                 peak_power_per_m2=peak_power_per_m2,
-                pv_tech=pv_tech)
+                pv_tech=pv_tech,
+                max_avg_southerly_horizon_degrees=max_avg_southerly_horizon_degrees)
 
     logging.info(f"Completed job {job_id}, project {project}")
     _send_success_email(job['email'], job_id, project)

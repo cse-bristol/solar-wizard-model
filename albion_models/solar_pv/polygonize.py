@@ -97,7 +97,8 @@ def aggregate_horizons(pg_uri: str,
                        max_roof_slope_degrees: int,
                        min_roof_area_m: int,
                        min_roof_degrees_from_north: int,
-                       flat_roof_degrees: int):
+                       flat_roof_degrees: int,
+                       max_avg_southerly_horizon_degrees: int):
     pg_conn = connect(pg_uri)
     schema = tables.schema(job_id)
     horizon_cols = _get_horizon_cols(horizon_slices, 'avg')
@@ -111,6 +112,7 @@ def aggregate_horizons(pg_uri: str,
                 "min_roof_area_m": min_roof_area_m,
                 "min_roof_degrees_from_north": min_roof_degrees_from_north,
                 "flat_roof_degrees": flat_roof_degrees,
+                "max_avg_southerly_horizon_degrees": max_avg_southerly_horizon_degrees
             },
             schema=Identifier(schema),
             pixel_horizons=Identifier(schema, tables.PIXEL_HORIZON_TABLE),
@@ -118,6 +120,7 @@ def aggregate_horizons(pg_uri: str,
             roof_horizons=Identifier(schema, tables.ROOF_HORIZON_TABLE),
             bounds_4326=Identifier(schema, tables.BOUNDS_TABLE),
             horizon_cols=SQL(horizon_cols),
+            avg_southerly_horizon_rads=SQL(_avg_southerly_horizon_rads(horizon_slices)),
         )
     finally:
         pg_conn.close()
@@ -153,3 +156,16 @@ def _get_horizon_cols(horizon_slices: int, aggregate_fn: str) -> str:
     if aggregate_fn not in ("avg", "min", "max"):
         raise ValueError(f"Invalid horizon aggregate function '{aggregate_fn}")
     return ','.join([f'{aggregate_fn}(h.horizon_slice_{i}) AS horizon_slice_{i}' for i in range(0, horizon_slices)])
+
+
+def _avg_southerly_horizon_rads(horizon_slices: int, degrees_around_centre: int = 135) -> str:
+    """
+    Get the SQL for calculating the average southerly horizon radians.
+    By default southerly is defined as the 135 degrees between ESE and WSW inclusive.
+    """
+    centre = horizon_slices / 2  # South
+    segment_size = 360 / horizon_slices
+    segment_start = centre - (degrees_around_centre / 2 / segment_size)
+    segment_end = centre + (degrees_around_centre / 2 / segment_size)
+    cols = [f'h.horizon_slice_{i}' for i in range(0, horizon_slices) if segment_start <= i <= segment_end]
+    return f"({' + '.join(cols)}) / {len(cols)}"

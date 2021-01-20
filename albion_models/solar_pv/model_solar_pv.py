@@ -29,7 +29,8 @@ def model_solar_pv(pg_uri: str,
                    min_roof_degrees_from_north: int,
                    flat_roof_degrees: int,
                    peak_power_per_m2: float,
-                   pv_tech: str):
+                   pv_tech: str,
+                   max_avg_southerly_horizon_degrees: int):
 
     pg_uri = process_pg_uri(pg_uri)
     _validate_params(
@@ -41,7 +42,8 @@ def model_solar_pv(pg_uri: str,
         roof_area_percent_usable,
         min_roof_degrees_from_north,
         flat_roof_degrees,
-        peak_power_per_m2)
+        peak_power_per_m2,
+        max_avg_southerly_horizon_degrees)
 
     solar_dir = join(root_solar_dir, f"job_{job_id}")
     os.makedirs(solar_dir, exist_ok=True)
@@ -73,7 +75,9 @@ def model_solar_pv(pg_uri: str,
     generate_aspect_polygons(mask_file, aspect_file, pg_uri, job_id, solar_dir)
 
     logging.info("Intersecting roof polygons with buildings, aggregating horizon data and filtering...")
-    aggregate_horizons(pg_uri, job_id, horizon_slices, max_roof_slope_degrees, min_roof_area_m, min_roof_degrees_from_north, flat_roof_degrees)
+    aggregate_horizons(pg_uri, job_id, horizon_slices, max_roof_slope_degrees,
+                       min_roof_area_m, min_roof_degrees_from_north, flat_roof_degrees,
+                       max_avg_southerly_horizon_degrees)
 
     logging.info("Sending requests to PV-GIS...")
     solar_pv_csv = _pv_gis(pg_uri, job_id, peak_power_per_m2, pv_tech, roof_area_percent_usable, solar_dir)
@@ -136,7 +140,8 @@ def _validate_params(lidar_paths: List[str],
                      roof_area_percent_usable: int,
                      min_roof_degrees_from_north: int,
                      flat_roof_degrees: int,
-                     peak_power_per_m2: float):
+                     peak_power_per_m2: float,
+                     max_avg_southerly_horizon_degrees: int):
     if not lidar_paths or len(lidar_paths) == 0:
         raise ValueError(f"No LIDAR tiles available, cannot run solar PV modelling.")
     if horizon_search_radius < 0 or horizon_search_radius > 10000:
@@ -145,6 +150,8 @@ def _validate_params(lidar_paths: List[str],
         raise ValueError(f"horizon slices must be between 8 and 64, was {horizon_slices}")
     if max_roof_slope_degrees < 0 or max_roof_slope_degrees > 90:
         raise ValueError(f"max_roof_slope_degrees must be between 0 and 90, was {max_roof_slope_degrees}")
+    if max_avg_southerly_horizon_degrees < 0 or max_avg_southerly_horizon_degrees > 90:
+        raise ValueError(f"max_avg_southerly_horizon_degrees must be between 0 and 90, was {max_avg_southerly_horizon_degrees}")
     if min_roof_area_m < 0:
         raise ValueError(f"min_roof_area_m must be greater than or equal to 0, was {min_roof_area_m}")
     if roof_area_percent_usable < 0 or roof_area_percent_usable > 100:
