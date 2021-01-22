@@ -15,20 +15,9 @@ def create_buildings_mask(job_id: int, solar_dir: str, pg_uri: str, resolution_m
     """
     pg_conn = connect(pg_uri, cursor_factory=psycopg2.extras.DictCursor)
     try:
-        with pg_conn.cursor() as cursor:
-            cursor.execute(SQL(
-                """
-                CREATE TABLE IF NOT EXISTS {bounds_4326} AS 
-                SELECT job_id, ST_Transform(bounds, 4326) AS bounds 
-                FROM models.job_queue;
-                CREATE INDEX ON {bounds_4326} using gist (bounds);
-                """).format(
-                    bounds_4326=Identifier(tables.schema(job_id), tables.BOUNDS_TABLE)))
-
-            pg_conn.commit()
         mask_sql = SQL(
             """
-            SELECT ST_Buffer(ST_Transform(b.geom_4326, 27700), 3) 
+            SELECT ST_Transform(b.geom_4326, 27700) 
             FROM mastermap.building b 
             LEFT JOIN {bounds_4326} q 
             ON ST_Intersects(b.geom_4326, q.bounds) 

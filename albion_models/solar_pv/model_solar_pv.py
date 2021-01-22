@@ -67,34 +67,37 @@ def model_solar_pv(pg_uri: str,
     get_horizons(cropped_lidar, solar_dir, mask_file, horizons_csv, horizon_search_radius, horizon_slices)
     load_horizons_to_db(pg_uri, job_id, horizons_csv, horizon_slices)
 
-    logging.info("Creating aspect raster...")
-    aspect_file = join(solar_dir, 'aspect.tif')
-    gdal_helpers.aspect(cropped_lidar, aspect_file)
+    # logging.info("Creating aspect raster...")
+    # aspect_file = join(solar_dir, 'aspect.tif')
+    # gdal_helpers.aspect(cropped_lidar, aspect_file)
+    #
+    # logging.info("Polygonising aspect raster...")
+    # generate_aspect_polygons(mask_file, aspect_file, pg_uri, job_id, solar_dir)
 
-    logging.info("Polygonising aspect raster...")
-    generate_aspect_polygons(mask_file, aspect_file, pg_uri, job_id, solar_dir)
-
-    logging.info("Intersecting roof polygons with buildings, aggregating horizon data and filtering...")
-    aggregate_horizons(pg_uri, job_id, horizon_slices, max_roof_slope_degrees,
-                       min_roof_area_m, min_roof_degrees_from_north, flat_roof_degrees,
-                       max_avg_southerly_horizon_degrees)
-
-    logging.info("Sending requests to PV-GIS...")
-    solar_pv_csv = _pv_gis(pg_uri, job_id, peak_power_per_m2, pv_tech, roof_area_percent_usable, solar_dir)
-
-    logging.info("Loading PV data into albion...")
-    _write_results_to_db(pg_uri, job_id, solar_pv_csv)
+    # logging.info("Intersecting roof polygons with buildings, aggregating horizon data and filtering...")
+    # aggregate_horizons(pg_uri, job_id, horizon_slices, max_roof_slope_degrees,
+    #                    min_roof_area_m, min_roof_degrees_from_north, flat_roof_degrees,
+    #                    max_avg_southerly_horizon_degrees)
+    #
+    # logging.info("Sending requests to PV-GIS...")
+    # solar_pv_csv = _pv_gis(pg_uri, job_id, peak_power_per_m2, pv_tech, roof_area_percent_usable, solar_dir)
+    #
+    # logging.info("Loading PV data into albion...")
+    # _write_results_to_db(pg_uri, job_id, solar_pv_csv)
 
 
 def _init_schema(pg_uri: str, job_id: int):
     pg_conn = connect(pg_uri, cursor_factory=psycopg2.extras.DictCursor)
     try:
-        sql_script(
-            pg_conn, 'create.schema.sql',
+        sql_script_with_bindings(
+            pg_conn, 'create.schema.sql', {"job_id": job_id},
             schema=Identifier(tables.schema(job_id)),
             pixel_horizons=Identifier(tables.schema(job_id), tables.PIXEL_HORIZON_TABLE),
             roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE),
             roof_horizons=Identifier(tables.schema(job_id), tables.ROOF_HORIZON_TABLE),
+            bounds_4326=Identifier(tables.schema(job_id), tables.BOUNDS_TABLE),
+            buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
+            roof_planes=Identifier(tables.schema(job_id), tables.ROOF_PLANE_TABLE),
         )
     finally:
         pg_conn.close()

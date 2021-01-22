@@ -3,6 +3,7 @@ CREATE TABLE {pixel_horizons} (
     y bigint,
     easting double precision,
     northing double precision,
+    elevation double precision,
     slope double precision,
     aspect double precision,
     sky_view_factor double precision,

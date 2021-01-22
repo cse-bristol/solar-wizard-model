@@ -13,6 +13,8 @@ stdenv.mkDerivation rec {
       requests
       gdal
       numpy
+      scikitlearn
+      scikitimage
     ]))
     saga_albion
   ];

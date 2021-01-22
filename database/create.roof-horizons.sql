@@ -4,16 +4,6 @@
 -- unwanted roof polygons (too small, too steep etc).
 --
 
--- relevant buildings:
-CREATE TABLE {schema}.buildings AS
-SELECT
-    toid,
-    ST_SetSrid(ST_Transform(geom_4326, 27700),27700)::geometry(polygon,27700) as geom_27700
-FROM mastermap.building b
-LEFT JOIN {bounds_4326} q ON ST_Intersects(b.geom_4326, q.bounds)
-WHERE q.job_id=%(job_id)s;
-
-CREATE INDEX ON {schema}.buildings USING GIST (geom_27700);
 
 -- fix any invalid roof polygons:
 UPDATE {roof_polygons} p SET wkb_geometry = ST_MakeValid(wkb_geometry)

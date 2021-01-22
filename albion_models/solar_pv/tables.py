@@ -15,6 +15,12 @@ SOLAR_PV_TABLE = 'solar_pv'
 BOUNDS_TABLE = 'bounds_4326'
 """Table with the job bounds transformed to SRID 4326"""
 
+BUILDINGS_TABLE = 'buildings'
+"""All the buildings inside the job bounds, transformed to 27700"""
+
+ROOF_PLANE_TABLE = 'roof_planes'
+"""All the roof planes detected using RANSAC"""
+
 
 def schema(job_id: int) -> str:
     """Get the solar PV schema given a job_id."""

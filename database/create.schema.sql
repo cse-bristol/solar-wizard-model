@@ -8,3 +8,35 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA {schema} GRANT ALL ON TABLES TO albion_ddl;
 DROP TABLE IF EXISTS {pixel_horizons};
 DROP TABLE IF EXISTS {roof_polygons};
 DROP TABLE IF EXISTS {roof_horizons};
+DROP TABLE IF EXISTS {buildings};
+DROP TABLE IF EXISTS {roof_planes};
+
+-- Create the bounds table in 4326 for quick intersection with mastermap buildings:
+CREATE TABLE IF NOT EXISTS {bounds_4326} AS
+SELECT job_id, ST_Transform(bounds, 4326) AS bounds
+FROM models.job_queue
+WHERE job_id = %(job_id)s;
+
+CREATE INDEX ON {bounds_4326} using gist (bounds);
+
+-- Extract the buildings that fall within the job bounds:
+CREATE TABLE {buildings} AS
+SELECT
+    toid,
+    ST_SetSrid(ST_Transform(geom_4326, 27700),27700)::geometry(polygon,27700) as geom_27700
+FROM mastermap.building b
+LEFT JOIN {bounds_4326} q ON ST_Intersects(b.geom_4326, q.bounds)
+WHERE q.job_id=%(job_id)s;
+
+CREATE INDEX ON {buildings} USING GIST (geom_27700);
+
+-- Create the table for storing roof planes:
+CREATE TABLE {roof_planes} (
+    roof_plane_id SERIAL PRIMARY KEY,
+    toid text,
+    x_coef double precision,
+    y_coef double precision,
+    intercept double precision,
+    slope double precision,
+    aspect double precision
+);

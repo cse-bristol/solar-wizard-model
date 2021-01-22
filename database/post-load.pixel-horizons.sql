@@ -3,3 +3,8 @@
 ALTER TABLE {pixel_horizons} ADD COLUMN en geometry(Point, 27700);
 UPDATE {pixel_horizons} p SET en = ST_SetSRID(ST_MakePoint(p.easting,p.northing), 27700);
 CREATE INDEX ON {pixel_horizons} USING GIST (en);
+
+ALTER TABLE {pixel_horizons} ADD COLUMN pixel_id SERIAL PRIMARY KEY;
+ALTER TABLE {pixel_horizons} ADD COLUMN roof_plane_id int;
+
+CREATE INDEX ON {pixel_horizons} (roof_plane_id);
