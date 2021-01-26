@@ -3,9 +3,6 @@
 PIXEL_HORIZON_TABLE = 'pixel_horizons'
 """Table to store the per-pixel horizon data from 320-albion-saga-gis"""
 
-ROOF_POLYGON_TABLE = 'roof_polygons'
-"""Table to store the polygons which represent planar areas of roof"""
-
 ROOF_HORIZON_TABLE = 'roof_horizons'
 """Table to store the horizon data joined with the polygons which represent planar areas of roof"""
 

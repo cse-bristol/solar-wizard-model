@@ -3,7 +3,7 @@
 CREATE TABLE {schema}.installations AS
 SELECT
     roof_geom_27700,
-    row_number() OVER () AS roof_id,
+    row_number() OVER () AS roof_plane_id,
     row_number() OVER () AS toid
 FROM (
     SELECT
@@ -12,11 +12,11 @@ FROM (
     WHERE job_id = %(job_id)s
 ) a;
 
-ALTER TABLE {schema}.installations ADD CONSTRAINT installations_pk PRIMARY KEY (roof_id);
+ALTER TABLE {schema}.installations ADD CONSTRAINT installations_pk PRIMARY KEY (roof_plane_id);
 
 CREATE TABLE {roof_horizons} AS
 SELECT
-    c.roof_id,
+    c.roof_plane_id,
     c.toid,
     c.roof_geom_27700::geometry(Polygon, 27700),
     avg(h.slope) AS slope,
@@ -31,7 +31,7 @@ SELECT
 FROM
     {schema}.installations c
     LEFT JOIN {pixel_horizons} h ON ST_Contains(c.roof_geom_27700, h.en)
-GROUP BY c.roof_id;
+GROUP BY c.roof_plane_id;
 
 UPDATE {roof_horizons} SET
     slope = radians(%(flat_roof_degrees)s),

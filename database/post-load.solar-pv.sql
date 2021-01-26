@@ -95,9 +95,9 @@ SELECT
     pv.easting,
     pv.northing,
     pv.toid,
-    pv.roof_id,
+    pv.roof_plane_id,
     pv.peak_power,
-    ST_SetSrid(ST_Transform(h.roof_geom_27700, 4326), 4326)::geometry(polygon, 4326) AS roof_geom_4326,
+    ST_SetSrid(ST_Transform(h.roof_geom_27700, 4326), 4326)::geometry(multipolygon, 4326) AS roof_geom_4326,
     h.slope,
     h.aspect,
     h.sky_view_factor,
@@ -106,9 +106,14 @@ SELECT
     h.footprint,
     %(job_id)s AS job_id,
     pv.horizon_sd,
-    pv.southerly_horizon_sd
+    pv.southerly_horizon_sd,
+    ST_SetSrid(ST_Transform(h.roof_geom_27700_3d, 4326), 4326)::geometry(multipolygonZ, 4326) AS roof_geom_4326_3d,
+    h.x_coef,
+    h.y_coef,
+    h.intercept,
+    h.is_flat
 FROM {solar_pv} pv
-LEFT JOIN {roof_horizons} h ON pv.roof_id = h.roof_id;
+LEFT JOIN {roof_horizons} h ON pv.roof_plane_id = h.roof_plane_id;
 
 DROP TABLE {solar_pv};
 

@@ -13,6 +13,8 @@ from sklearn.utils.validation import _check_sample_weight
 from sklearn.utils.validation import has_fit_parameter
 from sklearn.exceptions import ConvergenceWarning
 
+from albion_models.solar_pv.ransac.perimeter import perimeter_crofton
+
 
 class RANSACRegressorForLIDAR(RANSACRegressor):
 
@@ -33,7 +35,8 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
                  max_slope=None,
                  min_slope=None,
                  min_convex_hull_ratio=0.6,
-                 min_thinness_ratio=0.55):
+                 min_thinness_ratio=0.55,
+                 max_area_for_thinness_test=25):
         super().__init__(base_estimator,
                          min_samples=min_samples,
                          residual_threshold=residual_threshold,
@@ -51,6 +54,7 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
         self.min_slope = min_slope
         self.min_convex_hull_ratio = min_convex_hull_ratio
         self.min_thinness_ratio = min_thinness_ratio
+        self.max_area_for_thinness_test = max_area_for_thinness_test
         self.sd = None
 
     def fit(self, X, y, sample_weight=None, aspect=None):
@@ -291,7 +295,8 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
             # bad plane that cuts through the roof at an angle
             if not _plane_morphology_ok(X_inlier_subset, min_X,
                                         self.min_convex_hull_ratio,
-                                        self.min_thinness_ratio):
+                                        self.min_thinness_ratio,
+                                        self.max_area_for_thinness_test):
                 bad_samples.add(tuple(subset_idxs))
                 continue
 
@@ -381,7 +386,8 @@ def _smallest_angle_between(x, y):
 
 def _plane_morphology_ok(X_inlier_subset, min_X,
                          min_convex_hull_ratio: float,
-                         min_thinness_ratio: float) -> int:
+                         min_thinness_ratio: float,
+                         max_area_for_thinness_test: int) -> int:
     normed_inliers = np.array([np.array([pair[0] - min_X[0],
                                          pair[1] - min_X[1]])
                                for pair in X_inlier_subset]).astype('int')
@@ -406,10 +412,10 @@ def _plane_morphology_ok(X_inlier_subset, min_X,
     if cv_hull_ratio < min_convex_hull_ratio:
         return False
 
-    if min_thinness_ratio is None:
+    if min_thinness_ratio is None or roof_plane_area > max_area_for_thinness_test:
         return True
 
-    perimeter = measure.perimeter_crofton(groups, directions=4)
+    perimeter = perimeter_crofton(groups, directions=4)
     thinness_ratio = (4 * np.pi * roof_plane_area) / (perimeter * perimeter)
 
     if thinness_ratio < min_thinness_ratio:

@@ -126,7 +126,7 @@ def _handle_row(row: Dict[str, str]):
             'easting': row['easting'],
             'northing': row['northing'],
             'toid': row['toid'],
-            'roof_id': row['roof_id'],
+            'roof_plane_id': row['roof_plane_id'],
             'peak_power': response['inputs']['pv_module']['peak_power'],
             'horizon_sd': row['horizon_sd'],
             'southerly_horizon_sd': row['southerly_horizon_sd'],
@@ -147,11 +147,11 @@ def _row_to_pv_gis_params(row: dict) -> tuple:
 
     # angle: in degrees from horizontal
     # corresponds to slope field in patched SAGA csv output (in rads from horizontal)
-    angle = _rad_to_deg(row['slope'])
+    angle = row['slope']
 
     # aspect: in degrees clockwise from south
     # aspect field in patched SAGA csv output: in rads clockwise from north
-    aspect = _rad_to_deg(row['aspect']) - 180.0
+    aspect = row['aspect'] - 180.0
 
     roof_area_percent_usable = int(row['roof_area_percent_usable']) / 100
     area = float(row['area'])

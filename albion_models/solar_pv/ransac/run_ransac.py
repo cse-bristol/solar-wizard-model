@@ -1,4 +1,6 @@
+import logging
 import os
+import time
 from collections import defaultdict
 
 import math
@@ -12,7 +14,7 @@ import psycopg2.extras
 from psycopg2.sql import SQL, Identifier
 import numpy as np
 
-from solar_pv.ransac.ransac import RANSACRegressorForLIDAR, _aspect, _slope
+from albion_models.solar_pv.ransac.ransac import RANSACRegressorForLIDAR, _aspect, _slope
 
 
 def _get_cpu_count():
@@ -25,13 +27,16 @@ def run_ransac(pg_uri: str, job_id: int,
                building_page_size: int = 10) -> None:
     building_count = _building_count(pg_uri, job_id)
     segments = math.ceil(building_count / building_page_size)
-    print(f"{segments} pages of {building_page_size} buildings to process")
+    logging.info(f"{building_count} buildings, in {segments} batches to process")
+    start_time = time.time()
 
     with mp.Pool(workers) as pool:
         wrapped_iterable = ((pg_uri, job_id, seg, building_page_size)
                             for seg in range(0, segments))
         for res in pool.starmap(_handle_building_page, wrapped_iterable):
             pass
+
+    logging.info(f"RANSAC for {building_count} roofs took {round(time.time() - start_time, 2)} s.")
 
 
 def _handle_building_page(pg_uri: str, job_id: int, page: int, page_size: int):
@@ -173,7 +178,3 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[dict]):
             pg_conn.commit()
     finally:
         pg_conn.close()
-
-
-# _handle_building_page("postgresql://albion_webapp:ydBbE3JCnJ4@localhost:32768/albion", 133, page_size=10, page=0)
-run_ransac("postgresql://albion_webapp:ydBbE3JCnJ4@localhost:32768/albion", 133)
