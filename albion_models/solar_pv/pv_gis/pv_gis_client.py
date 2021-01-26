@@ -1,3 +1,5 @@
+import logging
+from os.path import join
 import csv
 import time
 import traceback
@@ -5,8 +7,13 @@ from typing import List, Dict, Iterable
 import multiprocessing as mp
 
 import requests
+import psycopg2.extras
+from psycopg2.sql import SQL, Identifier
 
 from albion_models.solar_pv.pv_gis.flatten import flatten
+import albion_models.solar_pv.tables as tables
+from albion_models.db_funcs import sql_script, connect, copy_csv, sql_script_with_bindings
+
 
 _PI = 3.14159265359
 _API_RATE_LIMIT_SECONDS = 1 / 25
@@ -14,12 +21,45 @@ _WORKERS = 4
 _API_RATE_LIMIT_SECONDS_PER_WORKER = _API_RATE_LIMIT_SECONDS * _WORKERS
 
 
-def solar_pv_estimate(iterable: Iterable[dict],
-                      peak_power_per_m2: float,
-                      pv_tech: str,
-                      roof_area_percent_usable: int,
-                      out_filename: str,
-                      log_frequency: int = 250):
+def pv_gis(pg_uri: str, job_id: int, peak_power_per_m2: float, pv_tech: str, roof_area_percent_usable: int, solar_dir: str):
+    solar_pv_csv = join(solar_dir, 'solar_pv.csv')
+    pg_conn = connect(pg_uri, cursor_factory=psycopg2.extras.DictCursor)
+    try:
+        with pg_conn.cursor() as cursor:
+            cursor.execute(SQL("SELECT * FROM {roof_horizons} WHERE usable = true").format(
+                roof_horizons=Identifier(tables.schema(job_id), tables.ROOF_HORIZON_TABLE))
+            )
+            rows = cursor.fetchall()
+            pg_conn.commit()
+            logging.info(f"{len(rows)} queries to send:")
+            _solar_pv_estimate(rows, peak_power_per_m2, pv_tech, roof_area_percent_usable, solar_pv_csv)
+    finally:
+        pg_conn.close()
+
+    _write_results_to_db(pg_uri, job_id, solar_pv_csv)
+
+
+def _write_results_to_db(pg_uri: str, job_id: int, csv_file: str):
+    pg_conn = connect(pg_uri)
+    try:
+        sql_script(pg_conn, 'create.solar-pv.sql', solar_pv=Identifier(tables.schema(job_id), tables.SOLAR_PV_TABLE))
+        copy_csv(pg_conn, csv_file, f'{tables.schema(job_id)}.{tables.SOLAR_PV_TABLE}')
+        sql_script_with_bindings(
+            pg_conn, 'post-load.solar-pv.sql', {"job_id": job_id},
+            solar_pv=Identifier(tables.schema(job_id), tables.SOLAR_PV_TABLE),
+            roof_horizons=Identifier(tables.schema(job_id), tables.ROOF_HORIZON_TABLE),
+            job_view=Identifier(f"solar_pv_job_{job_id}")
+        )
+    finally:
+        pg_conn.close()
+
+
+def _solar_pv_estimate(iterable: Iterable[dict],
+                       peak_power_per_m2: float,
+                       pv_tech: str,
+                       roof_area_percent_usable: int,
+                       out_filename: str,
+                       log_frequency: int = 250):
     with open(out_filename, 'w') as out, mp.Pool(_WORKERS) as pool:
         csv_writer = None
         processed: int = 0

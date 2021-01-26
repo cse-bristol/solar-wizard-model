@@ -19,6 +19,9 @@ SELECT
     c.roof_plane_id,
     c.toid,
     c.roof_geom_27700::geometry(Polygon, 27700),
+    null AS x_coef,
+    null AS y_coef,
+    null AS intercept,
     avg(h.slope) AS slope,
     avg(h.aspect) AS aspect,
     avg(sky_view_factor) AS sky_view_factor,
@@ -27,7 +30,14 @@ SELECT
     ST_Y(ST_SetSRID(ST_Centroid(c.roof_geom_27700), 27700)) AS northing,
     ST_Area(c.roof_geom_27700) / cos(avg(h.slope)) as area,
     ST_Area(c.roof_geom_27700) as footprint,
-    {aggregated_horizon_cols}
+    null AS is_flat,
+    {aggregated_horizon_cols},
+    null AS usable,
+    null AS easting,
+    null AS northing,
+    null AS roof_geom_27700_3d,
+    null AS horizon_sd,
+    null AS southerly_horizon_sd
 FROM
     {schema}.installations c
     LEFT JOIN {pixel_horizons} h ON ST_Contains(c.roof_geom_27700, h.en)
