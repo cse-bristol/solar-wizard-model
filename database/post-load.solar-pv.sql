@@ -107,7 +107,6 @@ SELECT
     %(job_id)s AS job_id,
     pv.horizon_sd,
     pv.southerly_horizon_sd,
-    ST_SetSrid(ST_Transform(h.roof_geom_27700_3d, 4326), 4326)::geometry(multipolygonZ, 4326) AS roof_geom_4326_3d,
     h.x_coef,
     h.y_coef,
     h.intercept,
