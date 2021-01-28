@@ -36,7 +36,21 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
                  min_slope=None,
                  min_convex_hull_ratio=0.6,
                  min_thinness_ratio=0.55,
-                 max_area_for_thinness_test=25):
+                 max_area_for_thinness_test=25,
+                 max_num_groups=20,
+                 max_group_area_ratio_to_largest=0.02):
+        """
+
+        :param max_area_for_thinness_test: The thinness test will not be applied to
+        roofs larger than this - useful as above a certain size even well-formed
+        rectangles start to count as too thin.
+
+        :param max_num_groups: Maximum number of contiguous groups the inliers are
+        allowed to fall in to.
+
+        :param max_group_area_ratio_to_largest: Maximum ratio of the area of each other
+        group to the area of the largest.
+        """
         super().__init__(base_estimator,
                          min_samples=min_samples,
                          residual_threshold=residual_threshold,
@@ -55,6 +69,8 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
         self.min_convex_hull_ratio = min_convex_hull_ratio
         self.min_thinness_ratio = min_thinness_ratio
         self.max_area_for_thinness_test = max_area_for_thinness_test
+        self.max_num_groups = max_num_groups
+        self.max_group_area_ratio_to_largest = max_group_area_ratio_to_largest
         self.sd = None
 
     def fit(self, X, y, sample_weight=None, aspect=None):
@@ -63,9 +79,13 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
         to detect roof planes.
 
         Changes made:
-        * Reject planes where the (x,y) points in the plane do not form a single
-        contiguous region of the LIDAR (Tarsha-Kurdi, 2007) - these are unlikely to
-        be roofs.
+        * Tarsha-Kurdi, 2007 recommends rejecting planes where the (x,y) points in the
+        plane do not form a single contiguous region of the LIDAR. This mostly helps
+        but does exclude some valid planes where the correctly-fitted plane also happens
+        to fit to other pixels in disconnected areas of the roof. I have modified it to
+        allow planes where a small number of non-contiguous pixels fit, as long as
+        the area ratio of those non-contiguous pixels to the area of the main mass of
+        contiguous pixels is small.
 
         * Do not optimise for number of points within `residual_threshold` distance
         from plane, instead optimise for lowest SD of all points within `residual_threshold`
@@ -296,7 +316,9 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
             if not _plane_morphology_ok(X_inlier_subset, min_X,
                                         self.min_convex_hull_ratio,
                                         self.min_thinness_ratio,
-                                        self.max_area_for_thinness_test):
+                                        self.max_area_for_thinness_test,
+                                        self.max_num_groups,
+                                        self.max_group_area_ratio_to_largest):
                 bad_samples.add(tuple(subset_idxs))
                 continue
 
@@ -351,6 +373,13 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
                 y_inlier_best,
                 sample_weight=sample_weight[inlier_best_idxs_subset])
 
+        # RANSAC for LIDAR change:
+        # Re-fit data to final model:
+        y_pred = base_estimator.predict(X)
+        residuals_subset = loss_function(y, y_pred)
+        inlier_mask_best = residuals_subset < residual_threshold
+        inlier_mask_best = _exclude_unconnected(X, min_X, inlier_mask_best)
+
         self.estimator_ = base_estimator
         self.inlier_mask_ = inlier_mask_best
         self.sd = sd_best
@@ -387,23 +416,27 @@ def _smallest_angle_between(x, y):
 def _plane_morphology_ok(X_inlier_subset, min_X,
                          min_convex_hull_ratio: float,
                          min_thinness_ratio: float,
-                         max_area_for_thinness_test: int) -> int:
-    normed_inliers = np.array([np.array([pair[0] - min_X[0],
-                                         pair[1] - min_X[1]])
-                               for pair in X_inlier_subset]).astype('int')
+                         max_area_for_thinness_test: int,
+                         max_num_groups: int,
+                         max_group_area_ratio_to_largest: int) -> int:
+    normed_inliers = (X_inlier_subset - min_X).astype(int)
 
     image = np.zeros((int(np.amax(normed_inliers[:, 0])) + 1,
                       int(np.amax(normed_inliers[:, 1])) + 1))
-    for pair in normed_inliers:
-        image[pair[0]][pair[1]] = 1
+    image[normed_inliers[:, 0], normed_inliers[:, 1]] = 1
 
-    # groups = measure.euler_number(image, connectivity=1)
     groups, num_groups = measure.label(image, connectivity=1, return_num=True)
     if num_groups > 1:
-        return False
-
-    if min_convex_hull_ratio is None:
-        return True
+        # Allow a small amount of small outliers:
+        u, c = np.unique(groups, return_counts=True)
+        group_areas = dict(zip(u, c))
+        del group_areas[0]
+        if len(group_areas) > max_num_groups:
+            return False
+        largest = max(group_areas.values())
+        for area in group_areas.values():
+            if area != largest and area / largest > max_group_area_ratio_to_largest:
+                return False
 
     roof_plane_area = np.count_nonzero(groups)
     convex_hull = morphology.convex_hull_image(groups)
@@ -412,16 +445,43 @@ def _plane_morphology_ok(X_inlier_subset, min_X,
     if cv_hull_ratio < min_convex_hull_ratio:
         return False
 
-    if min_thinness_ratio is None or roof_plane_area > max_area_for_thinness_test:
-        return True
+    if roof_plane_area <= max_area_for_thinness_test:
+        perimeter = perimeter_crofton(groups, directions=4)
+        thinness_ratio = (4 * np.pi * roof_plane_area) / (perimeter * perimeter)
 
-    perimeter = perimeter_crofton(groups, directions=4)
-    thinness_ratio = (4 * np.pi * roof_plane_area) / (perimeter * perimeter)
-
-    if thinness_ratio < min_thinness_ratio:
-        return False
+        if thinness_ratio < min_thinness_ratio:
+            return False
 
     return True
+
+
+def _exclude_unconnected(X, min_X, inlier_mask_best):
+    """
+    Create a new inlier mask which only sets as True those LIDAR pixels that
+    form part of the largest contiguous group of pixels fitted to the plane.
+    """
+
+    normed = (X - min_X).astype(int)
+    image = np.zeros((int(np.amax(normed[:, 0])) + 1,
+                      int(np.amax(normed[:, 1])) + 1))
+    idxs = np.zeros((int(np.amax(normed[:, 0])) + 1,
+                     int(np.amax(normed[:, 1])) + 1), dtype=int)
+    for i, pair in enumerate(normed):
+        if inlier_mask_best[i]:
+            image[pair[0]][pair[1]] = 1
+        idxs[pair[0]][pair[1]] = i
+
+    groups, num_groups = measure.label(image, connectivity=1, return_num=True)
+
+    u, c = np.unique(groups, return_counts=True)
+    group_areas = dict(zip(u, c))
+    del group_areas[0]
+    largest_area_group = max(group_areas, key=group_areas.get)
+
+    idx_subset = idxs[groups == largest_area_group]
+    mask = np.zeros(inlier_mask_best.shape, dtype=bool)
+    mask[idx_subset] = True
+    return mask
 
 
 def _sample(n_samples, min_samples, random_state, aspect):
@@ -433,11 +493,11 @@ def _sample(n_samples, min_samples, random_state, aspect):
         initial_sample = sample_without_replacement(n_samples, 1, random_state=random_state)[0]
         initial_aspect = aspect[initial_sample]
 
-        mask = np.array([_smallest_angle_between(aspect[i], initial_aspect)
-                         for i in range(0, n_samples)
-                         if i != initial_sample])
-        choose_from = np.where(mask < max_aspect_range)[0]
-        if len(choose_from) < 2:
+        aspect_diff = np.array([_smallest_angle_between(aspect[i], initial_aspect)
+                                if i != initial_sample else 999
+                                for i in range(0, n_samples)])
+        choose_from = np.asarray(aspect_diff < max_aspect_range).nonzero()[0]
+        if len(choose_from) < min_samples-1:
             continue
         if (sample_attempts + 1) % 100 == 0:
             max_aspect_range += 5

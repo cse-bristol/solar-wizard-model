@@ -4,7 +4,7 @@ Extensions to scikit-learn RANSAC implementation with additions for usage with L
 
 #### Changes made:
 
-* Reject planes where the (x,y) points in the plane do not form a single contiguous region of the LIDAR (Tarsha-Kurdi, 2007) - these are unlikely to be roofs.
+* Tarsha-Kurdi, 2007 recommends rejecting planes where the (x,y) points in the plane do not form a single contiguous region of the LIDAR. This mostly helps but does exclude some valid planes where the correctly-fitted plane also happens to fit to other pixels in disconnected areas of the roof. I have modified it to allow planes where a small number of non-contiguous pixels fit, as long as the area ratio of those non-contiguous pixels to the area of the main mass of contiguous pixels is small.
 
 * Do not optimise for number of inliers (points within `residual_threshold` distance from plane), instead optimise for lowest SD of all inliers' distance from plane (Tarsha-Kurdi, 2007). In a normal regression trying to fit as many points as possible makes sense as you want to fit one line to your whole dataset, but for roof plane fitting we know it is very likely that there will be multiple planes to fit in a given data set, so a plane fitting more points is not necessarily a better one.
 
