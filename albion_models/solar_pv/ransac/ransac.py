@@ -407,12 +407,6 @@ def _to_positive_angle(angle):
     return angle + 360 if angle < 0 else angle
 
 
-def _smallest_angle_between(x, y):
-    a = (x - y) % 180
-    b = (y - x) % 180
-    return a if a < b else b
-
-
 def _plane_morphology_ok(X_inlier_subset, min_X,
                          min_convex_hull_ratio: float,
                          min_thinness_ratio: float,
@@ -493,10 +487,10 @@ def _sample(n_samples, min_samples, random_state, aspect):
         initial_sample = sample_without_replacement(n_samples, 1, random_state=random_state)[0]
         initial_aspect = aspect[initial_sample]
 
-        aspect_diff = np.array([_smallest_angle_between(aspect[i], initial_aspect)
-                                if i != initial_sample else 999
-                                for i in range(0, n_samples)])
+        aspect_diff = np.minimum((aspect - initial_aspect) % 180, (initial_aspect - aspect) % 180)
+
         choose_from = np.asarray(aspect_diff < max_aspect_range).nonzero()[0]
+        choose_from = choose_from[choose_from != initial_sample]
         if len(choose_from) < min_samples-1:
             continue
         if (sample_attempts + 1) % 100 == 0:
