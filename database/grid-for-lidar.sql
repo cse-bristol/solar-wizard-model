@@ -29,7 +29,7 @@ SELECT cell FROM cells, bbox WHERE ST_Intersects(cell, bounds);
 CREATE INDEX ON {grid_table} USING GIST (cell);
 
 SELECT ST_AsText(a.geom) FROM (
-    SELECT (ST_Dump(ST_Intersection(cell, ST_ConvexHull(bounds)))).geom
+    SELECT (ST_Dump(ST_Intersection(cell, ST_Simplify(ST_Buffer(ST_ConvexHull(bounds), 500), 500)))).geom
     FROM {grid_table}, models.job_queue
     WHERE
         job_id = %(job_id)s
