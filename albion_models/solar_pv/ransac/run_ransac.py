@@ -112,8 +112,8 @@ def _load(pg_uri: str, job_id: int, page: int, page_size: int):
                 SELECT h.pixel_id, h.easting, h.northing, h.elevation, h.aspect, b.toid 
                 FROM building_page b 
                 LEFT JOIN {pixel_horizons} h
-                WHERE h.elevation != -9999
                 ON ST_Contains(b.geom_27700, h.en)
+                WHERE h.elevation != -9999
                 ORDER BY b.toid;
                 """).format(
                 pixel_horizons=Identifier(tables.schema(job_id), tables.PIXEL_HORIZON_TABLE),
