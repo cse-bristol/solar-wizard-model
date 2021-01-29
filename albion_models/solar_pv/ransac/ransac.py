@@ -422,9 +422,7 @@ def _plane_morphology_ok(X_inlier_subset, min_X,
     groups, num_groups = measure.label(image, connectivity=1, return_num=True)
     if num_groups > 1:
         # Allow a small amount of small outliers:
-        u, c = np.unique(groups, return_counts=True)
-        group_areas = dict(zip(u, c))
-        del group_areas[0]
+        group_areas = _group_areas(groups)
         if len(group_areas) > max_num_groups:
             return False
         largest = max(group_areas.values())
@@ -467,9 +465,7 @@ def _exclude_unconnected(X, min_X, inlier_mask_best):
 
     groups, num_groups = measure.label(image, connectivity=1, return_num=True)
 
-    u, c = np.unique(groups, return_counts=True)
-    group_areas = dict(zip(u, c))
-    del group_areas[0]
+    group_areas = _group_areas(groups)
     largest_area_group = max(group_areas, key=group_areas.get)
 
     idx_subset = idxs[groups == largest_area_group]
@@ -499,3 +495,11 @@ def _sample(n_samples, min_samples, random_state, aspect):
         return np.append([initial_sample], chosen)
 
     raise ValueError("Cannot find initial sample with aspect similarity")
+
+
+def _group_areas(groups) -> dict:
+    u, c = np.unique(groups, return_counts=True)
+    group_areas = dict(zip(u, c))
+    if 0 in group_areas:
+        del group_areas[0]
+    return group_areas
