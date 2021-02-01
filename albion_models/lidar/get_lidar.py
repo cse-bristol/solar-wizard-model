@@ -119,9 +119,8 @@ def _wait_for_job(lidar_job_id: str):
 
 def _check_job_status(lidar_job_id: str):
     url = f'https://environment.data.gov.uk/arcgis/rest/services/gp/DataDownload/GPServer/DataDownload/jobs/{lidar_job_id}'
-    res = requests.get(url, params={
-        "f": "json"
-    })
+    res = requests.get(url, params={"f": "json"})
+    res.raise_for_status()
     body = res.json()
     return body['jobStatus']
 
@@ -129,6 +128,7 @@ def _check_job_status(lidar_job_id: str):
 def _download_tiles(lidar_job_id: str, lidar_dir: str) -> List[str]:
     url = f'https://environment.data.gov.uk/arcgis/rest/directories/arcgisjobs/gp/datadownload_gpserver/{lidar_job_id}/scratch/results.json'
     res = requests.get(url)
+    res.raise_for_status()
     body = res.json()
 
     products = [p for p in body['data'] if p['productName'] == "LIDAR Composite DSM"]
@@ -172,6 +172,7 @@ def _download_tile(url: str, year: int, lidar_dir: str) -> List[str]:
         logging.info(f"Skipping download of {url}, already have {best_zip}")
     else:
         res = requests.get(url)
+        res.raise_for_status()
         with open(join(lidar_dir, zip_name_to_write), 'wb') as wz:
             wz.write(res.content)
         logging.info(f"Downloaded {url}")
