@@ -7,6 +7,7 @@ from typing import List, Dict, Iterable, Optional
 import multiprocessing as mp
 
 import requests
+from requests.adapters import HTTPAdapter
 import psycopg2.extras
 from psycopg2.sql import SQL, Identifier
 
@@ -20,6 +21,17 @@ _API_RATE_LIMIT_SECONDS = 1 / 25
 _WORKERS = 4
 _API_RATE_LIMIT_SECONDS_PER_WORKER = _API_RATE_LIMIT_SECONDS * _WORKERS
 _ALLOWED_ERRORS = ("Location over the sea. Please, select another location",)
+
+_session: requests.Session
+
+
+def init_process():
+    global _session
+    _session = requests.Session()
+    # Retry on things like socket, timeout, connection errors, not HTTP error codes:
+    adapter = HTTPAdapter(max_retries=5)
+    _session.mount('http://', adapter)
+    _session.mount('https://', adapter)
 
 
 def pv_gis(pg_uri: str, job_id: int, peak_power_per_m2: float, pv_tech: str, roof_area_percent_usable: int, solar_dir: str):
@@ -61,7 +73,7 @@ def _solar_pv_estimate(iterable: Iterable[dict],
                        roof_area_percent_usable: int,
                        out_filename: str,
                        log_frequency: int = 250):
-    with open(out_filename, 'w') as out, mp.Pool(_WORKERS) as pool:
+    with open(out_filename, 'w') as out, mp.Pool(_WORKERS, initializer=init_process) as pool:
         csv_writer = None
         processed: int = 0
         errors: int = 0
@@ -138,8 +150,9 @@ def _single_solar_pv_estimate(lon: float,
                               peakpower: float,
                               loss: float,
                               pvtechchoice: str) -> Optional[dict]:
+    global _session
     url = 'https://re.jrc.ec.europa.eu/api/PVcalc'
-    res = requests.get(url, params={
+    res = _session.get(url, params={
         "outputformat":  "json",
         "browser": 0,
         "userhorizon": ','.join([str(i) for i in horizon]),
