@@ -152,13 +152,17 @@ def _download_tiles(lidar_job_id: str, lidar_dir: str) -> List[str]:
                 }
 
     tiff_paths = []
+    all_files = os.listdir(lidar_dir)
+    all_zips = [d for d in all_files if d.endswith(".zip")]
+    all_tiffs = [d for d in all_files if d.endswith(".tiff") or d.endswith(".tif")]
+
     for tile_id, resolutions in tiles_dict.items():
         tile = resolutions['1M'] if '1M' in resolutions else resolutions['2M']
-        tiff_paths.extend(_download_tile(tile['url'], tile['year'], lidar_dir))
+        tiff_paths.extend(_download_tile(tile['url'], tile['year'], lidar_dir, all_zips, all_tiffs))
     return tiff_paths
 
 
-def _download_tile(url: str, year: int, lidar_dir: str) -> List[str]:
+def _download_tile(url: str, year: int, lidar_dir: str, all_zips: List[str], all_tiffs: List[str]) -> List[str]:
     """
     Check if the zip should be used instead of existing versions,
     extract the .asc files, and convert them to geotiffs.
@@ -166,7 +170,7 @@ def _download_tile(url: str, year: int, lidar_dir: str) -> List[str]:
     zip_name = url.split('/')[-1]
     zip_id = zip_name.split('.')[0].split('-')[-1]
     zip_name_to_write = f"{year}-{zip_name}"
-    zips_already_downloaded = [d for d in os.listdir(lidar_dir) if d.endswith(".zip") and zip_id in d]
+    zips_already_downloaded = [d for d in all_zips if zip_id in d]
     best_zip = _find_best(zips_already_downloaded + [zip_name_to_write])
     if best_zip != zip_name_to_write or zip_name_to_write in zips_already_downloaded:
         logging.info(f"Skipping download of {url}, already have {best_zip}")
@@ -177,8 +181,6 @@ def _download_tile(url: str, year: int, lidar_dir: str) -> List[str]:
             wz.write(res.content)
         logging.info(f"Downloaded {url}")
 
-    all_already_downloaded = [d for d in os.listdir(lidar_dir) if d.endswith(".tiff")]
-
     tiff_paths = []
     with zipfile.ZipFile(join(lidar_dir, best_zip)) as z:
         for zipinfo in z.infolist():
@@ -188,7 +190,7 @@ def _download_tile(url: str, year: int, lidar_dir: str) -> List[str]:
             tiff_paths.append(join(lidar_dir, tiff_filename))
             tile_id = zipinfo.filename.split('_')[0]
 
-            already_downloaded = [a for a in all_already_downloaded if tile_id in a]
+            already_downloaded = [a for a in all_tiffs if tile_id in a]
             for existing in already_downloaded:
                 if existing != tiff_filename:
                     os.remove(join(lidar_dir, existing))
