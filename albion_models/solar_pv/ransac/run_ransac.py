@@ -7,7 +7,7 @@ import math
 from typing import List
 import multiprocessing as mp
 
-from albion_models.db_funcs import connect
+from albion_models.db_funcs import connect, count
 from albion_models.solar_pv import tables
 
 import psycopg2.extras
@@ -22,9 +22,15 @@ def _get_cpu_count():
     return int(len(os.sched_getaffinity(0)) * 0.75)
 
 
-def run_ransac(pg_uri: str, job_id: int,
+def run_ransac(pg_uri: str,
+               job_id: int,
                workers: int = _get_cpu_count(),
                building_page_size: int = 10) -> None:
+
+    if count(pg_uri, tables.schema(job_id), tables.ROOF_PLANE_TABLE) > 0:
+        logging.info("Not detecting roof planes, already detected.")
+        return
+
     building_count = _building_count(pg_uri, job_id)
     segments = math.ceil(building_count / building_page_size)
     logging.info(f"{building_count} buildings, in {segments} batches to process")

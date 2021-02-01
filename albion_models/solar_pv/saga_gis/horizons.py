@@ -6,7 +6,7 @@ from typing import List
 from psycopg2.sql import SQL, Identifier
 
 import albion_models.solar_pv.tables as tables
-from albion_models.db_funcs import sql_script, copy_csv, connect
+from albion_models.db_funcs import sql_script, copy_csv, connect, count
 from albion_models.solar_pv import mask, gdal_helpers
 
 
@@ -22,6 +22,10 @@ def find_horizons(pg_uri: str,
     compass for each LIDAR pixel that falls inside one of the OS MasterMap building
     polygons.
     """
+    if count(pg_uri, tables.schema(job_id), tables.PIXEL_HORIZON_TABLE) > 0:
+        logging.info("Not detecting horizon, horizon data already loaded.")
+        return
+
     vrt_file = join(solar_dir, 'tiles.vrt')
     gdal_helpers.create_vrt(lidar_paths, vrt_file)
 

@@ -1,8 +1,9 @@
+import logging
 from typing import List
 from psycopg2.sql import SQL, Identifier
 
 import albion_models.solar_pv.tables as tables
-from albion_models.db_funcs import connect, sql_script_with_bindings
+from albion_models.db_funcs import connect, sql_script_with_bindings, count
 
 
 def aggregate_horizons(pg_uri: str,
@@ -13,8 +14,13 @@ def aggregate_horizons(pg_uri: str,
                        min_roof_degrees_from_north: int,
                        flat_roof_degrees: int,
                        max_avg_southerly_horizon_degrees: int):
-    pg_conn = connect(pg_uri)
     schema = tables.schema(job_id)
+
+    if count(pg_uri, schema, tables.ROOF_HORIZON_TABLE) > 0:
+        logging.info("Not aggregating horizon info, horizons already aggregated.")
+        return
+
+    pg_conn = connect(pg_uri)
     aggregated_horizon_cols = _aggregated_horizon_cols(horizon_slices, 'avg')
 
     try:

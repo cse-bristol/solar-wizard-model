@@ -65,3 +65,25 @@ def process_pg_uri(pg_uri: str) -> str:
 
 def connect(pg_uri: str, **kwargs):
     return psycopg2.connect(process_pg_uri(pg_uri), **kwargs)
+
+
+def count(pg_uri: str, schema: str, table: str) -> int:
+    pg_conn = connect(pg_uri)
+    try:
+        with pg_conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables
+                    WHERE table_schema = %(schema)s
+                    AND table_name = %(table)s
+                );
+            """, {"schema": schema, "table": table})
+            exists = cursor.fetchone()[0] is True
+            if not exists:
+                return 0
+            cursor.execute(SQL("SELECT COUNT(*) FROM {table} LIMIT 1").format(
+                table=Identifier(schema, table)
+            ))
+            return cursor.fetchone()[0]
+    finally:
+        pg_conn.close()

@@ -3,7 +3,7 @@ from os.path import join
 import csv
 import time
 import traceback
-from typing import List, Dict, Iterable
+from typing import List, Dict, Iterable, Optional
 import multiprocessing as mp
 
 import requests
@@ -19,6 +19,7 @@ _PI = 3.14159265359
 _API_RATE_LIMIT_SECONDS = 1 / 25
 _WORKERS = 4
 _API_RATE_LIMIT_SECONDS_PER_WORKER = _API_RATE_LIMIT_SECONDS * _WORKERS
+_ALLOWED_ERRORS = ("Location over the sea. Please, select another location",)
 
 
 def pv_gis(pg_uri: str, job_id: int, peak_power_per_m2: float, pv_tech: str, roof_area_percent_usable: int, solar_dir: str):
@@ -63,19 +64,25 @@ def _solar_pv_estimate(iterable: Iterable[dict],
     with open(out_filename, 'w') as out, mp.Pool(_WORKERS) as pool:
         csv_writer = None
         processed: int = 0
+        errors: int = 0
 
         wrapped_iterable = (dict(row,
                                  peak_power_per_m2=peak_power_per_m2,
                                  pv_tech=pv_tech,
                                  roof_area_percent_usable=roof_area_percent_usable) for row in iterable)
         for res in pool.imap_unordered(_handle_row, wrapped_iterable, chunksize=10):
-            if csv_writer is None:
-                csv_writer = csv.DictWriter(out, res.keys())
-                csv_writer.writeheader()
-            csv_writer.writerow(res)
+            if res is not None:
+                if csv_writer is None:
+                    csv_writer = csv.DictWriter(out, res.keys())
+                    csv_writer.writeheader()
+                csv_writer.writerow(res)
+            else:
+                errors += 1
             processed += 1
             if processed % log_frequency == 0 and log_frequency > 0 and processed > 0:
                 print(f"Sent {processed} queries.")
+
+        print(f"Total allowed PV-GIS errors: {errors}")
 
 
 # PV-GIS API params, from https://ec.europa.eu/jrc/en/PVGIS/docs/noninteractive
@@ -130,7 +137,7 @@ def _single_solar_pv_estimate(lon: float,
                               aspect: float,
                               peakpower: float,
                               loss: float,
-                              pvtechchoice: str):
+                              pvtechchoice: str) -> Optional[dict]:
     url = 'https://re.jrc.ec.europa.eu/api/PVcalc'
     res = requests.get(url, params={
         "outputformat":  "json",
@@ -145,17 +152,31 @@ def _single_solar_pv_estimate(lon: float,
         "aspect": aspect,
         "pvtechchoice": pvtechchoice
     })
-    res.raise_for_status()
+
+    if res.status_code == 400:
+        error = res.json()
+        error_message = error['message']
+        print(error_message)
+        if error['message'] in _ALLOWED_ERRORS:
+            return None
+        else:
+            res.raise_for_status()
+    else:
+        res.raise_for_status()
+
     body = res.json()
     return body
 
 
-def _handle_row(row: Dict[str, str]):
+def _handle_row(row: Dict[str, str]) -> Optional[dict]:
     try:
         lon, lat, horizon, angle, aspect, peakpower, loss, pv_tech = _row_to_pv_gis_params(row)
 
         start_time = time.time()
         response = _single_solar_pv_estimate(lon, lat, horizon, angle, aspect, peakpower, loss, pv_tech)
+        if response is None:
+            return None
+
         time_taken = time.time() - start_time
         # Stay under the API rate limit:
         if time_taken < _API_RATE_LIMIT_SECONDS_PER_WORKER:

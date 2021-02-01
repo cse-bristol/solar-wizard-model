@@ -87,8 +87,6 @@ def _init_schema(pg_uri: str, job_id: int):
         sql_script_with_bindings(
             pg_conn, 'create.schema.sql', {"job_id": job_id},
             schema=Identifier(tables.schema(job_id)),
-            pixel_horizons=Identifier(tables.schema(job_id), tables.PIXEL_HORIZON_TABLE),
-            roof_horizons=Identifier(tables.schema(job_id), tables.ROOF_HORIZON_TABLE),
             bounds_4326=Identifier(tables.schema(job_id), tables.BOUNDS_TABLE),
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
             roof_planes=Identifier(tables.schema(job_id), tables.ROOF_PLANE_TABLE),
