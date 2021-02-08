@@ -1,7 +1,5 @@
 
 
--- TODO handle usable area param
--- TODO query params for installation cost params
 INSERT INTO models.pv_cost_benefit (
     job_id,
     solar_pv_job_id,
@@ -26,16 +24,23 @@ SELECT
     row_number() OVER w AS installation_job_id,
     array_agg(pv.roof_plane_id) OVER w AS roof_plane_ids,
     SUM(pv.peak_power) OVER w AS peak_power,
-    SUM(pv.area) OVER w AS usable_area,
+    SUM(pv.area) OVER w * ((jq.params->>'roof_area_percent_usable')::double precision / 100) AS usable_area,
     SUM(pv.total_avg_energy_prod_kwh_per_year) OVER w AS total_yield_kwh_year,
-    SUM(pv.total_avg_energy_prod_kwh_per_year / pv.area) OVER w AS yield_kwh_m2_year,
+    SUM(pv.total_avg_energy_prod_kwh_per_year /
+        (pv.area * ((jq.params->>'roof_area_percent_usable')::double precision / 100))) OVER w AS yield_kwh_m2_year,
     CASE
-        WHEN SUM(pv.peak_power) OVER w <= 10  THEN SUM(pv.peak_power) OVER w * 1429 * 1.05
-        WHEN SUM(pv.peak_power) OVER w <= 100 THEN SUM(pv.peak_power) OVER w *  922 * 1.20
-        ELSE                                       SUM(pv.peak_power) OVER w *  714 * 1.20 END
+        WHEN SUM(pv.peak_power) OVER w <= 10  THEN
+            ((SUM(pv.peak_power) OVER w * %(small_inst_cost_per_kwp)s) + %(small_inst_fixed_cost)s) * (1 + %(small_inst_vat)s)
+        WHEN SUM(pv.peak_power) OVER w <= 100 THEN
+            ((SUM(pv.peak_power) OVER w * %(med_inst_cost_per_kwp)s)   + %(med_inst_fixed_cost)s)   * (1 + %(med_inst_vat)s)
+        ELSE
+            ((SUM(pv.peak_power) OVER w * %(large_inst_cost_per_kwp)s) + %(large_inst_fixed_cost)s) * (1 + %(large_inst_vat)s)
+        END AS installation_cost
 FROM models.solar_pv pv
+LEFT JOIN models.job_queue jq ON pv.job_id = jq.job_id
 WHERE pv.job_id = %(solar_pv_job_id)s
 WINDOW w AS (
     PARTITION BY pv.toid
-    ORDER BY pv.total_avg_energy_prod_kwh_per_year / pv.area DESC
+    ORDER BY pv.total_avg_energy_prod_kwh_per_year
+        / (pv.area * ((jq.params->>'roof_area_percent_usable')::double precision / 100)) DESC
     ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW);

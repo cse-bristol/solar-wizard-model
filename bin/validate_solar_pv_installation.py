@@ -16,12 +16,12 @@ def insert_job(pg_conn, geojson: str, project: str, lidar: bool, params: dict) -
         cursor.execute(
             """
             INSERT INTO models.job_queue 
-            (project, created_at, bounds, solar_pv, heat_demand, soft_dig, lidar, status, email, params) 
+            (project, created_at, bounds, solar_pv, heat_demand, soft_dig, lidar, solar_pv_cost_benefit, status, email, params) 
             VALUES 
-            (%s, %s, ST_Transform(ST_Multi(ST_GeomFromGeoJSON(%s)), 27700), %s, %s, %s, %s, %s, %s, %s)
+            (%s, %s, ST_Transform(ST_Multi(ST_GeomFromGeoJSON(%s)), 27700), %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING job_id;
             """,
-            (project, dt.datetime.now(), geojson, False, False, False, lidar,
+            (project, dt.datetime.now(), geojson, False, False, False, lidar, False,
              'NOT_STARTED', None, Json(params))
         )
         pg_conn.commit()

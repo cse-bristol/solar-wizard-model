@@ -2,7 +2,7 @@ from typing import List
 
 import numpy as np
 import psycopg2.extras
-from psycopg2.sql import SQL
+from psycopg2.sql import SQL, Identifier
 
 from albion_models.db_funcs import sql_script_with_bindings, connect
 
@@ -12,7 +12,16 @@ def model_cost_benefit(pg_uri: str,
                        solar_pv_job_id: int,
                        period_years: int,
                        discount_rate: float,
-                       electricity_kwh_cost: float):
+                       electricity_kwh_cost: float,
+                       small_inst_cost_per_kwp: float,
+                       med_inst_cost_per_kwp: float,
+                       large_inst_cost_per_kwp: float,
+                       small_inst_fixed_cost: float,
+                       med_inst_fixed_cost: float,
+                       large_inst_fixed_cost: float,
+                       small_inst_vat: float,
+                       med_inst_vat: float,
+                       large_inst_vat: float):
 
     pg_conn = connect(pg_uri, cursor_factory=psycopg2.extras.DictCursor)
     try:
@@ -23,6 +32,15 @@ def model_cost_benefit(pg_uri: str,
                 "period_years": period_years,
                 "discount_rate": discount_rate,
                 "electricity_kwh_cost": electricity_kwh_cost,
+                "small_inst_cost_per_kwp": small_inst_cost_per_kwp,
+                "med_inst_cost_per_kwp": med_inst_cost_per_kwp,
+                "large_inst_cost_per_kwp": large_inst_cost_per_kwp,
+                "small_inst_fixed_cost": small_inst_fixed_cost,
+                "med_inst_fixed_cost": med_inst_fixed_cost,
+                "large_inst_fixed_cost": large_inst_fixed_cost,
+                "small_inst_vat": small_inst_vat,
+                "med_inst_vat": med_inst_vat,
+                "large_inst_vat": large_inst_vat,
             })
 
         installations = _get_installations(pg_conn, job_id)
@@ -34,7 +52,7 @@ def model_cost_benefit(pg_uri: str,
             electricity_kwh_cost=electricity_kwh_cost)
 
         _update_npv_irr(pg_conn, processed)
-
+        _create_view(pg_conn, job_id)
     finally:
         pg_conn.close()
 
@@ -136,4 +154,12 @@ def _update_npv_irr(pg_conn, installations: List[tuple]):
         pg_conn.commit()
 
 
-model_cost_benefit("postgresql://albion_webapp:ydBbE3JCnJ4@localhost:32768/albion", 140, 135, 25, 0.035, 0.16)
+def _create_view(pg_conn, job_id: int):
+    with pg_conn.cursor() as cursor:
+        cursor.execute(SQL("""
+            CREATE OR REPLACE VIEW models.{job_view} AS
+            SELECT * FROM models.pv_cost_benefit WHERE job_id = %(job_id)s;
+        """).format(
+            job_view=Identifier(f"pv_cost_benefit_job_{int(job_id)}")), {
+            "job_id": job_id})
+        pg_conn.commit()

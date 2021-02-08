@@ -12,6 +12,7 @@ from albion_models.lidar.get_lidar import get_all_lidar
 from albion_models.hard_soft_dig.model_hard_soft_dig import model_hard_soft_dig
 from albion_models.heat_demand.model_heat_demand import model_heat_demand
 from albion_models.solar_pv.model_solar_pv import model_solar_pv
+from albion_models.solar_pv.cost_benefit.model_cost_benefit import model_cost_benefit
 
 
 def main_loop():
@@ -68,6 +69,7 @@ def _get_next_job(pg_conn) -> Optional[dict]:
                 q.heat_demand,
                 q.soft_dig,
                 q.lidar,
+                q.solar_pv_cost_benefit,
                 q.status,
                 q.email,
                 q.params
@@ -92,7 +94,7 @@ def _handle_job(pg_conn, job: dict) -> bool:
     logging.info(f"Handling job {job_id}, project {project}")
 
     if job['soft_dig']:
-        soft_ground_buffer_metres = params.get('soft_ground_buffer_metres', 10)
+        soft_ground_buffer_metres = params['soft_ground_buffer_metres']
         model_hard_soft_dig(
             pg_conn, job_id, bounds, soft_ground_buffer_metres
         )
@@ -101,19 +103,19 @@ def _handle_job(pg_conn, job: dict) -> bool:
         lidar_tiff_paths = get_all_lidar(pg_conn, job_id, os.environ.get("LIDAR_DIR"))
 
         if job['heat_demand']:
-            heat_degree_days = params.get('heat_degree_days', 2033.313)
+            heat_degree_days = params['heat_degree_days']
             model_heat_demand(pg_conn, job_id, bounds, lidar_tiff_paths, os.environ.get("HEAT_DEMAND_DIR"), heat_degree_days)
         if job['solar_pv']:
-            horizon_search_radius = params.get('horizon_search_radius', 1000)
-            horizon_slices = params.get('horizon_slices', 16)
-            max_roof_slope_degrees = params.get('max_roof_slope_degrees', 80)
-            min_roof_area_m = params.get('min_roof_area_m', 10)
-            min_roof_degrees_from_north = params.get('min_roof_degrees_from_north', 45)
-            flat_roof_degrees = params.get('flat_roof_degrees', 10)
-            peak_power_per_m2 = params.get('peak_power_per_m2', 0.120)
-            pv_tech = params.get('pv_tech', 'crystSi')
-            roof_area_percent_usable = params.get('roof_area_percent_usable', 75)
-            max_avg_southerly_horizon_degrees = params.get('max_avg_southerly_horizon_degrees', 35)
+            horizon_search_radius = params['horizon_search_radius']
+            horizon_slices = params['horizon_slices']
+            max_roof_slope_degrees = params['max_roof_slope_degrees']
+            min_roof_area_m = params['min_roof_area_m']
+            min_roof_degrees_from_north = params['min_roof_degrees_from_north']
+            flat_roof_degrees = params['flat_roof_degrees']
+            peak_power_per_m2 = params['peak_power_per_m2']
+            pv_tech = params['pv_tech']
+            roof_area_percent_usable = params['roof_area_percent_usable']
+            max_avg_southerly_horizon_degrees = params['max_avg_southerly_horizon_degrees']
             model_solar_pv(
                 pg_uri=os.environ.get("PG_URI"),
                 root_solar_dir=os.environ.get("SOLAR_DIR"),
@@ -129,6 +131,39 @@ def _handle_job(pg_conn, job: dict) -> bool:
                 peak_power_per_m2=peak_power_per_m2,
                 pv_tech=pv_tech,
                 max_avg_southerly_horizon_degrees=max_avg_southerly_horizon_degrees)
+
+    if job['solar_pv_cost_benefit']:
+        solar_pv_job_id = params["solar_pv_job_id"]
+        period_years = params["period_years"]
+        discount_rate = params["discount_rate"]
+        electricity_kwh_cost = params["electricity_kwh_cost"]
+
+        small_inst_cost_per_kwp = params["small_inst_cost_per_kwp"]
+        med_inst_cost_per_kwp = params["med_inst_cost_per_kwp"]
+        large_inst_cost_per_kwp = params["large_inst_cost_per_kwp"]
+        small_inst_fixed_cost = params["small_inst_fixed_cost"]
+        med_inst_fixed_cost = params["med_inst_fixed_cost"]
+        large_inst_fixed_cost = params["large_inst_fixed_cost"]
+        small_inst_vat = params["small_inst_vat"]
+        med_inst_vat = params["med_inst_vat"]
+        large_inst_vat = params["large_inst_vat"]
+
+        model_cost_benefit(
+            pg_uri=os.environ.get("PG_URI"),
+            job_id=job_id,
+            solar_pv_job_id=solar_pv_job_id,
+            period_years=period_years,
+            discount_rate=discount_rate,
+            electricity_kwh_cost=electricity_kwh_cost,
+            small_inst_cost_per_kwp=small_inst_cost_per_kwp,
+            med_inst_cost_per_kwp=med_inst_cost_per_kwp,
+            large_inst_cost_per_kwp=large_inst_cost_per_kwp,
+            small_inst_fixed_cost=small_inst_fixed_cost,
+            med_inst_fixed_cost=med_inst_fixed_cost,
+            large_inst_fixed_cost=large_inst_fixed_cost,
+            small_inst_vat=small_inst_vat,
+            med_inst_vat=med_inst_vat,
+            large_inst_vat=large_inst_vat)
 
     logging.info(f"Completed job {job_id}, project {project}")
     _send_success_email(job['email'], job_id, project)
