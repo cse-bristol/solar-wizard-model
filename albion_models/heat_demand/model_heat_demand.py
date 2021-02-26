@@ -133,10 +133,7 @@ def _load_output_to_database(pg_conn, file_name: str, job_id: int, heat_degree_d
                 %(job_id)s, 
                 b.geom_4326, 
                 %(heat_degree_days)s,
-                b.has_end_date = true
-                    OR b.blacklisted_pao = true
-                    OR b.blacklisted_sao = true
-                    OR b.blacklisted_classification = true AS ignore,
+                b.num_addresses = 0 AND b.num_epc_certs = 0 AS ignore,
                 b.blacklist_reasons AS ignore_reasons
             FROM models.raw_heat_demand r 
             LEFT JOIN building.building b ON r.toid = b.toid;
