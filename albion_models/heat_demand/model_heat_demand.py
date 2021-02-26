@@ -99,7 +99,6 @@ def _run_model(geojson_file: str, lidar_tiff_paths: List[str], outfile: str, hea
 def _load_output_to_database(pg_conn, file_name: str, job_id: int, heat_degree_days: float):
     """Load heat demand data from tabfile using the postgres COPY command"""
     with pg_conn.cursor() as cursor, open(file_name, encoding='utf-8') as results:
-        results.readline()  # skip header
         cursor.execute("""
             CREATE TABLE models.raw_heat_demand (
                 toid text NOT NULL,
@@ -123,18 +122,31 @@ def _load_output_to_database(pg_conn, file_name: str, job_id: int, heat_degree_d
                 tot_surface_per_volume double precision
             );
             """)
+
+        results.readline()  # skip header
         cursor.copy_from(results, "models.raw_heat_demand", sep='\t', null='')
         cursor.execute(SQL(
             """
             INSERT INTO models.heat_demand 
-            SELECT r.*, %(job_id)s, b.geom_4326, %(heat_degree_days)s FROM models.raw_heat_demand r 
-            LEFT JOIN mastermap.building b ON r.toid = b.toid;
+            SELECT 
+                r.*, 
+                %(job_id)s, 
+                b.geom_4326, 
+                %(heat_degree_days)s,
+                b.has_end_date = true
+                    OR b.blacklisted_pao = true
+                    OR b.blacklisted_sao = true
+                    OR b.blacklisted_classification = true AS ignore,
+                b.blacklist_reasons AS ignore_reasons
+            FROM models.raw_heat_demand r 
+            LEFT JOIN building.building b ON r.toid = b.toid;
             
             DROP TABLE models.raw_heat_demand;
             
             CREATE VIEW models.{job_view} AS 
             SELECT * FROM models.heat_demand WHERE job_id = %(job_id)s;
-            """).format(job_view=Identifier(f"heat_demand_job_{job_id}")),
+            """).format(
+                job_view=Identifier(f"heat_demand_job_{job_id}")),
             {
                 'job_id': job_id,
                 'heat_degree_days': heat_degree_days,
