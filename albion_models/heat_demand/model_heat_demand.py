@@ -122,9 +122,10 @@ def _load_output_to_database(pg_conn, file_name: str, job_id: int, heat_degree_d
                 tot_surface_per_volume double precision
             );
             """)
-
         results.readline()  # skip header
         cursor.copy_from(results, "models.raw_heat_demand", sep='\t', null='')
+        pg_conn.commit()
+
         cursor.execute(SQL(
             """
             INSERT INTO models.heat_demand 
