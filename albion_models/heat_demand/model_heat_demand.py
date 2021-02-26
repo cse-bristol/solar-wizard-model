@@ -143,6 +143,7 @@ def _load_output_to_database(pg_conn, file_name: str, job_id: int, heat_degree_d
             
             DROP TABLE models.raw_heat_demand;
             
+            DROP VIEW IF EXISTS models.{job_view};
             CREATE VIEW models.{job_view} AS 
             SELECT * FROM models.heat_demand WHERE job_id = %(job_id)s;
             """).format(
