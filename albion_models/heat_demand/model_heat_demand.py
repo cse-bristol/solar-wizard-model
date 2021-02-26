@@ -121,6 +121,7 @@ def _load_output_to_database(pg_conn, file_name: str, job_id: int, heat_degree_d
                 ext_surface_per_volume double precision,
                 tot_surface_per_volume double precision
             );
+            CREATE INDEX ON models.raw_heat_demand (toid);
             """)
         results.readline()  # skip header
         cursor.copy_from(results, "models.raw_heat_demand", sep='\t', null='')
