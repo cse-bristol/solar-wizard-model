@@ -3,7 +3,7 @@ import subprocess
 from os.path import join
 from typing import List
 
-from psycopg2.sql import SQL, Identifier
+from psycopg2.sql import SQL, Identifier, Literal
 
 import albion_models.solar_pv.tables as tables
 from albion_models.db_funcs import sql_script, copy_csv, connect, count
@@ -16,7 +16,8 @@ def find_horizons(pg_uri: str,
                   lidar_paths: List[str],
                   horizon_search_radius: int,
                   horizon_slices: int,
-                  masking_strategy: str) -> None:
+                  masking_strategy: str,
+                  mask_table: str = "mastermap.building") -> None:
     """
     Detect the horizon height in degrees for each `horizon_slices` slice of the
     compass for each LIDAR pixel that falls inside one of the OS MasterMap building
@@ -29,11 +30,13 @@ def find_horizons(pg_uri: str,
     vrt_file = join(solar_dir, 'tiles.vrt')
     gdal_helpers.create_vrt(lidar_paths, vrt_file)
 
-    logging.info("Creating raster mask from mastermap.buildings polygon...")
+    srid = gdal_helpers.get_srid(vrt_file, fallback=27700)
+
+    logging.info("Creating raster mask...")
     if masking_strategy == 'building':
-        mask_file = mask.create_buildings_mask(job_id, solar_dir, pg_uri, resolution_metres=1)
+        mask_file = mask.create_buildings_mask(job_id, solar_dir, pg_uri, resolution=1, mask_table=mask_table, srid=srid)
     elif masking_strategy == 'bounds':
-        mask_file = mask.create_bounds_mask(job_id, solar_dir, pg_uri, resolution_metres=1)
+        mask_file = mask.create_bounds_mask(job_id, solar_dir, pg_uri, resolution=1, srid=srid)
     else:
         raise ValueError(f"Unknown masking strategy {masking_strategy}")
 
@@ -46,7 +49,7 @@ def find_horizons(pg_uri: str,
     logging.info("Using 320-albion-saga-gis to find horizons...")
     horizons_csv = join(solar_dir, 'horizons.csv')
     _get_horizons(cropped_lidar, solar_dir, mask_file, horizons_csv, horizon_search_radius, horizon_slices)
-    _load_horizons_to_db(pg_uri, job_id, horizons_csv, horizon_slices)
+    _load_horizons_to_db(pg_uri, job_id, horizons_csv, horizon_slices, srid)
 
 
 def _get_horizons(lidar_tif: str, solar_dir: str, mask_tif: str, csv_out: str, search_radius: int, slices: int, retrying: bool = False):
@@ -65,12 +68,13 @@ def _get_horizons(lidar_tif: str, solar_dir: str, mask_tif: str, csv_out: str, s
     if res.returncode != 0:
         # Seems like SAGA GIS very rarely crashes during cleanup due to some c++ use-after-free bug:
         if "corrupted double-linked list" in res.stderr and not retrying:
+            logging.info("Retrying horizons - SAGA reported 'corrupted double-linked list'")
             _get_horizons(lidar_tif, solar_dir, mask_tif, csv_out, search_radius, slices, True)
         else:
             raise ValueError(res.stderr)
 
 
-def _load_horizons_to_db(pg_uri: str, job_id: int, horizon_csv: str, horizon_slices: int):
+def _load_horizons_to_db(pg_uri: str, job_id: int, horizon_csv: str, horizon_slices: int, srid: int):
     pg_conn = connect(pg_uri)
     schema = tables.schema(job_id)
     pixel_horizons_table = tables.PIXEL_HORIZON_TABLE
@@ -86,7 +90,8 @@ def _load_horizons_to_db(pg_uri: str, job_id: int, horizon_csv: str, horizon_sli
 
         sql_script(
             pg_conn, 'post-load.pixel-horizons.sql',
-            pixel_horizons=Identifier(schema, pixel_horizons_table)
+            pixel_horizons=Identifier(schema, pixel_horizons_table),
+            srid=Literal(srid)
         )
     finally:
         pg_conn.close()

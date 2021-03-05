@@ -222,6 +222,8 @@ def _asc_to_geotiff(lidar_dir: str, asc_filename: str) -> str:
     """
     Convert asc file to geotiff, and add SRS metadata to file.
     """
+    gdal.UseExceptions()
+
     drv = gdal.GetDriverByName('GTiff')
     gdal_asc_file = gdal.Open(join(lidar_dir, asc_filename))
     tiff_filename = asc_filename.split('.')[0] + '.tiff'

@@ -1,6 +1,6 @@
 let
   pkgs = import <nixpkgs> {};
-  saga_albion = (import ./320-albion-saga-gis/default.nix) { inherit pkgs; };
+  saga_albion = import ./320-albion-saga-gis { inherit pkgs; };
 in with pkgs;
 
 stdenv.mkDerivation rec {

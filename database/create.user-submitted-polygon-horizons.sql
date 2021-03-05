@@ -1,4 +1,5 @@
--- Table needs to match that created by the standard solar PV model (`create.roof-horizons.sql`)
+-- Treat the entire bounds of the job as the bounds of one PV installation
+-- (or as many installations are there are polygons in the multipolygon)
 
 CREATE TABLE {schema}.installations AS
 SELECT
@@ -14,11 +15,12 @@ FROM (
 
 ALTER TABLE {schema}.installations ADD CONSTRAINT installations_pk PRIMARY KEY (roof_plane_id);
 
+-- Table needs to match that created by the standard solar PV model (`create.roof-horizons.sql`)
 CREATE TABLE {roof_horizons} AS
 SELECT
+    c.roof_geom_27700,
     c.roof_plane_id,
     c.toid,
-    c.roof_geom_27700::geometry(Polygon, 27700),
     null AS x_coef,
     null AS y_coef,
     null AS intercept,
@@ -26,15 +28,13 @@ SELECT
     avg(h.aspect) AS aspect,
     avg(sky_view_factor) AS sky_view_factor,
     avg(percent_visible) AS percent_visible,
-    ST_X(ST_SetSRID(ST_Centroid(c.roof_geom_27700), 27700)) AS easting,
-    ST_Y(ST_SetSRID(ST_Centroid(c.roof_geom_27700), 27700)) AS northing,
     ST_Area(c.roof_geom_27700) / cos(avg(h.slope)) as area,
     ST_Area(c.roof_geom_27700) as footprint,
     null AS is_flat,
     {aggregated_horizon_cols},
     null AS usable,
-    null AS easting,
-    null AS northing,
+    ST_X(ST_Transform(ST_Centroid(c.roof_geom_27700), 27700)) AS easting,
+    ST_Y(ST_Transform(ST_Centroid(c.roof_geom_27700), 27700)) AS northing,
     null AS roof_geom_27700_3d,
     null AS horizon_sd,
     null AS southerly_horizon_sd

@@ -41,6 +41,14 @@ def copy_csv(pg_conn, file_name: str, table: str, encoding='utf-8'):
             pg_conn.commit()
 
 
+def to_csv(pg_conn, file_name: str, table: str, encoding='utf-8'):
+    with pg_conn.cursor() as cursor:
+        with open(file_name, 'w', encoding=encoding) as f:
+            copy_sql = SQL("COPY {} TO stdin (FORMAT 'csv', HEADER)").format(Identifier(*table.split(".")))
+            cursor.copy_expert(copy_sql, f)
+            pg_conn.commit()
+
+
 def process_pg_uri(pg_uri: str) -> str:
     """
     Some versions of ogr2ogr attempt to add an 'application name' parameter
@@ -55,12 +63,12 @@ def process_pg_uri(pg_uri: str) -> str:
     parsed = urlparse(pg_uri)
     if parsed.scheme == '':
         # Not a URI, probably the 'key=value' form of PG connection string:
-        return pg_uri + ' ' + 'application_name=albion_solar_pv'
+        return pg_uri + ' ' + 'application_name=albion_models'
 
     if len(parsed.query) == 0:
-        return parsed._replace(query='application_name=albion_solar_pv').geturl()
+        return parsed._replace(query='application_name=albion_models').geturl()
     else:
-        return parsed._replace(query=f'{parsed.query}&application_name=albion_solar_pv').geturl()
+        return parsed._replace(query=f'{parsed.query}&application_name=albion_models').geturl()
 
 
 def connect(pg_uri: str, **kwargs):
