@@ -1,13 +1,34 @@
 import logging
 import subprocess
-from typing import List
+from typing import List, Tuple
 
 import gdal
 
 
 def create_vrt(tiles: List[str], vrt_file: str):
     logging.info("Creating vrt...")
-    _run(f"gdalbuildvrt {vrt_file} {' '.join(tiles)}")
+    _run(f"gdalbuildvrt -resolution highest {vrt_file} {' '.join(tiles)}")
+
+
+def get_res(filename: str) -> float:
+    gdal.UseExceptions()
+
+    f = gdal.Open(filename)
+    _, xres, _, _, _, yres = f.GetGeoTransform()
+    if abs(xres) == abs(yres):
+        return abs(xres)
+    else:
+        raise ValueError(f"Albion does not currently support non-equal x- and y- resolutions."
+                         f"File {filename} had xres {abs(xres)}, yres {abs(yres)}")
+
+
+def get_srs_units(filename: str) -> Tuple[float, str]:
+    gdal.UseExceptions()
+
+    f = gdal.Open(filename)
+    sref = f.GetSpatialRef()
+    sref.AutoIdentifyEPSG()
+    return float(sref.GetLinearUnits()), sref.GetLinearUnitsName()
 
 
 def get_srid(filename: str, fallback: int = None) -> int:
@@ -28,11 +49,11 @@ def get_srid(filename: str, fallback: int = None) -> int:
     raise ValueError(f"Failed to detect SRID of {filename} and no fallback set!")
 
 
-def rasterize(pg_uri: str, mask_sql: str, mask_file: str, resolution: float, srid: int):
+def rasterize(pg_uri: str, mask_sql: str, mask_file: str, res: float, srid: int):
     res = subprocess.run(f"""
         gdal_rasterize 
         -sql '{mask_sql}' 
-        -burn 1 -tr {resolution} {resolution} 
+        -burn 1 -tr {res} {res}
         -init 0 -ot Int16 
         -of GTiff -a_srs EPSG:{srid} 
         "PG:{pg_uri}" 

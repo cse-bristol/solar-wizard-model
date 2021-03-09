@@ -48,7 +48,7 @@ def model_solar_pv(pg_uri: str,
     logging.info("Initialising postGIS schema...")
     _init_schema(pg_uri, job_id)
 
-    find_horizons(
+    res = find_horizons(
         pg_uri=pg_uri,
         job_id=job_id,
         solar_dir=solar_dir,
@@ -69,7 +69,8 @@ def model_solar_pv(pg_uri: str,
         min_roof_area_m=min_roof_area_m,
         min_roof_degrees_from_north=min_roof_degrees_from_north,
         flat_roof_degrees=flat_roof_degrees,
-        max_avg_southerly_horizon_degrees=max_avg_southerly_horizon_degrees)
+        max_avg_southerly_horizon_degrees=max_avg_southerly_horizon_degrees,
+        resolution_metres=res)
 
     logging.info("Sending requests to PV-GIS...")
     pv_gis_client.pv_gis(

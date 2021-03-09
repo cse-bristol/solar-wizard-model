@@ -8,10 +8,10 @@ CREATE TABLE {roof_horizons} AS
 SELECT
     ST_Multi(ST_Buffer(
         ST_Union(ST_Rotate(
-            ST_Expand(h.en, sqrt(2) / 2),
+            ST_Expand(h.en, sqrt(%(resolution)s * %(resolution)s * 2.0) / 2),
             -radians(p.aspect),
             h.en)),
-         -((sqrt(2) - 1) / 2),
+         -((sqrt(%(resolution)s * %(resolution)s * 2.0) - 1) / 2),
         'endcap=square join=mitre quad_segs=2'))::geometry(MultiPolygon, 27700) AS roof_geom_27700,
     p.roof_plane_id,
     p.toid,
@@ -22,8 +22,8 @@ SELECT
     p.aspect,
     avg(sky_view_factor) AS sky_view_factor,
     avg(percent_visible) AS percent_visible,
-    count(*) / cos(radians(p.slope)) AS area,
-    count(*) AS footprint,
+    (count(*) * %(resolution)s * %(resolution)s) / cos(radians(p.slope)) AS area,
+    (count(*) * %(resolution)s * %(resolution)s) AS footprint,
     p.slope <= 5 AS is_flat,
     {aggregated_horizon_cols}
 FROM

@@ -13,7 +13,8 @@ def aggregate_horizons(pg_uri: str,
                        min_roof_area_m: int,
                        min_roof_degrees_from_north: int,
                        flat_roof_degrees: int,
-                       max_avg_southerly_horizon_degrees: int):
+                       max_avg_southerly_horizon_degrees: int,
+                       resolution_metres: float):
     schema = tables.schema(job_id)
 
     if count(pg_uri, schema, tables.ROOF_HORIZON_TABLE) > 0:
@@ -32,7 +33,8 @@ def aggregate_horizons(pg_uri: str,
                 "min_roof_area_m": min_roof_area_m,
                 "min_roof_degrees_from_north": min_roof_degrees_from_north,
                 "flat_roof_degrees": flat_roof_degrees,
-                "max_avg_southerly_horizon_degrees": max_avg_southerly_horizon_degrees
+                "max_avg_southerly_horizon_degrees": max_avg_southerly_horizon_degrees,
+                "resolution": resolution_metres,
             },
             schema=Identifier(schema),
             pixel_horizons=Identifier(schema, tables.PIXEL_HORIZON_TABLE),

@@ -8,17 +8,16 @@ from typing import List
 from psycopg2._json import Json
 from psycopg2.sql import SQL, Identifier
 
-from albion_models.solar_pv.saga_gis.horizons import find_horizons
-from albion_models.db_funcs import connect, to_csv, process_pg_uri
-from albion_models.solar_pv.model_solar_pv import _init_schema
+from albion_models.db_funcs import connect, to_csv, process_pg_uri, copy_tsv, count
 from albion_models.solar_pv import tables
+from albion_models.solar_pv.model_solar_pv import _init_schema
 from albion_models.solar_pv.polygonize import _horizon_cols, _southerly_horizon_cols, \
     _aggregated_horizon_cols
+from albion_models.solar_pv.saga_gis.horizons import find_horizons
 
 
-def _get_horizons(pg_uri: str, table: str, job_id: int, lidar_paths: List[str]):
+def _get_horizons(pg_uri: str, solar_dir: str, table: str, job_id: int, lidar_paths: List[str]):
     _init_schema(pg_uri, job_id)
-    solar_dir = join(os.environ.get("SOLAR_DIR"), f"job_{job_id}")
     os.makedirs(solar_dir, exist_ok=True)
     find_horizons(pg_uri, job_id,
                   solar_dir=solar_dir,
@@ -26,7 +25,8 @@ def _get_horizons(pg_uri: str, table: str, job_id: int, lidar_paths: List[str]):
                   horizon_search_radius=1000,
                   horizon_slices=16,
                   masking_strategy="building",
-                  mask_table=table)
+                  mask_table=table,
+                  override_res=1.0)
 
 
 def _insert_job(pg_conn, table: str) -> int:
@@ -54,17 +54,45 @@ def _get_lidar(dir_name: str) -> List[str]:
     return [os.path.join(dir_name, name) for name in os.listdir(dir_name)]
 
 
-# def _saga_solar_radiation(solar_dir: str):
-#     command = f'saga_cmd ta_lighting 2 ' \
-#               f'-GRD_DEM {join(solar_dir, "cropped_lidar.tif")} ' \
-#               f'-MASK {join(solar_dir, "mask.tif")} ' \
-#               f'-GRD_SVF {join(solar_dir, "svf_out.sdat")} '
-#
-#     res = subprocess.run(command, capture_output=True, text=True, shell=True)
-#     print(res.stdout)
-#     print(res.stderr)
-#     if res.returncode != 0:
-#         raise ValueError(res.stderr)
+def _saga_solar_radiation(pg_conn, job_id: int, solar_dir: str):
+    logging.info("Getting solar radiation from SAGA...")
+    command = f'saga_cmd ta_lighting 2 ' \
+              f'-GRD_DEM {join(solar_dir, "cropped_lidar.tif")} ' \
+              f'-MASK {join(solar_dir, "mask.tif")} ' \
+              f'-GRD_SVF {join(solar_dir, "svf_out.sgrd")} ' \
+              f'-GRD_TOTAL {join(solar_dir, "total.sgrd")} ' \
+              f'-DAY 2021-06-21 ' \
+              f'-HOUR_STEP 2 '
+
+    res = subprocess.run(command, capture_output=True, text=True, shell=True)
+    print(res.stdout)
+    print(res.stderr)
+    if res.returncode != 0 and "corrupted double-linked list" not in res.stderr:
+        raise ValueError(res.stderr)
+
+    logging.info("Converting raster to TSV for copy to postgres...")
+    import gdal
+    import numpy as np
+    file = gdal.Open(join(solar_dir, "total.sdat"))
+    band = file.GetRasterBand(1)
+    a = band.ReadAsArray()
+
+    tsv = join(solar_dir, "total.tsv")
+    with open(tsv, 'w') as f:
+        for index, val in np.ndenumerate(a):
+            if int(val) != -99999:
+                x = index[1]
+                y = a.shape[0] - index[0]
+                f.write(f"{x}\t{y}\t{val}\n")
+
+    with pg_conn.cursor() as cursor:
+        cursor.execute(SQL(
+            "CREATE TABLE {radiation} (x int, y int, kwh_m2 double precision);"
+        ).format(radiation=Identifier(tables.schema(job_id), "radiation")))
+        pg_conn.commit()
+
+    logging.info("Copying TSV to postgres...")
+    copy_tsv(pg_conn, tsv, f"{tables.schema(job_id)}.radiation")
 
 
 def _aggregate_by_building(pg_conn, job_id: int, table: str, horizon_slices: int):
@@ -72,24 +100,30 @@ def _aggregate_by_building(pg_conn, job_id: int, table: str, horizon_slices: int
     with pg_conn.cursor() as cursor:
         cursor.execute(SQL(
             """
+            CREATE INDEX ON {radiation} (x,y);
+            CREATE INDEX ON {pixel_horizons} (x,y);
+
             ALTER TABLE {pixel_horizons} ADD COLUMN IF NOT EXISTS lonlat geometry(Point, 4326);
             UPDATE {pixel_horizons} SET lonlat = ST_Transform(en, 4326);
             CREATE INDEX IF NOT EXISTS pixel_horizons_lonlat_idx ON {pixel_horizons} USING GIST (lonlat);
             COMMIT;
 
-            CREATE TABLE IF NOT EXISTS {building_horizon} AS
+            DROP TABLE IF EXISTS {building_horizon};
+            CREATE TABLE {building_horizon} AS
             SELECT
                 t.ogc_fid,
                 t.feat_id, 
                 t.fotfeat_id, 
-                t.feat_kode,
                 avg(h.sky_view_factor) AS avg_sky_view_factor,
                 stddev(h.sky_view_factor) AS sky_view_factor_sd,
                 avg(h.percent_visible) AS avg_percent_visible,
                 stddev(h.percent_visible) AS percent_visible_sd,
+                avg(r.kwh_m2) AS radiation_kwh_m2,
                 {aggregated_horizon_cols}
             FROM {table} t LEFT JOIN {pixel_horizons} h
             ON ST_Contains(t.geom_4326, h.lonlat)
+            LEFT JOIN {radiation} r
+            ON r.x = h.x and r.y = h.y
             GROUP BY t.ogc_fid;
             COMMIT;
             
@@ -118,12 +152,17 @@ def _aggregate_by_building(pg_conn, job_id: int, table: str, horizon_slices: int
                 southerly_horizon_sd = sd.southerly_horizon_sd
             FROM sd
             WHERE {building_horizon}.ogc_fid = sd.ogc_fid;
+            COMMIT;
+            
+            ALTER TABLE {building_horizon} {drop_horizon_cols};
             """).format(
             table=Identifier(*table.split(".")),
             pixel_horizons=Identifier(tables.schema(job_id), tables.PIXEL_HORIZON_TABLE),
+            radiation=Identifier(tables.schema(job_id), "radiation"),
             building_horizon=Identifier(tables.schema(job_id), "building_horizon"),
             aggregated_horizon_cols=SQL(_aggregated_horizon_cols(horizon_slices, 'avg')),
             horizon_cols=SQL(','.join(_horizon_cols(horizon_slices))),
+            drop_horizon_cols=SQL(','.join([f'DROP COLUMN horizon_slice_{i}' for i in range(0, horizon_slices)])),
             southerly_horizon_cols=SQL(','.join(_southerly_horizon_cols(horizon_slices))),
         ))
         pg_conn.commit()
@@ -136,7 +175,14 @@ def main(table: str, lidar_dir: str, out_csv: str, job_id: int = None):
     try:
         if job_id is None:
             job_id = _insert_job(pg_conn, table)
-        _get_horizons(pg_uri, table, job_id, _get_lidar(lidar_dir))
+        solar_dir = join(os.environ.get("SOLAR_DIR"), f"job_{job_id}")
+        _get_horizons(pg_uri, solar_dir, table, job_id, _get_lidar(lidar_dir))
+
+        if count(pg_uri, tables.schema(job_id), "radiation") > 0:
+            logging.info("Not detecting radiation, data already loaded.")
+        else:
+            _saga_solar_radiation(pg_conn, job_id, solar_dir)
+
         _aggregate_by_building(pg_conn, job_id, table, horizon_slices=16)
         to_csv(pg_conn, out_csv, f"{tables.schema(job_id)}.building_horizon")
     finally:
@@ -144,10 +190,9 @@ def main(table: str, lidar_dir: str, out_csv: str, job_id: int = None):
 
 
 if __name__ == '__main__':
-    main("denmark.cph",
-         lidar_dir="/home/neil/data/albion-data/denmark/lidar/copenhagen/lidar-dsm",
-         out_csv="/home/neil/data/albion-data/cph.csv",
-         job_id=12)
+    # main("denmark.cph",
+    #      lidar_dir="/home/neil/data/albion-data/denmark/lidar/copenhagen/lidar-dsm",
+    #      out_csv="/home/neil/data/albion-data/cph.csv")
     main("denmark.aalborg",
          lidar_dir="/home/neil/data/albion-data/denmark/lidar/aalborg/lidar-dsm",
          out_csv="/home/neil/data/albion-data/aalborg.csv")

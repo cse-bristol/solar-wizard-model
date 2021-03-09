@@ -11,7 +11,7 @@ from albion_models.solar_pv import gdal_helpers
 def create_buildings_mask(job_id: int,
                           solar_dir: str,
                           pg_uri: str,
-                          resolution: float,
+                          res: float,
                           mask_table: str,
                           srid: int) -> str:
     """
@@ -36,11 +36,11 @@ def create_buildings_mask(job_id: int,
         pg_conn.close()
 
     mask_file = join(solar_dir, 'mask.tif')
-    gdal_helpers.rasterize(pg_uri, mask_sql, mask_file, resolution, srid)
+    gdal_helpers.rasterize(pg_uri, mask_sql, mask_file, res, srid)
     return mask_file
 
 
-def create_bounds_mask(job_id: int, solar_dir: str, pg_uri: str, resolution: float, srid: int) -> str:
+def create_bounds_mask(job_id: int, solar_dir: str, pg_uri: str, res: float, srid: int) -> str:
     """
     Create a raster mask from the bounds polygon associated with the job. Pixels
     inside the bounds will be 1, all others 0.
@@ -54,5 +54,5 @@ def create_bounds_mask(job_id: int, solar_dir: str, pg_uri: str, resolution: flo
         pg_conn.close()
 
     mask_file = join(solar_dir, 'mask.tif')
-    gdal_helpers.rasterize(pg_uri, mask_sql, mask_file, resolution, srid)
+    gdal_helpers.rasterize(pg_uri, mask_sql, mask_file, res, srid)
     return mask_file
