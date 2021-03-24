@@ -190,9 +190,9 @@ def main(table: str, lidar_dir: str, out_csv: str, job_id: int = None):
 
 
 if __name__ == '__main__':
-    # main("denmark.cph",
-    #      lidar_dir="/home/neil/data/albion-data/denmark/lidar/copenhagen/lidar-dsm",
-    #      out_csv="/home/neil/data/albion-data/cph.csv")
+    main("denmark.cph",
+         lidar_dir="/home/neil/data/albion-data/denmark/lidar/copenhagen/lidar-dsm",
+         out_csv="/home/neil/data/albion-data/cph.csv")
     main("denmark.aalborg",
          lidar_dir="/home/neil/data/albion-data/denmark/lidar/aalborg/lidar-dsm",
          out_csv="/home/neil/data/albion-data/aalborg.csv")

@@ -225,11 +225,15 @@ def _send_email(from_email: str, to_email: List[str], password: str, subject: st
     msg['To'] = ', '.join(to_email)
     msg.set_content(body)
 
-    with smtplib.SMTP('smtp.office365.com', 587) as mailserver:
-        mailserver.ehlo()
-        mailserver.starttls()
-        mailserver.login(from_email, password)
-        mailserver.send_message(msg)
+    try:
+        with smtplib.SMTP('smtp.office365.com', 587) as mailserver:
+            mailserver.ehlo()
+            mailserver.starttls()
+            mailserver.login(from_email, password)
+            mailserver.send_message(msg)
+    except smtplib.SMTPException:
+        logging.exception("Failed to send email")
+    return True
 
 
 if __name__ == "__main__":
