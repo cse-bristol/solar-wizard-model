@@ -233,7 +233,6 @@ def _send_email(from_email: str, to_email: List[str], password: str, subject: st
             mailserver.send_message(msg)
     except smtplib.SMTPException:
         logging.exception("Failed to send email")
-    return True
 
 
 if __name__ == "__main__":
