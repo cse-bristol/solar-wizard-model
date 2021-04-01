@@ -13,7 +13,8 @@ INSERT INTO models.pv_cost_benefit (
     usable_area,
     total_yield_kwh_year,
     yield_kwh_m2_year,
-    installation_cost)
+    installation_cost,
+    geom_4326)
 SELECT
     %(job_id)s,
     %(solar_pv_job_id)s,
@@ -35,7 +36,8 @@ SELECT
             ((SUM(pv.peak_power) OVER w * %(med_inst_cost_per_kwp)s)   + %(med_inst_fixed_cost)s)   * (1 + %(med_inst_vat)s)
         ELSE
             ((SUM(pv.peak_power) OVER w * %(large_inst_cost_per_kwp)s) + %(large_inst_fixed_cost)s) * (1 + %(large_inst_vat)s)
-        END AS installation_cost
+        END AS installation_cost,
+    ST_Multi(ST_Union(pv.roof_geom_4326) OVER w) AS geom_4326
 FROM models.solar_pv pv
 LEFT JOIN models.job_queue jq ON pv.job_id = jq.job_id
 WHERE pv.job_id = %(solar_pv_job_id)s
