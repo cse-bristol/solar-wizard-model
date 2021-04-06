@@ -12,7 +12,7 @@ def model_cost_benefit(pg_uri: str,
                        solar_pv_job_id: int,
                        period_years: int,
                        discount_rate: float,
-                       electricity_kwh_cost: float,
+                       electricity_kwh_costs: List[float],
                        small_inst_cost_per_kwp: float,
                        med_inst_cost_per_kwp: float,
                        large_inst_cost_per_kwp: float,
@@ -22,39 +22,72 @@ def model_cost_benefit(pg_uri: str,
                        small_inst_vat: float,
                        med_inst_vat: float,
                        large_inst_vat: float):
-
     pg_conn = connect(pg_uri, cursor_factory=psycopg2.extras.DictCursor)
     try:
-        sql_script_with_bindings(
-            pg_conn, 'create.pv_cost_benefit.sql', {
-                "job_id": job_id,
-                "solar_pv_job_id": solar_pv_job_id,
-                "period_years": period_years,
-                "discount_rate": discount_rate,
-                "electricity_kwh_cost": electricity_kwh_cost,
-                "small_inst_cost_per_kwp": small_inst_cost_per_kwp,
-                "med_inst_cost_per_kwp": med_inst_cost_per_kwp,
-                "large_inst_cost_per_kwp": large_inst_cost_per_kwp,
-                "small_inst_fixed_cost": small_inst_fixed_cost,
-                "med_inst_fixed_cost": med_inst_fixed_cost,
-                "large_inst_fixed_cost": large_inst_fixed_cost,
-                "small_inst_vat": small_inst_vat,
-                "med_inst_vat": med_inst_vat,
-                "large_inst_vat": large_inst_vat,
-            })
-
-        installations = _get_installations(pg_conn, job_id)
-
-        processed = _process_installations(
-            installations=installations,
-            period_years=period_years,
-            discount_rate=discount_rate,
-            electricity_kwh_cost=electricity_kwh_cost)
-
-        _update_npv_irr(pg_conn, processed)
+        for electricity_kwh_cost in electricity_kwh_costs:
+            _do_model(
+                pg_conn,
+                job_id=job_id,
+                solar_pv_job_id=solar_pv_job_id,
+                period_years=period_years,
+                discount_rate=discount_rate,
+                electricity_kwh_cost=electricity_kwh_cost,
+                small_inst_cost_per_kwp=small_inst_cost_per_kwp,
+                med_inst_cost_per_kwp=med_inst_cost_per_kwp,
+                large_inst_cost_per_kwp=large_inst_cost_per_kwp,
+                small_inst_fixed_cost=small_inst_fixed_cost,
+                med_inst_fixed_cost=med_inst_fixed_cost,
+                large_inst_fixed_cost=large_inst_fixed_cost,
+                small_inst_vat=small_inst_vat,
+                med_inst_vat=med_inst_vat,
+                large_inst_vat=large_inst_vat)
         _create_view(pg_conn, job_id)
     finally:
         pg_conn.close()
+
+
+def _do_model(pg_conn,
+              job_id: int,
+              solar_pv_job_id: int,
+              period_years: int,
+              discount_rate: float,
+              electricity_kwh_cost: float,
+              small_inst_cost_per_kwp: float,
+              med_inst_cost_per_kwp: float,
+              large_inst_cost_per_kwp: float,
+              small_inst_fixed_cost: float,
+              med_inst_fixed_cost: float,
+              large_inst_fixed_cost: float,
+              small_inst_vat: float,
+              med_inst_vat: float,
+              large_inst_vat: float):
+    sql_script_with_bindings(
+        pg_conn, 'create.pv_cost_benefit.sql', {
+            "job_id": job_id,
+            "solar_pv_job_id": solar_pv_job_id,
+            "period_years": period_years,
+            "discount_rate": discount_rate,
+            "electricity_kwh_cost": electricity_kwh_cost,
+            "small_inst_cost_per_kwp": small_inst_cost_per_kwp,
+            "med_inst_cost_per_kwp": med_inst_cost_per_kwp,
+            "large_inst_cost_per_kwp": large_inst_cost_per_kwp,
+            "small_inst_fixed_cost": small_inst_fixed_cost,
+            "med_inst_fixed_cost": med_inst_fixed_cost,
+            "large_inst_fixed_cost": large_inst_fixed_cost,
+            "small_inst_vat": small_inst_vat,
+            "med_inst_vat": med_inst_vat,
+            "large_inst_vat": large_inst_vat,
+        })
+
+    installations = _get_installations(pg_conn, job_id, electricity_kwh_cost)
+
+    processed = _process_installations(
+        installations=installations,
+        period_years=period_years,
+        discount_rate=discount_rate,
+        electricity_kwh_cost=electricity_kwh_cost)
+
+    _update_npv_irr(pg_conn, processed)
 
 
 def _cash_flow(period_years: int,
@@ -106,14 +139,16 @@ def _irr(period_years: int,
     return rate
 
 
-def _get_installations(pg_conn, job_id: int) -> List[dict]:
+def _get_installations(pg_conn, job_id: int, electricity_kwh_cost: float) -> List[dict]:
     with pg_conn.cursor() as cursor:
         cursor.execute("""
             SELECT 
                 job_id, toid, installation_job_id, total_yield_kwh_year, installation_cost
             FROM models.pv_cost_benefit
-            WHERE job_id = %(job_id)s
-        """, {"job_id": job_id})
+            WHERE job_id = %(job_id)s AND electricity_kwh_cost = %(electricity_kwh_cost)s
+        """, {
+            "job_id": job_id,
+            "electricity_kwh_cost": electricity_kwh_cost})
         res = cursor.fetchall()
         pg_conn.commit()
         return res

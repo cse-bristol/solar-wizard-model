@@ -136,7 +136,7 @@ def _handle_job(pg_conn, job: dict) -> bool:
         solar_pv_job_id = params["solar_pv_job_id"]
         period_years = params["period_years"]
         discount_rate = params["discount_rate"]
-        electricity_kwh_cost = params["electricity_kwh_cost"]
+        electricity_kwh_costs = params["electricity_kwh_costs"]
 
         small_inst_cost_per_kwp = params["small_inst_cost_per_kwp"]
         med_inst_cost_per_kwp = params["med_inst_cost_per_kwp"]
@@ -154,7 +154,7 @@ def _handle_job(pg_conn, job: dict) -> bool:
             solar_pv_job_id=solar_pv_job_id,
             period_years=period_years,
             discount_rate=discount_rate,
-            electricity_kwh_cost=electricity_kwh_cost,
+            electricity_kwh_costs=electricity_kwh_costs,
             small_inst_cost_per_kwp=small_inst_cost_per_kwp,
             med_inst_cost_per_kwp=med_inst_cost_per_kwp,
             large_inst_cost_per_kwp=large_inst_cost_per_kwp,
