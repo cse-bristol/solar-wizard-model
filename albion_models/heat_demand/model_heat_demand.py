@@ -80,16 +80,19 @@ def _create_geojson(rows: List[dict], filename: str):
 
 
 def _run_model(geojson_file: str, lidar_tiff_paths: List[str], outfile: str, heat_degree_days: float):
-    lidar_tiff_paths = ' '.join(['--lidar ' + path for path in lidar_tiff_paths])
-    res = subprocess.run(
-        f"""java -jar {join(PROJECT_ROOT, "resources", "thermos-heat-model.jar")}
+    lidar_tiff_paths = ' '.join(['-l ' + path for path in lidar_tiff_paths])
+    command = f"""java -jar {join(PROJECT_ROOT, "resources", "thermos-heat-model.jar")}
         --input {geojson_file}
         --key-field toid
         --output {outfile}
         --degree-days {heat_degree_days}
         {lidar_tiff_paths}
-        """.replace("\n", " "),
-        capture_output=True, text=True, shell=True)
+        """.replace("\n", " ")
+
+    logging.info("Running command:")
+    logging.info(command)
+
+    res = subprocess.run(command.split(), capture_output=True, text=True)
     print(res.stdout)
     print(res.stderr)
     if res.returncode != 0:

@@ -36,6 +36,6 @@ class HeatDemandModelTestCase(unittest.TestCase):
         self.pg_conn.rollback()
         with self.pg_conn.cursor() as cursor:
             cursor.execute("DELETE FROM models.heat_demand WHERE job_id = 999")
-            cursor.execute("DROP VIEW models.heat_demand_job_999")
+            cursor.execute("DROP VIEW IF EXISTS models.heat_demand_job_999")
             cursor.execute("DELETE FROM models.job_queue WHERE job_id = 999")
             self.pg_conn.commit()
