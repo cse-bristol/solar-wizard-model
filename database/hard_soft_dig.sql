@@ -8,16 +8,49 @@ CREATE SCHEMA {temp_schema};
 CREATE TABLE {temp_schema}.road (
     road_id text PRIMARY KEY,
     road_type text NOT NULL,
-    geom_4326 geometry(MultiLineString,4326) NOT NULL
+    geom_4326 geometry(MultiLineString,4326) NOT NULL,
+    hierarchy text NOT NULL,
+    form text NOT NULL,
+    beis_cost_category text NOT NULL
 );
 
-INSERT INTO {temp_schema}.road SELECT toid, 'road_link', ST_Force2D(geom_4326) FROM highways.road_link
+INSERT INTO {temp_schema}.road SELECT
+    r.toid,
+    'road_link',
+    ST_Force2D(r.geom_4326),
+    lower(r.routehierarchy),
+    lower(r.formofway),
+    lower(b.beis_cost_category)
+FROM highways.road_link r
+LEFT JOIN models.hsd_beis_cost_category b
+    ON lower(b.hierarchy) = lower(r.routehierarchy)
+    AND lower(b.form) = lower(r.formofway)
 WHERE ST_Intersects(ST_GeomFromText(%(bounds)s, 4326), geom_4326);
 
-INSERT INTO {temp_schema}.road SELECT toid, 'path_link', ST_Force2D(geom_4326) FROM highways.path_link
+INSERT INTO {temp_schema}.road SELECT
+    r.toid,
+    'path_link',
+    ST_Force2D(r.geom_4326),
+    'path',
+    'path',
+    lower(b.beis_cost_category)
+FROM highways.path_link r
+LEFT JOIN models.hsd_beis_cost_category b
+    ON lower(b.hierarchy) = 'path'
+    AND lower(b.form) = 'path'
 WHERE ST_Intersects(ST_GeomFromText(%(bounds)s, 4326), geom_4326);
 
-INSERT INTO {temp_schema}.road SELECT toid, 'path_connecting_link', ST_Force2D(geom_4326) FROM highways.path_connecting_link
+INSERT INTO {temp_schema}.road SELECT
+    r.toid,
+    'path_connecting_link',
+    ST_Force2D(r.geom_4326),
+    'path',
+    'path',
+    lower(b.beis_cost_category)
+FROM highways.path_connecting_link r
+LEFT JOIN models.hsd_beis_cost_category b
+    ON lower(b.hierarchy) = 'path'
+    AND lower(b.form) = 'path'
 WHERE ST_Intersects(ST_GeomFromText(%(bounds)s, 4326), geom_4326);
 
 CREATE INDEX ON {temp_schema}.road USING GIST (geom_4326);
@@ -96,7 +129,10 @@ CREATE TABLE {temp_schema}.hard_soft_dig (
     road_id text NOT NULL,
     road_type text NOT NULL,
     is_hard_dig bool NOT NULL,
-    geom_4326 geometry(MultiLineString,4326) NOT NULL
+    geom_4326 geometry(MultiLineString,4326) NOT NULL,
+    hierarchy text NOT NULL,
+    form text NOT NULL,
+    beis_cost_category text NOT NULL
 ) ;
 
 -- Mark as soft dig all roads that are fully within soft ground
@@ -107,7 +143,8 @@ SELECT road.road_id, road.road_type, false,
     WHEN ST_CoveredBy(road.geom_4326, land.geom_4326)
     THEN road.geom_4326
     ELSE ST_Multi(ST_Intersection(road.geom_4326,land.geom_4326))
-    END AS geom_4326
+    END AS geom_4326,
+    road.hierarchy, road.form, 'soft'
 FROM {temp_schema}.road road
    INNER JOIN {temp_schema}.gridded_soft_ground land
    ON ST_Intersects(road.geom_4326, land.geom_4326);
@@ -120,13 +157,16 @@ SELECT road.road_id, road.road_type, true,
     WHEN ST_CoveredBy(road.geom_4326, land.geom_4326)
     THEN road.geom_4326
     ELSE ST_Multi(ST_Intersection(road.geom_4326,land.geom_4326))
-    END AS geom_4326
+    END AS geom_4326,
+    road.hierarchy, road.form, road.beis_cost_category
 FROM {temp_schema}.road road
    INNER JOIN {temp_schema}.gridded_hard_ground land
    ON ST_Intersects(road.geom_4326, land.geom_4326);
 
-INSERT INTO models.hard_soft_dig (road_id, job_id, soft_ground_buffer_metres, road_type, is_hard_dig, geom_4326)
-SELECT road_id, %(job_id)s, %(soft_ground_buffer_metres)s, road_type, is_hard_dig, (ST_Dump(geom_4326)).geom
+INSERT INTO models.hard_soft_dig (
+    road_id, job_id, soft_ground_buffer_metres, road_type, is_hard_dig, geom_4326, hierarchy, form, beis_cost_category)
+SELECT
+    road_id, %(job_id)s, %(soft_ground_buffer_metres)s, road_type, is_hard_dig, (ST_Dump(geom_4326)).geom, hierarchy, form, beis_cost_category
 FROM {temp_schema}.hard_soft_dig;
 
 CREATE OR REPLACE VIEW models.{model_view} AS
