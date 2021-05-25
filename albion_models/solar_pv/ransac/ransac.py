@@ -32,14 +32,18 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
                  random_state=None,
                  # RANSAC for LIDAR additions:
                  min_points_per_plane=8,
+                 min_points_per_plane_perc=0.008,
                  max_slope=None,
                  min_slope=None,
-                 min_convex_hull_ratio=0.6,
+                 min_convex_hull_ratio=0.65,
                  min_thinness_ratio=0.55,
                  max_area_for_thinness_test=25,
                  max_num_groups=20,
                  max_group_area_ratio_to_largest=0.02):
         """
+        :param min_points_per_plane_perc: min points per plane as a percentage of total
+        points that fall within the building bounds. Default 0.8% (0.008). This will
+        only affect larger buildings and stops it finding lots of tiny little sections.
 
         :param max_area_for_thinness_test: The thinness test will not be applied to
         roofs larger than this - useful as above a certain size even well-formed
@@ -64,6 +68,7 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
                          loss=loss,
                          random_state=random_state)
         self.min_points_per_plane = min_points_per_plane
+        self.min_points_per_plane_perc = min_points_per_plane_perc
         self.max_slope = max_slope
         self.min_slope = min_slope
         self.min_convex_hull_ratio = min_convex_hull_ratio
@@ -73,7 +78,11 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
         self.max_group_area_ratio_to_largest = max_group_area_ratio_to_largest
         self.sd = None
 
-    def fit(self, X, y, sample_weight=None, aspect=None):
+    def fit(self, X, y,
+            sample_weight=None,
+            aspect=None,
+            total_points_in_building: int = None,
+            include_group_checks: bool = True):
         """
         Extended implementation of RANSAC with additions for usage with LIDAR
         to detect roof planes.
@@ -105,7 +114,8 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
 
         * Reject planes where the area of the polygon formed by the inliers in the xy
         plane is significantly less than the area of the convex hull of that polygon.
-        This is intended to reject planes
+        This is intended to reject planes which have cut across a roof and so have a
+        u-shaped intersect with the actual points.
 
         * Reject planes where the `thinness ratio` is too low - i.e the shape of the
         polygon is very long and thin. The `thinness ratio` is defined as
@@ -314,11 +324,15 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
             # If the convex hull's area is significantly larger, it's likely to be a
             # bad plane that cuts through the roof at an angle
             if not _plane_morphology_ok(X_inlier_subset, min_X,
-                                        self.min_convex_hull_ratio,
-                                        self.min_thinness_ratio,
-                                        self.max_area_for_thinness_test,
-                                        self.max_num_groups,
-                                        self.max_group_area_ratio_to_largest):
+                                        min_convex_hull_ratio=self.min_convex_hull_ratio,
+                                        min_thinness_ratio=self.min_thinness_ratio,
+                                        max_area_for_thinness_test=self.max_area_for_thinness_test,
+                                        min_points_per_plane=self.min_points_per_plane,
+                                        min_points_per_plane_perc=self.min_points_per_plane_perc,
+                                        total_points_in_building=total_points_in_building,
+                                        max_num_groups=self.max_num_groups,
+                                        max_group_area_ratio_to_largest=self.max_group_area_ratio_to_largest,
+                                        include_group_checks=include_group_checks):
                 bad_samples.add(tuple(subset_idxs))
                 continue
 
@@ -411,8 +425,12 @@ def _plane_morphology_ok(X_inlier_subset, min_X,
                          min_convex_hull_ratio: float,
                          min_thinness_ratio: float,
                          max_area_for_thinness_test: int,
+                         min_points_per_plane: int,
+                         min_points_per_plane_perc: float,
+                         total_points_in_building: int,
                          max_num_groups: int,
-                         max_group_area_ratio_to_largest: int) -> int:
+                         max_group_area_ratio_to_largest: float,
+                         include_group_checks: bool) -> int:
     normed_inliers = (X_inlier_subset - min_X).astype(int)
 
     image = np.zeros((int(np.amax(normed_inliers[:, 0])) + 1,
@@ -420,25 +438,33 @@ def _plane_morphology_ok(X_inlier_subset, min_X,
     image[normed_inliers[:, 0], normed_inliers[:, 1]] = 1
 
     groups, num_groups = measure.label(image, connectivity=1, return_num=True)
-    if num_groups > 1:
+    areas = _group_areas(groups)
+    largest = max(areas, key=areas.get)
+    roof_plane_area = areas[largest]
+    if roof_plane_area < min_points_per_plane or roof_plane_area < (total_points_in_building * min_points_per_plane_perc):
+        return False
+    only_largest = groups == largest
+
+    # The `include_group_checks` flag allows disabling these 2 checks, as they
+    # were causing issues for buildings with many unconnected roof sections
+    # on the same plane:
+    if num_groups > 1 and include_group_checks:
         # Allow a small amount of small outliers:
         group_areas = _group_areas(groups)
         if len(group_areas) > max_num_groups:
             return False
-        largest = max(group_areas.values())
-        for area in group_areas.values():
-            if area != largest and area / largest > max_group_area_ratio_to_largest:
+        for groupid, area in group_areas.items():
+            if groupid != largest and area / roof_plane_area > max_group_area_ratio_to_largest:
                 return False
 
-    roof_plane_area = np.count_nonzero(groups)
-    convex_hull = morphology.convex_hull_image(groups)
+    convex_hull = morphology.convex_hull_image(only_largest)
     convex_hull_area = np.count_nonzero(convex_hull)
     cv_hull_ratio = roof_plane_area / convex_hull_area
     if cv_hull_ratio < min_convex_hull_ratio:
         return False
 
     if roof_plane_area <= max_area_for_thinness_test:
-        perimeter = perimeter_crofton(groups, directions=4)
+        perimeter = perimeter_crofton(only_largest, directions=4)
         thinness_ratio = (4 * np.pi * roof_plane_area) / (perimeter * perimeter)
 
         if thinness_ratio < min_thinness_ratio:

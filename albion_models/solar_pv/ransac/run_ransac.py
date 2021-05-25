@@ -53,30 +53,41 @@ def _handle_building_page(pg_uri: str, job_id: int, page: int, page_size: int):
 
     planes = []
     for toid, building in by_toid.items():
-        planes.extend(_ransac_building(building, toid))
+        found = _ransac_building(building, toid)
+        if len(found) > 0:
+            planes.extend(found)
+        elif len(building) > 1000:
+            # Retry with relaxed constraints around group checks and with a higher
+            # `max_trials` for larger buildings where we care more:
+            found = _ransac_building(building, toid, max_trials=3000, include_group_checks=False)
+            planes.extend(found)
 
     _save_planes(pg_uri, job_id, planes)
     print(f"Page {page} of buildings complete")
 
 
-def _ransac_building(pixels_in_building: List[dict], toid: str) -> List[dict]:
+def _ransac_building(pixels_in_building: List[dict], toid: str, max_trials: int = 1000, include_group_checks: bool = True) -> List[dict]:
     xyz = np.array([[pixel["easting"], pixel["northing"], pixel["elevation"]] for pixel in pixels_in_building])
     aspect = np.array([pixel["aspect"] for pixel in pixels_in_building])
     pixel_ids = np.array([pixel["pixel_id"] for pixel in pixels_in_building])
 
     planes = []
     min_points_per_plane = 8
+    total_points_in_building = len(aspect)
 
     while np.count_nonzero(xyz) // 3 > min_points_per_plane:
         XY = xyz[:, :2]
         Z = xyz[:, 2]
         try:
             ransac = RANSACRegressorForLIDAR(residual_threshold=0.25,
-                                             max_trials=1000,
+                                             max_trials=max_trials,
                                              max_slope=75,
                                              min_slope=0,
                                              min_points_per_plane=min_points_per_plane)
-            ransac.fit(XY, Z, aspect=aspect)
+            ransac.fit(XY, Z,
+                       aspect=aspect,
+                       total_points_in_building=total_points_in_building,
+                       include_group_checks=include_group_checks)
             inlier_mask = ransac.inlier_mask_
             outlier_mask = np.logical_not(inlier_mask)
             a, b = ransac.estimator_.coef_
@@ -90,6 +101,7 @@ def _ransac_building(pixels_in_building: List[dict], toid: str) -> List[dict]:
                 "slope": _slope(a, b),
                 "aspect": _aspect(a, b),
                 "inliers": pixel_ids[inlier_mask],
+                "sd": ransac.sd,
             })
 
             xyz = xyz[outlier_mask]
@@ -160,13 +172,13 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[dict]):
     try:
         with pg_conn.cursor() as cursor:
             plane_ids = psycopg2.extras.execute_values(cursor, SQL("""
-                INSERT INTO {roof_planes} (toid, x_coef, y_coef, intercept, slope, aspect)
+                INSERT INTO {roof_planes} (toid, x_coef, y_coef, intercept, slope, aspect, sd)
                 VALUES %s
                 RETURNING roof_plane_id;
             """).format(
                 roof_planes=Identifier(tables.schema(job_id), tables.ROOF_PLANE_TABLE),
             ), argslist=planes, fetch=True,
-               template="(%(toid)s, %(x_coef)s, %(y_coef)s, %(intercept)s, %(slope)s, %(aspect)s)")
+               template="(%(toid)s, %(x_coef)s, %(y_coef)s, %(intercept)s, %(slope)s, %(aspect)s, %(sd)s)")
 
             pixel_plane_data = []
             for i in range(0, len(plane_ids)):

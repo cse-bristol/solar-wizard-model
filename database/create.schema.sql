@@ -33,5 +33,6 @@ CREATE TABLE IF NOT EXISTS {roof_planes} (
     y_coef double precision,
     intercept double precision,
     slope double precision,
-    aspect double precision
+    aspect double precision,
+    sd double precision
 );
