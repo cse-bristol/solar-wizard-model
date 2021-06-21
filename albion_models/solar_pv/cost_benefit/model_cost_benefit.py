@@ -162,6 +162,7 @@ def _process_installations(installations: List[dict],
         installation["job_id"],
         installation["toid"],
         installation["installation_job_id"],
+        electricity_kwh_cost,
         _npv(
             period_years=period_years,
             discount_rate=discount_rate,
@@ -181,9 +182,10 @@ def _update_npv_irr(pg_conn, installations: List[tuple]):
         psycopg2.extras.execute_values(cursor, SQL("""
             UPDATE models.pv_cost_benefit cb
             SET npv = data.npv, irr = data.irr 
-            FROM (VALUES %s) AS data (job_id, toid, installation_job_id, npv, irr) 
+            FROM (VALUES %s) AS data (job_id, toid, installation_job_id, electricity_kwh_cost, npv, irr) 
             WHERE cb.job_id = data.job_id
             AND cb.toid = data.toid 
+            AND cb.electricity_kwh_cost = data.electricity_kwh_cost 
             AND cb.installation_job_id = data.installation_job_id
         """), argslist=installations)
         pg_conn.commit()
