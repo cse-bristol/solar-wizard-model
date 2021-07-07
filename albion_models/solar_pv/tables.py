@@ -6,6 +6,9 @@ PIXEL_HORIZON_TABLE = 'pixel_horizons'
 ROOF_HORIZON_TABLE = 'roof_horizons'
 """Table to store the horizon data joined with the polygons which represent planar areas of roof"""
 
+PANEL_HORIZON_TABLE = 'panel_horizons'
+"""Horizon data joined with polygons representing arrays of PV panels"""
+
 SOLAR_PV_TABLE = 'solar_pv'
 """Table to store the raw solar PV data received from PV-GIS"""
 

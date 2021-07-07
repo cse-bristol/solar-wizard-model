@@ -22,7 +22,6 @@ def model_solar_pv(pg_uri: str,
                    horizon_slices: int,
                    max_roof_slope_degrees: int,
                    min_roof_area_m: int,
-                   roof_area_percent_usable: int,
                    min_roof_degrees_from_north: int,
                    flat_roof_degrees: int,
                    peak_power_per_m2: float,
@@ -36,7 +35,6 @@ def model_solar_pv(pg_uri: str,
         horizon_slices=horizon_slices,
         max_roof_slope_degrees=max_roof_slope_degrees,
         min_roof_area_m=min_roof_area_m,
-        roof_area_percent_usable=roof_area_percent_usable,
         min_roof_degrees_from_north=min_roof_degrees_from_north,
         flat_roof_degrees=flat_roof_degrees,
         peak_power_per_m2=peak_power_per_m2,
@@ -78,7 +76,6 @@ def model_solar_pv(pg_uri: str,
         job_id=job_id,
         peak_power_per_m2=peak_power_per_m2,
         pv_tech=pv_tech,
-        roof_area_percent_usable=roof_area_percent_usable,
         solar_dir=solar_dir)
 
 
@@ -101,7 +98,6 @@ def _validate_params(lidar_paths: List[str],
                      horizon_slices: int,
                      max_roof_slope_degrees: int,
                      min_roof_area_m: int,
-                     roof_area_percent_usable: int,
                      min_roof_degrees_from_north: int,
                      flat_roof_degrees: int,
                      peak_power_per_m2: float,
@@ -118,8 +114,6 @@ def _validate_params(lidar_paths: List[str],
         raise ValueError(f"max_avg_southerly_horizon_degrees must be between 0 and 90, was {max_avg_southerly_horizon_degrees}")
     if min_roof_area_m < 0:
         raise ValueError(f"min_roof_area_m must be greater than or equal to 0, was {min_roof_area_m}")
-    if roof_area_percent_usable < 0 or roof_area_percent_usable > 100:
-        raise ValueError(f"roof_area_percent_usable must be between 0 and 100, was {roof_area_percent_usable}")
     if min_roof_degrees_from_north < 0 or min_roof_degrees_from_north > 180:
         raise ValueError(f"min_roof_degrees_from_north must be between 0 and 180, was {min_roof_degrees_from_north}")
     if flat_roof_degrees < 0 or flat_roof_degrees > 90:

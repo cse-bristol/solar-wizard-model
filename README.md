@@ -34,7 +34,6 @@ Another key component of the model is a [patched version](https://github.com/cse
 * `horizon-slices`: Horizon compass slices (default 16)
 * `max-roof-slope-degrees`: Maximum roof slope for PV (default 80)
 * `min-roof-area-m`: Minimum roof area m² for PV installation (default 10)
-* `roof_area_percent_usable`: Percentage of a roof plane usable for mounting panels (default 75)
 * `min-roof-degrees-from-north`: Minimum degree distance from North for PV (default 45)
 * `flat-roof-degrees`: Angle (degrees) to mount panels on flat roofs (default 10)
 * `peak-power-per-m2`: Nominal peak power (kWp) per m² of roof (default 0.120)
@@ -51,9 +50,7 @@ Increasing the `horizon-search-radius` or `horizon-slices` might slow things dow
   * Installations are often limited by roof strength rather than available area.
   * Sometimes more panels can be fit on the roof if they go in parallel with the building shape, rather than facing due South.
 
-   The current approach treats them as south-facing and has an input parameter for the angle to mount them at (default 10), and the usable area of roof is controlled by the same parameter that controls the usable area of sloped roofs: `roof_area_percent_usable` (default 75 based on the table [here](https://www.thegreenage.co.uk/how-many-solar-panels-can-i-fit-on-my-roof/), could definitely be done better - see next point). Really the usable area should decrease as the angle increases, but the exact amount would depend on how many rows the panels are mounted in.
-  
-* It currently assumes that panels can fill `roof_area_percent_usable` of each roof plane - However, the polygonisation process very rarely forms `n` rectangles for the `n` roof slopes of the building - things like dormer windows, uneven areas, chimneys and so on all show up, and the polygons are forced to follow the 1mx1m (or 2mx2m) boundaries of the lidar pixels, which align with the cardinal directions, while most houses do not. So it's hard to say whether statistics about how much of a roof can be used for panels also apply to the question about how much of one of these roof planes can be used for panels. 
+   The current approach treats them as south-facing and has an input parameter for the angle to mount them at (default 10). The usable area decreases as the angle increases, as the space in between the rows increases.
   
 * Sometimes an area we want to model might be interested in putting some PV installations in a field - so there needs to be a way of adding arbitrary extra polygons to the mask so that horizon and irradiation values are calculated for those area.
 

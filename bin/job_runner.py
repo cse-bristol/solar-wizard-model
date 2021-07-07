@@ -114,7 +114,6 @@ def _handle_job(pg_conn, job: dict) -> bool:
             flat_roof_degrees = params['flat_roof_degrees']
             peak_power_per_m2 = params['peak_power_per_m2']
             pv_tech = params['pv_tech']
-            roof_area_percent_usable = params['roof_area_percent_usable']
             max_avg_southerly_horizon_degrees = params['max_avg_southerly_horizon_degrees']
             model_solar_pv(
                 pg_uri=os.environ.get("PG_URI"),
@@ -125,7 +124,6 @@ def _handle_job(pg_conn, job: dict) -> bool:
                 horizon_slices=horizon_slices,
                 max_roof_slope_degrees=max_roof_slope_degrees,
                 min_roof_area_m=min_roof_area_m,
-                roof_area_percent_usable=roof_area_percent_usable,
                 min_roof_degrees_from_north=min_roof_degrees_from_north,
                 flat_roof_degrees=flat_roof_degrees,
                 peak_power_per_m2=peak_power_per_m2,

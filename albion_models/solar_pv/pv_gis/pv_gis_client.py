@@ -34,18 +34,18 @@ def init_process():
     _session.mount('https://', adapter)
 
 
-def pv_gis(pg_uri: str, job_id: int, peak_power_per_m2: float, pv_tech: str, roof_area_percent_usable: int, solar_dir: str):
+def pv_gis(pg_uri: str, job_id: int, peak_power_per_m2: float, pv_tech: str, solar_dir: str):
     solar_pv_csv = join(solar_dir, 'solar_pv.csv')
     pg_conn = connect(pg_uri, cursor_factory=psycopg2.extras.DictCursor)
     try:
         with pg_conn.cursor() as cursor:
-            cursor.execute(SQL("SELECT * FROM {roof_horizons} WHERE usable = true").format(
-                roof_horizons=Identifier(tables.schema(job_id), tables.ROOF_HORIZON_TABLE))
+            cursor.execute(SQL("SELECT * FROM {panel_horizons} WHERE usable = true").format(
+                panel_horizons=Identifier(tables.schema(job_id), tables.PANEL_HORIZON_TABLE))
             )
             rows = cursor.fetchall()
             pg_conn.commit()
             logging.info(f"{len(rows)} queries to send:")
-            _solar_pv_estimate(rows, peak_power_per_m2, pv_tech, roof_area_percent_usable, solar_pv_csv)
+            _solar_pv_estimate(rows, peak_power_per_m2, pv_tech, solar_pv_csv)
     finally:
         pg_conn.close()
 
@@ -60,7 +60,7 @@ def _write_results_to_db(pg_uri: str, job_id: int, csv_file: str):
         sql_script_with_bindings(
             pg_conn, 'post-load.solar-pv.sql', {"job_id": job_id},
             solar_pv=Identifier(tables.schema(job_id), tables.SOLAR_PV_TABLE),
-            roof_horizons=Identifier(tables.schema(job_id), tables.ROOF_HORIZON_TABLE),
+            panel_horizons=Identifier(tables.schema(job_id), tables.PANEL_HORIZON_TABLE),
             job_view=Identifier(f"solar_pv_job_{job_id}")
         )
     finally:
@@ -70,7 +70,6 @@ def _write_results_to_db(pg_uri: str, job_id: int, csv_file: str):
 def _solar_pv_estimate(iterable: Iterable[dict],
                        peak_power_per_m2: float,
                        pv_tech: str,
-                       roof_area_percent_usable: int,
                        out_filename: str,
                        log_frequency: int = 250):
     with open(out_filename, 'w') as out, mp.Pool(_WORKERS, initializer=init_process) as pool:
@@ -80,8 +79,7 @@ def _solar_pv_estimate(iterable: Iterable[dict],
 
         wrapped_iterable = (dict(row,
                                  peak_power_per_m2=peak_power_per_m2,
-                                 pv_tech=pv_tech,
-                                 roof_area_percent_usable=roof_area_percent_usable) for row in iterable)
+                                 pv_tech=pv_tech) for row in iterable)
         for res in pool.imap_unordered(_handle_row, wrapped_iterable, chunksize=10):
             if res is not None:
                 if csv_writer is None:
@@ -227,9 +225,7 @@ def _row_to_pv_gis_params(row: dict) -> tuple:
     # aspect field in patched SAGA csv output: in rads clockwise from north
     aspect = row['aspect'] - 180.0
 
-    roof_area_percent_usable = int(row['roof_area_percent_usable']) / 100
     area = float(row['area'])
-    area *= roof_area_percent_usable
     peakpower = float(row['peak_power_per_m2']) * area
 
     loss = 14

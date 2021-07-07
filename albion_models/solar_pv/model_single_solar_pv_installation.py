@@ -16,7 +16,6 @@ def model_single_solar_pv_installation(pg_uri: str,
                                        lidar_paths: List[str],
                                        horizon_search_radius: int,
                                        horizon_slices: int,
-                                       roof_area_percent_usable: int,
                                        flat_roof_degrees: int,
                                        peak_power_per_m2: float,
                                        pv_tech: str,
@@ -33,7 +32,6 @@ def model_single_solar_pv_installation(pg_uri: str,
         lidar_paths,
         horizon_search_radius,
         horizon_slices,
-        roof_area_percent_usable,
         flat_roof_degrees,
         peak_power_per_m2)
 
@@ -61,14 +59,12 @@ def model_single_solar_pv_installation(pg_uri: str,
         job_id=job_id,
         peak_power_per_m2=peak_power_per_m2,
         pv_tech=pv_tech,
-        roof_area_percent_usable=roof_area_percent_usable,
         solar_dir=solar_dir)
 
 
 def _validate_params(lidar_paths: List[str],
                      horizon_search_radius: int,
                      horizon_slices: int,
-                     roof_area_percent_usable: int,
                      flat_roof_degrees: int,
                      peak_power_per_m2: float):
     if not lidar_paths or len(lidar_paths) == 0:
@@ -79,9 +75,6 @@ def _validate_params(lidar_paths: List[str],
     if horizon_slices > 64 or horizon_slices < 8:
         raise ValueError(
             f"horizon slices must be between 8 and 64, was {horizon_slices}")
-    if roof_area_percent_usable < 0 or roof_area_percent_usable > 100:
-        raise ValueError(
-            f"roof_area_percent_usable must be between 0 and 100, was {roof_area_percent_usable}")
     if flat_roof_degrees < 0 or flat_roof_degrees > 90:
         raise ValueError(
             f"flat_roof_degrees must be between 0 and 90, was {flat_roof_degrees}")

@@ -119,7 +119,6 @@ def model(geojson: dict, project_name: str, params: dict):
         flat_roof_degrees = params.get('flat_roof_degrees', 10)
         peak_power_per_m2 = params.get('peak_power_per_m2', 0.120)
         pv_tech = params.get('pv_tech', 'crystSi')
-        roof_area_percent_usable = params.get('roof_area_percent_usable', 100)
         aggregate_fn = params['aggregate_fn']
         model_single_solar_pv_installation(
             pg_uri=os.environ.get("PG_URI"),
@@ -128,7 +127,6 @@ def model(geojson: dict, project_name: str, params: dict):
             lidar_paths=lidar_tiff_paths,
             horizon_search_radius=horizon_search_radius,
             horizon_slices=horizon_slices,
-            roof_area_percent_usable=roof_area_percent_usable,
             flat_roof_degrees=flat_roof_degrees,
             peak_power_per_m2=peak_power_per_m2,
             pv_tech=pv_tech,

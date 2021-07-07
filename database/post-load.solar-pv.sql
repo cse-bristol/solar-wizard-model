@@ -97,7 +97,7 @@ SELECT
     pv.toid,
     pv.roof_plane_id,
     pv.peak_power,
-    ST_SetSrid(ST_Transform(h.roof_geom_27700, 4326), 4326)::geometry(multipolygon, 4326) AS roof_geom_4326,
+    ST_SetSrid(ST_Transform(h.panel_geom_27700, 4326), 4326)::geometry(multipolygon, 4326) AS roof_geom_4326,
     h.slope,
     h.aspect,
     h.sky_view_factor,
@@ -112,7 +112,7 @@ SELECT
     h.intercept,
     h.is_flat
 FROM {solar_pv} pv
-LEFT JOIN {roof_horizons} h ON pv.roof_plane_id = h.roof_plane_id;
+LEFT JOIN {panel_horizons} h ON pv.roof_plane_id = h.roof_plane_id;
 
 DROP TABLE {solar_pv};
 

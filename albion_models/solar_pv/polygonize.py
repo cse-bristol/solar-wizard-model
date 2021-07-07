@@ -17,7 +17,7 @@ def aggregate_horizons(pg_uri: str,
                        resolution_metres: float):
     schema = tables.schema(job_id)
 
-    if count(pg_uri, schema, tables.ROOF_HORIZON_TABLE) > 0:
+    if count(pg_uri, schema, tables.PANEL_HORIZON_TABLE) > 0:
         logging.info("Not aggregating horizon info, horizons already aggregated.")
         return
 
@@ -40,6 +40,7 @@ def aggregate_horizons(pg_uri: str,
             pixel_horizons=Identifier(schema, tables.PIXEL_HORIZON_TABLE),
             roof_planes=Identifier(schema, tables.ROOF_PLANE_TABLE),
             roof_horizons=Identifier(schema, tables.ROOF_HORIZON_TABLE),
+            panel_horizons=Identifier(schema, tables.PANEL_HORIZON_TABLE),
             buildings=Identifier(schema, tables.BUILDINGS_TABLE),
             aggregated_horizon_cols=SQL(aggregated_horizon_cols),
             avg_southerly_horizon_rads=SQL(_avg_southerly_horizon_rads(horizon_slices)),
