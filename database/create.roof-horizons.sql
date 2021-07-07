@@ -131,7 +131,7 @@ COMMIT;
 CREATE TABLE {panel_horizons} AS
 WITH panels AS (
     SELECT
-        models.pv_grid(roof_geom_27700, 0.9, 1.6, aspect, slope, is_flat) AS panel_geom_27700,
+        models.pv_grid(roof_geom_27700, %(panel_width_m)s, %(panel_height_m)s, aspect, slope, is_flat) AS panel_geom_27700,
         roof_plane_id
     FROM {roof_horizons}
 )

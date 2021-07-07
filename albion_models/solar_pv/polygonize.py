@@ -14,6 +14,8 @@ def aggregate_horizons(pg_uri: str,
                        min_roof_degrees_from_north: int,
                        flat_roof_degrees: int,
                        max_avg_southerly_horizon_degrees: int,
+                       panel_width_m: float,
+                       panel_height_m: float,
                        resolution_metres: float):
     schema = tables.schema(job_id)
 
@@ -34,6 +36,8 @@ def aggregate_horizons(pg_uri: str,
                 "min_roof_degrees_from_north": min_roof_degrees_from_north,
                 "flat_roof_degrees": flat_roof_degrees,
                 "max_avg_southerly_horizon_degrees": max_avg_southerly_horizon_degrees,
+                "panel_width_m": panel_width_m,
+                "panel_height_m": panel_height_m,
                 "resolution": resolution_metres,
             },
             schema=Identifier(schema),
