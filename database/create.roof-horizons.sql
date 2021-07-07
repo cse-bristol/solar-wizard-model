@@ -70,29 +70,6 @@ UPDATE {roof_horizons} SET
 COMMIT;
 
 --
--- Add 3D version of roof plane:
---
-ALTER TABLE {roof_horizons} ADD COLUMN roof_geom_27700_3d geometry(MultiPolygonZ, 27700);
-
-UPDATE {roof_horizons} SET roof_geom_27700_3d = ST_Multi(ST_Translate(
-    ST_RotateY(
-        ST_RotateX(
-            ST_Translate(
-                ST_Force3d(ST_Scale(
-                    roof_geom_27700,
-                    ST_MakePoint(sqrt((x_coef * x_coef) + 1), sqrt((y_coef * y_coef) + 1)),
-                    ST_Centroid(roof_geom_27700))),
-                -easting, -northing),
-            atan(y_coef)),
-        atan(x_coef)),
-    easting,
-    northing,
-    (easting * x_coef) + (northing * y_coef) + intercept))::geometry(MultiPolygonZ, 27700);
-
-CREATE INDEX ON {roof_horizons} USING GIST (roof_geom_27700_3d);
-COMMIT;
-
---
 -- Add horizon standard deviation info:
 --
 ALTER TABLE {roof_horizons} ADD COLUMN horizon_sd double precision;
@@ -126,6 +103,32 @@ WHERE is_flat;
 COMMIT;
 
 --
+-- Fix up angles - changes any roof planes where the aspect is almost aligned
+-- with the angles of the building to be fully aligned. Treats all buildings
+-- as rectangles.
+--
+WITH azimuth AS (
+    SELECT
+    toid,
+    degrees(st_azimuth(st_pointN(st_boundary(ST_OrientedEnvelope(geom_27700)), 1),
+                       st_pointN(st_boundary(ST_OrientedEnvelope(geom_27700)), 2))) AS degs
+    FROM {buildings}
+),
+all_angles AS (
+    SELECT toid, degs FROM azimuth
+    UNION
+    SELECT toid, (degs + 90)::numeric %% 360::numeric FROM azimuth
+    UNION
+    SELECT toid, (degs + 180)::numeric %% 360::numeric FROM azimuth
+    UNION
+    SELECT toid, (degs + 270)::numeric %% 360::numeric FROM azimuth
+)
+UPDATE {roof_horizons} h SET aspect = a.degs
+FROM all_angles a
+WHERE h.toid = a.toid AND abs(a.degs - aspect) < 5 AND NOT is_flat AND usable;
+COMMIT;
+
+--
 -- PV panelling:
 --
 CREATE TABLE {panel_horizons} AS
@@ -147,3 +150,26 @@ ALTER TABLE {panel_horizons} ADD PRIMARY KEY (roof_plane_id);
 
 UPDATE {panel_horizons} p SET usable = false
 WHERE usable = true AND area < %(min_roof_area_m)s;
+
+--
+-- Add 3D version of panels:
+--
+ALTER TABLE {panel_horizons} ADD COLUMN panel_geom_27700_3d geometry(MultiPolygonZ, 27700);
+
+UPDATE {panel_horizons} SET panel_geom_27700_3d = ST_Multi(ST_Translate(
+    ST_RotateY(
+        ST_RotateX(
+            ST_Translate(
+                ST_Force3d(ST_Scale(
+                    panel_geom_27700,
+                    ST_MakePoint(sqrt((x_coef * x_coef) + 1), sqrt((y_coef * y_coef) + 1)),
+                    ST_Centroid(panel_geom_27700))),
+                -easting, -northing),
+            atan(y_coef)),
+        atan(x_coef)),
+    easting,
+    northing,
+    (easting * x_coef) + (northing * y_coef) + intercept))::geometry(MultiPolygonZ, 27700);
+
+CREATE INDEX ON {panel_horizons} USING GIST (panel_geom_27700_3d);
+COMMIT;
