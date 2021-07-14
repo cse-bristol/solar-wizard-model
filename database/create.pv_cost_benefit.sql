@@ -36,7 +36,7 @@ SELECT
         ELSE
             ((SUM(pv.peak_power) OVER w * %(large_inst_cost_per_kwp)s) + %(large_inst_fixed_cost)s) * (1 + %(large_inst_vat)s)
         END AS installation_cost,
-    ST_Multi(ST_Union(pv.roof_geom_4326) OVER w) AS geom_4326
+    ST_Multi(ST_CollectionHomogenize(ST_Collect(pv.roof_geom_4326) OVER w)) AS geom_4326
 FROM models.solar_pv pv
 LEFT JOIN models.job_queue jq ON pv.job_id = jq.job_id
 WHERE pv.job_id = %(solar_pv_job_id)s
