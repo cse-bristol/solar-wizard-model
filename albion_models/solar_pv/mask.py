@@ -5,7 +5,7 @@ from psycopg2.sql import SQL, Identifier, Literal
 
 import albion_models.solar_pv.tables as tables
 from albion_models.db_funcs import connect
-from albion_models.solar_pv import gdal_helpers
+from albion_models import gdal_helpers
 
 
 def create_buildings_mask(job_id: int,

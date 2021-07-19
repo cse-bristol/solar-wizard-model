@@ -1,20 +1,19 @@
 import logging
-import os
 import subprocess
 from os.path import join
-from typing import List
 
 from psycopg2.sql import SQL, Identifier, Literal
 
 import albion_models.solar_pv.tables as tables
 from albion_models.db_funcs import sql_script, copy_csv, connect, count
-from albion_models.solar_pv import mask, gdal_helpers
+from albion_models.solar_pv import mask
+from albion_models import gdal_helpers
 
 
 def find_horizons(pg_uri: str,
                   job_id: int,
                   solar_dir: str,
-                  lidar_paths: List[str],
+                  lidar_vrt_file: str,
                   horizon_search_radius: int,
                   horizon_slices: int,
                   masking_strategy: str,
@@ -27,13 +26,9 @@ def find_horizons(pg_uri: str,
 
     Returns the resolution of the LIDAR, or the override_res value if passed.
     """
-
-    vrt_file = join(solar_dir, 'tiles.vrt')
-    gdal_helpers.create_vrt(lidar_paths, vrt_file)
-
-    srid = gdal_helpers.get_srid(vrt_file, fallback=27700)
+    srid = gdal_helpers.get_srid(lidar_vrt_file, fallback=27700)
     if override_res is None:
-        res = gdal_helpers.get_res(vrt_file)
+        res = gdal_helpers.get_res(lidar_vrt_file)
     else:
         res = override_res
 
@@ -41,7 +36,7 @@ def find_horizons(pg_uri: str,
         logging.info("Not detecting horizon, horizon data already loaded.")
         return res
 
-    unit_dims, unit = gdal_helpers.get_srs_units(vrt_file)
+    unit_dims, unit = gdal_helpers.get_srs_units(lidar_vrt_file)
     if unit_dims != 1.0 or unit != 'metre':
         # If this ever needs changing - the `resolution_metres` param of `aggregate_horizons()`
         # needs a resolution per metre rather than per whatever the unit of the SRS is -
@@ -60,10 +55,10 @@ def find_horizons(pg_uri: str,
 
     logging.info("Cropping lidar to mask dimensions...")
     if masking_strategy == 'bounds':
-        gdal_helpers.crop_or_expand(mask_file, vrt_file, mask_file, adjust_resolution=False)
+        gdal_helpers.crop_or_expand(mask_file, lidar_vrt_file, mask_file, adjust_resolution=False)
 
     cropped_lidar = join(solar_dir, 'cropped_lidar.tif')
-    gdal_helpers.crop_or_expand(vrt_file, mask_file, cropped_lidar, adjust_resolution=True)
+    gdal_helpers.crop_or_expand(lidar_vrt_file, mask_file, cropped_lidar, adjust_resolution=True)
 
     logging.info("Using 320-albion-saga-gis to find horizons...")
     horizons_csv = join(solar_dir, 'horizons.csv')

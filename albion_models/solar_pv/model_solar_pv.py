@@ -1,7 +1,6 @@
 import logging
 import os
 from os.path import join
-from typing import List
 
 import psycopg2.extras
 from psycopg2.sql import Identifier
@@ -17,7 +16,7 @@ from albion_models.solar_pv.ransac.run_ransac import run_ransac
 def model_solar_pv(pg_uri: str,
                    root_solar_dir: str,
                    job_id: int,
-                   lidar_paths: List[str],
+                   lidar_vrt_file: str,
                    horizon_search_radius: int,
                    horizon_slices: int,
                    max_roof_slope_degrees: int,
@@ -32,7 +31,7 @@ def model_solar_pv(pg_uri: str,
 
     pg_uri = process_pg_uri(pg_uri)
     _validate_params(
-        lidar_paths=lidar_paths,
+        lidar_vrt_file=lidar_vrt_file,
         horizon_search_radius=horizon_search_radius,
         horizon_slices=horizon_slices,
         max_roof_slope_degrees=max_roof_slope_degrees,
@@ -54,7 +53,7 @@ def model_solar_pv(pg_uri: str,
         pg_uri=pg_uri,
         job_id=job_id,
         solar_dir=solar_dir,
-        lidar_paths=lidar_paths,
+        lidar_vrt_file=lidar_vrt_file,
         horizon_search_radius=horizon_search_radius,
         horizon_slices=horizon_slices,
         masking_strategy='building')
@@ -99,7 +98,7 @@ def _init_schema(pg_uri: str, job_id: int):
         pg_conn.close()
 
 
-def _validate_params(lidar_paths: List[str],
+def _validate_params(lidar_vrt_file: str,
                      horizon_search_radius: int,
                      horizon_slices: int,
                      max_roof_slope_degrees: int,
@@ -110,7 +109,7 @@ def _validate_params(lidar_paths: List[str],
                      max_avg_southerly_horizon_degrees: int,
                      panel_width_m: float,
                      panel_height_m: float):
-    if not lidar_paths or len(lidar_paths) == 0:
+    if not lidar_vrt_file or not os.path.exists(lidar_vrt_file):
         raise ValueError(f"No LIDAR tiles available, cannot run solar PV modelling.")
     if horizon_search_radius < 0 or horizon_search_radius > 10000:
         raise ValueError(f"horizon search radius must be between 0 and 10000, was {horizon_search_radius}")

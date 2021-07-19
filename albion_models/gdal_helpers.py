@@ -1,4 +1,6 @@
+import json
 import logging
+import os
 import subprocess
 from typing import List, Tuple
 
@@ -7,7 +9,25 @@ import gdal
 
 def create_vrt(tiles: List[str], vrt_file: str):
     logging.info("Creating vrt...")
-    _run(f"gdalbuildvrt -resolution highest {vrt_file} {' '.join(tiles)}")
+    if tiles and len(tiles) > 0:
+        run(f"gdalbuildvrt -resolution highest {vrt_file} {' '.join(tiles)}")
+    else:
+        logging.warning("No tiles passed, not creating vrt")
+
+
+def files_in_vrt(vrt_file: str) -> List[str]:
+    """Given a .vrt file, return a list of the files it references."""
+    if not os.path.exists(vrt_file):
+        logging.warning(f"Vrt {vrt_file} does not exist, not extracting file list")
+        return []
+
+    res = subprocess.run(f"gdalinfo -json {vrt_file}",
+                         capture_output=True, text=True, shell=True)
+    if res.returncode != 0:
+        print(res.stderr)
+        raise ValueError(res.stderr)
+    json_out = json.loads(res.stdout)
+    return [f for f in json_out['files'] if f != os.path.basename(f)]
 
 
 def get_res(filename: str) -> float:
@@ -92,11 +112,11 @@ def crop_or_expand(file_to_crop: str,
 
 
 def aspect(cropped_lidar: str, aspect_file: str):
-    _run(f"gdaldem aspect {cropped_lidar} {aspect_file} -of GTiff -b 1 -zero_for_flat")
+    run(f"gdaldem aspect {cropped_lidar} {aspect_file} -of GTiff -b 1 -zero_for_flat")
 
 
-def _run(command: str):
-    res = subprocess.run(command, capture_output=True, text=True, shell=True)
+def run(command: str):
+    res = subprocess.run(command.replace("\n", " "), capture_output=True, text=True, shell=True)
     print(res.stdout)
     print(res.stderr)
     if res.returncode != 0:

@@ -8,11 +8,14 @@ from typing import Optional, List
 import psycopg2
 import psycopg2.extras
 
+from albion_models import gdal_helpers
 from albion_models.lidar.get_lidar import get_all_lidar
+from albion_models.lidar.lidar_coverage import calculate_lidar_coverage
 from albion_models.hard_soft_dig.model_hard_soft_dig import model_hard_soft_dig
 from albion_models.heat_demand.model_heat_demand import model_heat_demand
 from albion_models.solar_pv.model_solar_pv import model_solar_pv
 from albion_models.solar_pv.cost_benefit.model_cost_benefit import model_cost_benefit
+from albion_models.db_funcs import process_pg_uri
 
 
 def main_loop():
@@ -91,6 +94,7 @@ def _handle_job(pg_conn, job: dict) -> bool:
     project: str = job['project']
     bounds: str = job['bounds']
     params: dict = job['params']
+    pg_uri = process_pg_uri(os.environ.get("PG_URI"))
     logging.info(f"Handling job {job_id}, project {project}")
 
     if job['soft_dig']:
@@ -100,10 +104,14 @@ def _handle_job(pg_conn, job: dict) -> bool:
         )
 
     if job['heat_demand'] or job['solar_pv'] or job['lidar']:
-        lidar_tiff_paths = get_all_lidar(pg_conn, job_id, os.environ.get("LIDAR_DIR"))
+        lidar_dir = os.environ.get("LIDAR_DIR")
+        lidar_vrt_file = get_all_lidar(pg_conn, job_id, lidar_dir)
 
+        if job['lidar']:
+            calculate_lidar_coverage(job_id, lidar_dir, pg_uri)
         if job['heat_demand']:
             heat_degree_days = params['heat_degree_days']
+            lidar_tiff_paths = gdal_helpers.files_in_vrt(lidar_vrt_file)
             model_heat_demand(pg_conn, job_id, bounds, lidar_tiff_paths, os.environ.get("HEAT_DEMAND_DIR"), heat_degree_days)
         if job['solar_pv']:
             horizon_search_radius = params['horizon_search_radius']
@@ -118,10 +126,10 @@ def _handle_job(pg_conn, job: dict) -> bool:
             panel_width_m = params['panel_width_m']
             panel_height_m = params['panel_height_m']
             model_solar_pv(
-                pg_uri=os.environ.get("PG_URI"),
+                pg_uri=pg_uri,
                 root_solar_dir=os.environ.get("SOLAR_DIR"),
                 job_id=job_id,
-                lidar_paths=lidar_tiff_paths,
+                lidar_vrt_file=lidar_vrt_file,
                 horizon_search_radius=horizon_search_radius,
                 horizon_slices=horizon_slices,
                 max_roof_slope_degrees=max_roof_slope_degrees,
@@ -151,7 +159,7 @@ def _handle_job(pg_conn, job: dict) -> bool:
         large_inst_vat = params["large_inst_vat"]
 
         model_cost_benefit(
-            pg_uri=os.environ.get("PG_URI"),
+            pg_uri=pg_uri,
             job_id=job_id,
             solar_pv_job_id=solar_pv_job_id,
             period_years=period_years,

@@ -12,20 +12,33 @@ from osgeo import gdal, osr
 import requests
 from psycopg2.sql import SQL, Identifier
 
+from albion_models import gdal_helpers
 from albion_models.paths import SQL_DIR
 
 
-def get_all_lidar(pg_conn, job_id, lidar_dir: str) -> List[str]:
+def get_all_lidar(pg_conn, job_id: int, lidar_dir: str) -> str:
     """
     Download LIDAR tiles unless already present, or if newer/better resolution
     than those already downloaded.
     """
+    job_lidar_dir = join(lidar_dir, f"job_{job_id}")
+    job_lidar_vrt = join(job_lidar_dir, "tiles.vrt")
+
+    if os.path.exists(job_lidar_vrt):
+        logging.info("LiDAR .vrt exists, using files referenced")
+        return job_lidar_vrt
+
     gridded_bounds = _get_gridded_bounds(pg_conn, job_id)
     tiff_paths = []
-    logging.info(f"{len(gridded_bounds)} LIDAR jobs to run")
+    logging.info(f"{len(gridded_bounds)} LiDAR jobs to run")
     for rings in gridded_bounds:
         tiff_paths.extend(_get_lidar(rings=rings, lidar_dir=lidar_dir))
-    return tiff_paths
+
+    os.makedirs(job_lidar_dir, exist_ok=True)
+    gdal_helpers.create_vrt(tiff_paths, job_lidar_vrt)
+    logging.info(f"Created LiDAR vrt {job_lidar_vrt}")
+
+    return job_lidar_vrt
 
 
 def _get_gridded_bounds(pg_conn, job_id: int) -> List[List[List[float]]]:
@@ -53,7 +66,7 @@ def _wkt_to_rings(wkt: str) -> List[List[float]]:
             rings.append([float(split[0].strip()), float(split[1].strip())])
         return rings
     else:
-        logging.warning(f"LIDAR area was not a polygon. Occasional points and "
+        logging.warning(f"LiDAR area was not a polygon. Occasional points and "
                         f"linestrings might be possible results of intersecting "
                         f"the grid with the bounding polygon: {wkt}")
         return []
@@ -73,10 +86,10 @@ def _get_lidar(rings: List[List[float]], lidar_dir: str) -> List[str]:
     status = _wait_for_job(lidar_job_id)
     if status == 'esriJobFailed':
         raise ValueError(f"Lidar job {lidar_job_id} failed: status {status}")
-    logging.info(f"Lidar job {lidar_job_id} completed with status {status}, downloading...")
+    logging.info(f"LiDAR job {lidar_job_id} completed with status {status}, downloading...")
 
     tiff_paths = _download_tiles(lidar_job_id, lidar_dir)
-    logging.info(f"Lidar data for {lidar_job_id} downloaded")
+    logging.info(f"LiDAR data for {lidar_job_id} downloaded")
     return tiff_paths
 
 
@@ -199,7 +212,7 @@ def _download_tile(url: str, year: int, lidar_dir: str, all_zips: List[str], all
     return tiff_paths
 
 
-def _find_best(filenames: List[str], delim : str = '-') -> str:
+def _find_best(filenames: List[str], delim: str = '-') -> str:
     """
     1. Prefers 1M resolution over 2M
     2. Prefers newer over older
