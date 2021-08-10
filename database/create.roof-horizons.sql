@@ -4,6 +4,7 @@
 -- pixels where the southerly horizon is too high.
 --
 
+DROP TABLE IF EXISTS {roof_horizons};
 CREATE TABLE {roof_horizons} AS
 SELECT
     ST_Multi(ST_Buffer(
@@ -125,7 +126,7 @@ all_angles AS (
 )
 UPDATE {roof_horizons} h SET aspect = a.degs
 FROM all_angles a
-WHERE h.toid = a.toid AND abs(a.degs - aspect) < 5 AND NOT is_flat AND usable;
+WHERE h.toid = a.toid AND abs(a.degs - aspect) < 15 AND NOT is_flat AND usable;
 COMMIT;
 
 --
