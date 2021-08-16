@@ -9,7 +9,7 @@ DROP TABLE IF EXISTS {clean_table};
 CREATE TABLE {clean_table} AS
 SELECT
     ST_SetSrid(
-        ST_CollectionExtract(ST_MakeValid(ST_Union(ST_MakeValid(t.geom_27700)))),
+        ST_CollectionExtract(ST_MakeValid(ST_Union(ST_MakeValid(t.geom_27700))), 3),
         27700)::geometry(multipolygon, 27700) AS geom_27700
 FROM {temp_table} t;
 
