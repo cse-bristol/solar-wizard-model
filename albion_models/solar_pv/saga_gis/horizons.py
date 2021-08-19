@@ -95,7 +95,7 @@ def _load_horizons_to_db(pg_uri: str, job_id: int, horizon_csv: str, horizon_sli
     horizon_cols = ','.join([f'horizon_slice_{i} double precision' for i in range(0, horizon_slices)])
     try:
         sql_script(
-            pg_conn, 'create.pixel-horizons.sql',
+            pg_conn, 'pv/create.pixel-horizons.sql',
             pixel_horizons=Identifier(schema, pixel_horizons_table),
             horizon_cols=SQL(horizon_cols),
         )
@@ -103,7 +103,7 @@ def _load_horizons_to_db(pg_uri: str, job_id: int, horizon_csv: str, horizon_sli
         copy_csv(pg_conn, horizon_csv, f"{schema}.{pixel_horizons_table}")
 
         sql_script(
-            pg_conn, 'post-load.pixel-horizons.sql',
+            pg_conn, 'pv/post-load.pixel-horizons.sql',
             pixel_horizons=Identifier(schema, pixel_horizons_table),
             srid=Literal(srid)
         )

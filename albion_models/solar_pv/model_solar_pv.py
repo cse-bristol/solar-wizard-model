@@ -88,7 +88,7 @@ def _init_schema(pg_uri: str, job_id: int):
     pg_conn = connect(pg_uri, cursor_factory=psycopg2.extras.DictCursor)
     try:
         sql_script_with_bindings(
-            pg_conn, 'create.schema.sql', {"job_id": job_id},
+            pg_conn, 'pv/create.schema.sql', {"job_id": job_id},
             schema=Identifier(tables.schema(job_id)),
             bounds_4326=Identifier(tables.schema(job_id), tables.BOUNDS_TABLE),
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),

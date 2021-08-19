@@ -28,7 +28,7 @@ def aggregate_horizons(pg_uri: str,
 
     try:
         sql_script_with_bindings(
-            pg_conn, 'create.roof-horizons.sql',
+            pg_conn, 'pv/create.roof-horizons.sql',
             {
                 "job_id": job_id,
                 "max_roof_slope_degrees": max_roof_slope_degrees,
@@ -66,7 +66,7 @@ def aggregate_user_submitted_polygon_horizons(pg_uri: str,
 
     try:
         sql_script_with_bindings(
-            pg_conn, 'create.user-submitted-polygon-horizons.sql',
+            pg_conn, 'pv/create.user-submitted-polygon-horizons.sql',
             {
                 "job_id": job_id,
                 "flat_roof_degrees": flat_roof_degrees,

@@ -42,6 +42,24 @@ def model_cost_benefit(pg_uri: str,
                 med_inst_vat=med_inst_vat,
                 large_inst_vat=large_inst_vat)
         _create_view(pg_conn, job_id)
+
+        # Extract the installation with the best IRR for each toid/elec cost:
+        sql_script_with_bindings(
+            pg_conn,
+            "cb/best-irr.pv-cost-benefit.sql",
+            {"job_id": job_id})
+
+        # Summarise results by IRR band/elec cost/tenure type:
+        for tenure in ("Owner occupied",
+                       "Privately rented",
+                       "Council/housing association",
+                       "Non-residential",
+                       "All"):
+            sql_script_with_bindings(
+                pg_conn,
+                "cb/summarise.pv-cost-benefit.sql",
+                {"job_id": job_id,
+                 "main_tenure": tenure})
     finally:
         pg_conn.close()
 
@@ -62,7 +80,7 @@ def _do_model(pg_conn,
               med_inst_vat: float,
               large_inst_vat: float):
     sql_script_with_bindings(
-        pg_conn, 'create.pv_cost_benefit.sql', {
+        pg_conn, 'cb/create.pv-cost-benefit.sql', {
             "job_id": job_id,
             "solar_pv_job_id": solar_pv_job_id,
             "period_years": period_years,

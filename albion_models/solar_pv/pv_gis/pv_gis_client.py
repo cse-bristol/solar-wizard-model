@@ -55,10 +55,10 @@ def pv_gis(pg_uri: str, job_id: int, peak_power_per_m2: float, pv_tech: str, sol
 def _write_results_to_db(pg_uri: str, job_id: int, csv_file: str):
     pg_conn = connect(pg_uri)
     try:
-        sql_script(pg_conn, 'create.solar-pv.sql', solar_pv=Identifier(tables.schema(job_id), tables.SOLAR_PV_TABLE))
+        sql_script(pg_conn, 'pv/create.solar-pv.sql', solar_pv=Identifier(tables.schema(job_id), tables.SOLAR_PV_TABLE))
         copy_csv(pg_conn, csv_file, f'{tables.schema(job_id)}.{tables.SOLAR_PV_TABLE}')
         sql_script_with_bindings(
-            pg_conn, 'post-load.solar-pv.sql', {"job_id": job_id},
+            pg_conn, 'pv/post-load.solar-pv.sql', {"job_id": job_id},
             solar_pv=Identifier(tables.schema(job_id), tables.SOLAR_PV_TABLE),
             panel_horizons=Identifier(tables.schema(job_id), tables.PANEL_HORIZON_TABLE),
             job_view=Identifier(f"solar_pv_job_{job_id}")
