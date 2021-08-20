@@ -62,7 +62,7 @@ SELECT
     irr.toid,
     t.address,
     t.postcode,
-    CASE WHEN t.main_tenure IS NOT NULL THEN t.main_tenure
+    CASE WHEN t.main_tenure IS NOT NULL THEN t.main_tenure::text
          WHEN SUBSTRING(t.main_class FOR 2) NOT IN ('RD', 'RH', 'RI') THEN 'Non-residential'
     END AS main_tenure,
     t.main_class,
