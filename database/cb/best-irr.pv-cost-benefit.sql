@@ -36,22 +36,22 @@ WITH best_irr AS (
 tenure AS (
     SELECT
         toid,
-        concat_ws(' ',
-            MAX(pao),
-            MAX(dependent_thoroughfare),
-            MAX(thoroughfare),
-            MAX(double_dependent_locality),
-            MAX(dependent_locality),
-            MAX(post_town),
-            MAX(postcode)
-        ) AS address,
-        MAX(b.postcode) AS postcode,
+        NULLIF(concat_ws(' ',
+            (array_agg(a.pao))[1],
+            (array_agg(a.dependent_thoroughfare))[1],
+            (array_agg(a.thoroughfare))[1],
+            (array_agg(a.double_dependent_locality))[1],
+            (array_agg(a.dependent_locality))[1],
+            (array_agg(a.post_town))[1],
+            (array_agg(a.postcode))[1]
+        ), '') AS address,
+        MAX(a.postcode) AS postcode,
         MODE() WITHIN GROUP (ORDER BY hh.tenure_type) AS main_tenure,
-        MAX(b.most_common_classification) AS main_class
+        MODE() WITHIN GROUP (ORDER BY a.classification_code) AS main_class
     FROM
         models.pv_cost_benefit cb
-        LEFT JOIN building.building b USING (toid)
-        LEFT JOIN experian.household hh ON hh.uprn = ANY(b.uprns)
+        LEFT JOIN addressbase.address a USING (toid)
+        LEFT JOIN experian.household hh USING (uprn)
     WHERE cb.job_id = %(job_id)s
     GROUP by toid
 )
