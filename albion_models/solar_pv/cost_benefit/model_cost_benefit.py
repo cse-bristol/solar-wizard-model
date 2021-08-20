@@ -24,33 +24,24 @@ def model_cost_benefit(pg_uri: str,
                        large_inst_vat: float):
     pg_conn = connect(pg_uri, cursor_factory=psycopg2.extras.DictCursor)
     try:
-        with pg_conn.cursor() as cursor:
-            cursor.execute("SELECT COUNT(*) AS count "
-                           "FROM models.pv_cost_benefit "
-                           "WHERE job_id = %(job_id)s",
-                           {"job_id": job_id})
-            count = cursor.fetchone()['count']
-            pg_conn.commit()
-
-        if count == 0:
-            for electricity_kwh_cost in electricity_kwh_costs:
-                _do_model(
-                    pg_conn,
-                    job_id=job_id,
-                    solar_pv_job_id=solar_pv_job_id,
-                    period_years=period_years,
-                    discount_rate=discount_rate,
-                    electricity_kwh_cost=electricity_kwh_cost,
-                    small_inst_cost_per_kwp=small_inst_cost_per_kwp,
-                    med_inst_cost_per_kwp=med_inst_cost_per_kwp,
-                    large_inst_cost_per_kwp=large_inst_cost_per_kwp,
-                    small_inst_fixed_cost=small_inst_fixed_cost,
-                    med_inst_fixed_cost=med_inst_fixed_cost,
-                    large_inst_fixed_cost=large_inst_fixed_cost,
-                    small_inst_vat=small_inst_vat,
-                    med_inst_vat=med_inst_vat,
-                    large_inst_vat=large_inst_vat)
-            _create_view(pg_conn, job_id)
+        for electricity_kwh_cost in electricity_kwh_costs:
+            _do_model(
+                pg_conn,
+                job_id=job_id,
+                solar_pv_job_id=solar_pv_job_id,
+                period_years=period_years,
+                discount_rate=discount_rate,
+                electricity_kwh_cost=electricity_kwh_cost,
+                small_inst_cost_per_kwp=small_inst_cost_per_kwp,
+                med_inst_cost_per_kwp=med_inst_cost_per_kwp,
+                large_inst_cost_per_kwp=large_inst_cost_per_kwp,
+                small_inst_fixed_cost=small_inst_fixed_cost,
+                med_inst_fixed_cost=med_inst_fixed_cost,
+                large_inst_fixed_cost=large_inst_fixed_cost,
+                small_inst_vat=small_inst_vat,
+                med_inst_vat=med_inst_vat,
+                large_inst_vat=large_inst_vat)
+        _create_view(pg_conn, job_id)
 
         create_cb_report_data(job_id, pg_conn)
     finally:
