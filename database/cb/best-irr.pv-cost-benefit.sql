@@ -27,6 +27,7 @@ INSERT INTO models.pv_cb_best_irr (
     irr_rank,
     panel_geom_4326
 )
+-- todo this is far to expensive, fix - use some temp tables?
 WITH best_irr AS (
     SELECT DISTINCT ON (toid, electricity_kwh_cost) *
     FROM models.pv_cost_benefit cb

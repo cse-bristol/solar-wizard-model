@@ -43,7 +43,8 @@ def model_cost_benefit(pg_uri: str,
                 large_inst_vat=large_inst_vat)
         _create_view(pg_conn, job_id)
 
-        create_cb_report_data(job_id, pg_conn)
+        # todo re-enable
+        # create_cb_report_data(job_id, pg_conn)
     finally:
         pg_conn.close()
 
