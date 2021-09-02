@@ -43,18 +43,21 @@ def model_cost_benefit(pg_uri: str,
                 large_inst_vat=large_inst_vat)
         _create_view(pg_conn, job_id)
 
-        # todo re-enable
-        # create_cb_report_data(job_id, pg_conn)
+        create_cb_report_data(job_id, pg_conn)
     finally:
         pg_conn.close()
 
 
 def create_cb_report_data(job_id: int, pg_conn):
     # Extract the installation with the best IRR for each toid/elec cost:
+    job_id = int(job_id)
+
     sql_script_with_bindings(
         pg_conn,
         "cb/best-irr.pv-cost-benefit.sql",
-        {"job_id": job_id})
+        {"job_id": job_id},
+        best_irr=SQL(f"models.pv_cb_{job_id}_best_irr_temp"),
+        tenure=SQL(f"models.pv_cb_{job_id}_tenure_temp"))
 
     # Summarise results by IRR band/elec cost/tenure type:
     for tenure in ("Owner occupied",

@@ -4,7 +4,52 @@
 -- 3. (output 1) L107-126
 -- See also `summarise.pv-cost-benefit.sql`
 
+--
+-- Select one PV installation per toid:
+--
+CREATE TABLE {best_irr} AS
+SELECT DISTINCT ON (toid, electricity_kwh_cost) *
+FROM models.pv_cost_benefit cb
+WHERE cb.job_id = %(job_id)s
+ORDER BY toid, electricity_kwh_cost, irr DESC;
 
+CREATE INDEX ON {best_irr} (toid);
+CREATE INDEX ON {best_irr} (irr);
+
+COMMIT;
+
+--
+-- Get tenure, abp class, address per toid:
+--
+CREATE TABLE {tenure} AS
+SELECT
+    toid,
+    NULLIF(concat_ws(' ',
+        (array_agg(a.pao))[1],
+        (array_agg(a.dependent_thoroughfare))[1],
+        (array_agg(a.thoroughfare))[1],
+        (array_agg(a.double_dependent_locality))[1],
+        (array_agg(a.dependent_locality))[1],
+        (array_agg(a.post_town))[1],
+        (array_agg(a.postcode))[1]
+    ), '') AS address,
+    MAX(a.postcode) AS postcode,
+    MODE() WITHIN GROUP (ORDER BY hh.tenure_type) AS main_tenure,
+    MODE() WITHIN GROUP (ORDER BY a.classification_code) AS main_class
+FROM
+    models.pv_cost_benefit cb
+    LEFT JOIN addressbase.address a USING (toid)
+    LEFT JOIN experian.household hh USING (uprn)
+WHERE cb.job_id = %(job_id)s
+GROUP by toid;
+
+CREATE INDEX ON {tenure} (toid);
+
+COMMIT;
+
+--
+-- Build outputs table:
+--
 INSERT INTO models.pv_cb_best_irr (
     job_id,
     installation_job_id,
@@ -26,35 +71,6 @@ INSERT INTO models.pv_cb_best_irr (
     irr_percentile,
     irr_rank,
     panel_geom_4326
-)
--- todo this is far to expensive, fix - use some temp tables?
-WITH best_irr AS (
-    SELECT DISTINCT ON (toid, electricity_kwh_cost) *
-    FROM models.pv_cost_benefit cb
-    WHERE cb.job_id = %(job_id)s
-    ORDER BY toid, electricity_kwh_cost, irr DESC
-),
-tenure AS (
-    SELECT
-        toid,
-        NULLIF(concat_ws(' ',
-            (array_agg(a.pao))[1],
-            (array_agg(a.dependent_thoroughfare))[1],
-            (array_agg(a.thoroughfare))[1],
-            (array_agg(a.double_dependent_locality))[1],
-            (array_agg(a.dependent_locality))[1],
-            (array_agg(a.post_town))[1],
-            (array_agg(a.postcode))[1]
-        ), '') AS address,
-        MAX(a.postcode) AS postcode,
-        MODE() WITHIN GROUP (ORDER BY hh.tenure_type) AS main_tenure,
-        MODE() WITHIN GROUP (ORDER BY a.classification_code) AS main_class
-    FROM
-        models.pv_cost_benefit cb
-        LEFT JOIN addressbase.address a USING (toid)
-        LEFT JOIN experian.household hh USING (uprn)
-    WHERE cb.job_id = %(job_id)s
-    GROUP by toid
 )
 SELECT
     irr.job_id,
@@ -80,5 +96,12 @@ SELECT
     rank() OVER (ORDER BY irr DESC) AS irr_rank,
     irr.geom_4326 AS panel_geom_4326
 FROM
-    best_irr irr
-    LEFT JOIN tenure t USING (toid);
+    {best_irr} irr
+    LEFT JOIN {tenure} t USING (toid);
+
+--
+-- Cleanup
+--
+
+DROP TABLE {best_irr};
+DROP TABLE {tenure};
