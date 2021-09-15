@@ -59,6 +59,7 @@ INSERT INTO models.pv_cb_best_irr (
     postcode,
     main_tenure,
     main_class,
+    main_class_desc,
     mw,
     gwh,
     area_m2,
@@ -83,6 +84,11 @@ SELECT
          WHEN SUBSTRING(t.main_class FOR 2) NOT IN ('RD', 'RH', 'RI') THEN 'Non-residential'
     END AS main_tenure,
     t.main_class,
+    concat_ws(' : ',
+        primary_description,
+        secondary_description,
+        tertiary_description,
+        quaternary_description) AS main_class_desc,
     irr.peak_power / 1000.0 AS mw,
     irr.total_yield_kwh_year / 1000000.0 AS gwh,
     irr.usable_area AS area_m2,
@@ -97,7 +103,8 @@ SELECT
     irr.geom_4326 AS panel_geom_4326
 FROM
     {best_irr} irr
-    LEFT JOIN {tenure} t USING (toid);
+    LEFT JOIN {tenure} t USING (toid)
+    LEFT JOIN addressbase.classification_scheme cs ON t.main_class = cs.concatenated_classification;
 
 --
 -- Cleanup
