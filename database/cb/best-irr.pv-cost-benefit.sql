@@ -98,8 +98,8 @@ SELECT
     (irr.total_yield_kwh_year / 1000000.0) * irr.electricity_kwh_cost * 1000.0 AS annual_revenue_k,
     irr.npv / 1000.0 AS npv_k,
     irr.irr,
-    percent_rank() OVER (ORDER BY irr) AS irr_percentile,
-    rank() OVER (ORDER BY irr DESC) AS irr_rank,
+    percent_rank() OVER (PARTITION BY electricity_kwh_cost ORDER BY irr) AS irr_percentile,
+    rank() OVER (PARTITION BY electricity_kwh_cost ORDER BY irr DESC) AS irr_rank,
     irr.geom_4326 AS panel_geom_4326
 FROM
     {best_irr} irr

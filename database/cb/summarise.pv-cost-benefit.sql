@@ -21,11 +21,14 @@ INSERT INTO models.pv_cb_report (
 )
 WITH irr_bands AS (
     -- Generate 30 ranges, from [0.00,0.01) to [0.29,)
+    -- as well as (,0.0) for all negative numbers
     SELECT
         numrange(round(a / 100.0, 2), round(a / 100.0 + 0.01, 2), '[)') AS irr_band
     FROM generate_series(0, 28) AS s(a)
     UNION
     SELECT numrange(0.29, NULL, '[)')
+    UNION
+    SELECT numrange(NULL, 0.0, '()')
     ORDER BY irr_band
 )
 SELECT
@@ -49,7 +52,6 @@ FROM
     LEFT JOIN models.pv_cb_best_irr cb ON irr_bands.irr_band @> cb.irr::numeric
 WHERE
     cb.job_id = %(job_id)s
-    AND cb.irr > 0
     AND (main_tenure = %(main_tenure)s OR %(main_tenure)s = 'All' )
 GROUP BY irr_band, electricity_kwh_cost
 WINDOW w_cost AS (PARTITION BY electricity_kwh_cost ORDER BY irr_band DESC);
