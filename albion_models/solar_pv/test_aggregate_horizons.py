@@ -1,7 +1,7 @@
 import unittest
 from typing import List
 
-from albion_models.solar_pv.polygonize import _avg_southerly_horizon_rads
+from albion_models.solar_pv.aggregate_horizons import _avg_southerly_horizon_rads
 
 
 class PolygonizeTestCase(unittest.TestCase):

@@ -73,13 +73,17 @@ COMMIT;
 --
 -- Add horizon standard deviation info:
 --
+ALTER TABLE {roof_horizons} ADD COLUMN horizon_avg double precision;
 ALTER TABLE {roof_horizons} ADD COLUMN horizon_sd double precision;
+ALTER TABLE {roof_horizons} ADD COLUMN southerly_horizon_avg double precision;
 ALTER TABLE {roof_horizons} ADD COLUMN southerly_horizon_sd double precision;
 
 WITH sd AS (
 	  SELECT
 	      roof_plane_id,
+	      avg(horizon) AS horizon_avg,
 	      stddev(horizon) AS horizon_sd,
+	      avg(southerly_horizon) AS southerly_horizon_avg,
 	      stddev(southerly_horizon) AS southerly_horizon_sd
     FROM (
         SELECT

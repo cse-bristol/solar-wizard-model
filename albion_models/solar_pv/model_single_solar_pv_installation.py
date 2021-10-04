@@ -4,7 +4,7 @@ from os.path import join
 from typing import List
 
 from albion_models.db_funcs import process_pg_uri
-from albion_models.solar_pv.polygonize import aggregate_user_submitted_polygon_horizons
+from albion_models.solar_pv.aggregate_horizons import aggregate_user_submitted_polygon_horizons
 from albion_models.solar_pv.saga_gis.horizons import find_horizons
 from albion_models.solar_pv.model_solar_pv import _init_schema
 import albion_models.solar_pv.pv_gis.pv_gis_client as pv_gis_client

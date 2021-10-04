@@ -8,7 +8,7 @@ from psycopg2.sql import Identifier
 import albion_models.solar_pv.pv_gis.pv_gis_client as pv_gis_client
 import albion_models.solar_pv.tables as tables
 from albion_models.db_funcs import connect, sql_script_with_bindings, process_pg_uri
-from albion_models.solar_pv.polygonize import aggregate_horizons
+from albion_models.solar_pv.aggregate_horizons import aggregate_horizons
 from albion_models.solar_pv.saga_gis.horizons import find_horizons
 from albion_models.solar_pv.ransac.run_ransac import run_ransac
 

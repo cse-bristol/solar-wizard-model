@@ -33,15 +33,6 @@ def pv_gis(lon: float, lat: float, peakpower: float, slope: float, aspect: float
     return flatten(body['outputs'])
 
 
-def print_res(res):
-    header = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'h7', 'h8', 'h9', 'h10', 'h11',
-              'h12', 'h13', 'h14', 'h15', 'h16', 'kwh', 'kwh_sd']
-    row_format = "{:<7}" * len(header)
-    print(row_format.format(*header))
-    for row in res:
-        print(row_format.format(*row.values()))
-
-
 def _rad_to_deg(rad):
     return float(rad) * 180 / 3.14159265359
 
@@ -92,7 +83,7 @@ def gen_inputs() -> List[dict]:
         "lon": -4.1205946,
         "peakpower": 0.2,
         "slope": _rad_to_deg(0.3251753474088293),
-        "aspect": _rad_to_deg(2.1694196314779273) - 180.0,
+        "aspect": 135,
         "horizon": []
     }
 
@@ -102,13 +93,7 @@ def gen_inputs() -> List[dict]:
             if 90 > base_horizon + outlier >= 0:
                 input = base.copy()
                 input['horizon'] = [base_horizon for _ in range(0, 16)]
-                input['horizon'][5] += outlier
-                input['horizon'][6] += outlier
-                input['horizon'][7] += outlier
-                input['horizon'][8] += outlier
-                input['horizon'][9] += outlier
-                input['horizon'][10] += outlier
-                input['horizon'][11] += outlier
+                input['horizon'][4] += outlier
                 inputs.append(input)
     return inputs
 

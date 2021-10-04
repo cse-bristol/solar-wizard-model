@@ -33,32 +33,35 @@ def pv_gis(pg_uri: str, job_id: int, peak_power_per_m2: float, pv_tech: str, sol
     pg_conn = connect(pg_uri, cursor_factory=psycopg2.extras.DictCursor)
     try:
         with pg_conn.cursor() as cursor:
-            cursor.execute(SQL("SELECT * FROM {panel_horizons} WHERE usable = true").format(
-                panel_horizons=Identifier(tables.schema(job_id), tables.PANEL_HORIZON_TABLE))
+            cursor.execute(SQL("SELECT * FROM {per_panel_horizons} WHERE usable = true").format(
+                per_panel_horizons=Identifier(tables.schema(job_id), tables.PER_PANEL_HORIZON_TABLE))
             )
             roof_planes = cursor.fetchall()
             pg_conn.commit()
-            logging.info(f"{len(roof_planes)} queries to send:")
-            _estimate_solar_pv(roof_planes, peak_power_per_m2, pv_tech, solar_pv_csv)
+
+        logging.info(f"{len(roof_planes)} queries to send:")
+        _estimate_solar_pv(roof_planes, peak_power_per_m2, pv_tech, solar_pv_csv)
+        _write_results_to_db(pg_conn, job_id, solar_pv_csv)
     finally:
         pg_conn.close()
 
-    _write_results_to_db(pg_uri, job_id, solar_pv_csv)
 
+def _write_results_to_db(pg_conn, job_id: int, csv_file: str):
+    sql_script(
+        pg_conn,
+        'pv/create.solar-pv.sql',
+        solar_pv=Identifier(tables.schema(job_id), tables.SOLAR_PV_TABLE))
 
-def _write_results_to_db(pg_uri: str, job_id: int, csv_file: str):
-    pg_conn = connect(pg_uri)
-    try:
-        sql_script(pg_conn, 'pv/create.solar-pv.sql', solar_pv=Identifier(tables.schema(job_id), tables.SOLAR_PV_TABLE))
-        copy_csv(pg_conn, csv_file, f'{tables.schema(job_id)}.{tables.SOLAR_PV_TABLE}')
-        sql_script_with_bindings(
-            pg_conn, 'pv/post-load.solar-pv.sql', {"job_id": job_id},
-            solar_pv=Identifier(tables.schema(job_id), tables.SOLAR_PV_TABLE),
-            panel_horizons=Identifier(tables.schema(job_id), tables.PANEL_HORIZON_TABLE),
-            job_view=Identifier(f"solar_pv_job_{job_id}")
-        )
-    finally:
-        pg_conn.close()
+    copy_csv(pg_conn, csv_file, f'{tables.schema(job_id)}.{tables.SOLAR_PV_TABLE}')
+
+    sql_script_with_bindings(
+        pg_conn,
+        'pv/post-load.solar-pv.sql',
+        {"job_id": job_id},
+        solar_pv=Identifier(tables.schema(job_id), tables.SOLAR_PV_TABLE),
+        panel_horizons=Identifier(tables.schema(job_id), tables.PANEL_HORIZON_TABLE),
+        per_panel_horizons=Identifier(tables.schema(job_id), tables.PER_PANEL_HORIZON_TABLE),
+        job_view=Identifier(f"solar_pv_job_{job_id}"))
 
 
 def init_process():

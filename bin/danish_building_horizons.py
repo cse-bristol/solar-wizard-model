@@ -11,7 +11,7 @@ from psycopg2.sql import SQL, Identifier
 from albion_models.db_funcs import connect, to_csv, process_pg_uri, copy_tsv, count
 from albion_models.solar_pv import tables
 from albion_models.solar_pv.model_solar_pv import _init_schema
-from albion_models.solar_pv.polygonize import _horizon_cols, _southerly_horizon_cols, \
+from albion_models.solar_pv.aggregate_horizons import _horizon_cols, _southerly_horizon_cols, \
     _aggregated_horizon_cols
 from albion_models.solar_pv.saga_gis.horizons import find_horizons
 
