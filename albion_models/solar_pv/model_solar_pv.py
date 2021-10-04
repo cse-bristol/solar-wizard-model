@@ -1,5 +1,6 @@
 import logging
 import os
+import shutil
 from os.path import join
 
 import psycopg2.extras
@@ -27,7 +28,8 @@ def model_solar_pv(pg_uri: str,
                    pv_tech: str,
                    max_avg_southerly_horizon_degrees: int,
                    panel_width_m: float,
-                   panel_height_m: float):
+                   panel_height_m: float,
+                   debug_mode: bool):
 
     pg_uri = process_pg_uri(pg_uri)
     _validate_params(
@@ -83,6 +85,14 @@ def model_solar_pv(pg_uri: str,
         pv_tech=pv_tech,
         solar_dir=solar_dir)
 
+    if not debug_mode:
+        logging.info("Removing temp dir...")
+        shutil.rmtree(solar_dir)
+        logging.info("Dropping schema...")
+        _drop_schema(pg_uri, job_id)
+    else:
+        logging.info("Debug mode: not removing temp dir or dropping schema.")
+
 
 def _init_schema(pg_uri: str, job_id: int):
     pg_conn = connect(pg_uri, cursor_factory=psycopg2.extras.DictCursor)
@@ -93,6 +103,17 @@ def _init_schema(pg_uri: str, job_id: int):
             bounds_4326=Identifier(tables.schema(job_id), tables.BOUNDS_TABLE),
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
             roof_planes=Identifier(tables.schema(job_id), tables.ROOF_PLANE_TABLE),
+        )
+    finally:
+        pg_conn.close()
+
+
+def _drop_schema(pg_uri: str, job_id: int):
+    pg_conn = connect(pg_uri, cursor_factory=psycopg2.extras.DictCursor)
+    try:
+        sql_script_with_bindings(
+            pg_conn, 'pv/drop.schema.sql', {"job_id": job_id},
+            schema=Identifier(tables.schema(job_id)),
         )
     finally:
         pg_conn.close()

@@ -1,4 +1,5 @@
 import logging
+import os
 from os.path import join
 import csv
 import time
@@ -42,6 +43,7 @@ def pv_gis(pg_uri: str, job_id: int, peak_power_per_m2: float, pv_tech: str, sol
         logging.info(f"{len(roof_planes)} queries to send:")
         _estimate_solar_pv(roof_planes, peak_power_per_m2, pv_tech, solar_pv_csv)
         _write_results_to_db(pg_conn, job_id, solar_pv_csv)
+        os.remove(solar_pv_csv)
     finally:
         pg_conn.close()
 

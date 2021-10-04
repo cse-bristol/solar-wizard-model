@@ -1,6 +1,9 @@
 import logging
+import os
 import subprocess
 from os.path import join
+from typing import List
+from pathlib import Path
 
 from psycopg2.sql import SQL, Identifier, Literal
 
@@ -65,6 +68,8 @@ def find_horizons(pg_uri: str,
     _get_horizons(cropped_lidar, solar_dir, mask_file, horizons_csv, horizon_search_radius, horizon_slices)
     _load_horizons_to_db(pg_uri, job_id, horizons_csv, horizon_slices, srid)
 
+    logging.info("Deleting unneeded horizon files...")
+    _delete_tmp_files(solar_dir, [mask_file, cropped_lidar, horizons_csv])
     return res
 
 
@@ -109,3 +114,12 @@ def _load_horizons_to_db(pg_uri: str, job_id: int, horizon_csv: str, horizon_sli
         )
     finally:
         pg_conn.close()
+
+
+def _delete_tmp_files(solar_dir: str, other_files: List[str]):
+    for f in other_files:
+        os.remove(f)
+    for p in Path(solar_dir).glob("vis_out.*"):
+        p.unlink()
+    for p in Path(solar_dir).glob("svf_out.*"):
+        p.unlink()
