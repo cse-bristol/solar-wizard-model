@@ -1,19 +1,14 @@
 """
 This is a script for exploring what changes in the kWh output of a PV installation
-when its horizon varies.
+as you move it around in lat/long.
 """
 import csv
-from os.path import join
 from statistics import stdev
 from typing import List
 
 import requests
 
-from albion_models import paths
 from albion_models.solar_pv.pv_gis.flatten import flatten
-
-# TODO: see how much an identical installation changes as you move it around in lat/long
-# - could enable doing way less PVGIS requests if we just send 1 request for all the similar panels
 
 
 def pv_gis(lon: float, lat: float, peakpower: float, slope: float, aspect: float, horizon: List[float]):
