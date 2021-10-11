@@ -196,7 +196,7 @@ def _send_failure_email(to_email: str, job_id: int, project: str, error: str):
         from_email=os.environ.get("SMTP_FROM"),
         to_email=all_recipients,
         password=os.environ.get("SMTP_PASS"),
-        subject=f"Albion result extraction job '{project}' failed",
+        subject=f"Albion modelling job '{project}' failed",
         body=textwrap.dedent(f"""
             Hello,
             
