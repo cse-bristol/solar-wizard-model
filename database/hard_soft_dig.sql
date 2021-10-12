@@ -9,22 +9,22 @@ CREATE TABLE {temp_schema}.road (
     road_id text PRIMARY KEY,
     road_type text NOT NULL,
     geom_4326 geometry(MultiLineString,4326) NOT NULL,
-    hierarchy text NOT NULL,
-    form text NOT NULL,
-    beis_cost_category text NOT NULL
+    hierarchy highways.hierarchy NOT NULL,
+    form highways.form NOT NULL,
+    beis_cost_category models.beis_cost_category NOT NULL
 );
 
 INSERT INTO {temp_schema}.road SELECT
     r.toid,
     'road_link',
     ST_Force2D(r.geom_4326),
-    lower(r.routehierarchy),
-    lower(r.formofway),
-    lower(b.beis_cost_category)
+    r.routehierarchy,
+    r.formofway,
+    b.beis_cost_category
 FROM highways.road_link r
 LEFT JOIN models.hsd_beis_cost_category b
-    ON lower(b.hierarchy) = lower(r.routehierarchy)
-    AND lower(b.form) = lower(r.formofway)
+    ON b.hierarchy = r.routehierarchy
+    AND b.form = r.formofway
 WHERE ST_Intersects(ST_GeomFromText(%(bounds)s, 4326), geom_4326);
 
 INSERT INTO {temp_schema}.road SELECT
@@ -33,11 +33,11 @@ INSERT INTO {temp_schema}.road SELECT
     ST_Force2D(r.geom_4326),
     'path',
     'path',
-    lower(b.beis_cost_category)
+    b.beis_cost_category
 FROM highways.path_link r
 LEFT JOIN models.hsd_beis_cost_category b
-    ON lower(b.hierarchy) = 'path'
-    AND lower(b.form) = 'path'
+    ON b.hierarchy = 'path'
+    AND b.form = 'path'
 WHERE ST_Intersects(ST_GeomFromText(%(bounds)s, 4326), geom_4326);
 
 INSERT INTO {temp_schema}.road SELECT
@@ -46,11 +46,11 @@ INSERT INTO {temp_schema}.road SELECT
     ST_Force2D(r.geom_4326),
     'path',
     'path',
-    lower(b.beis_cost_category)
+    b.beis_cost_category
 FROM highways.path_connecting_link r
 LEFT JOIN models.hsd_beis_cost_category b
-    ON lower(b.hierarchy) = 'path'
-    AND lower(b.form) = 'path'
+    ON b.hierarchy = 'path'
+    AND b.form = 'path'
 WHERE ST_Intersects(ST_GeomFromText(%(bounds)s, 4326), geom_4326);
 
 CREATE INDEX ON {temp_schema}.road USING GIST (geom_4326);
@@ -130,9 +130,9 @@ CREATE TABLE {temp_schema}.hard_soft_dig (
     road_type text NOT NULL,
     is_hard_dig bool NOT NULL,
     geom_4326 geometry(MultiLineString,4326) NOT NULL,
-    hierarchy text NOT NULL,
-    form text NOT NULL,
-    beis_cost_category text NOT NULL
+    hierarchy highways.hierarchy NOT NULL,
+    form highways.form NOT NULL,
+    beis_cost_category models.beis_cost_category NOT NULL
 ) ;
 
 -- Mark as soft dig all roads that are fully within soft ground

@@ -205,11 +205,11 @@ def _row_to_pv_gis_params(row: dict) -> tuple:
     horizon = [_rad_to_deg(v) for k, v in row.items() if 'horizon_slice' in k]
 
     # angle: in degrees from horizontal
-    # corresponds to slope field in patched SAGA csv output (in rads from horizontal)
+    # corresponds to slope field in patched SAGA csv output (in degrees from horizontal)
     angle = row['slope']
 
     # aspect: in degrees clockwise from south
-    # aspect field in patched SAGA csv output: in rads clockwise from north
+    # aspect field in patched SAGA csv output: in degrees clockwise from north
     aspect = row['aspect'] - 180.0
 
     area = float(row['area'])
