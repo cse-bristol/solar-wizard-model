@@ -17,7 +17,9 @@ INSERT INTO models.pv_cb_report (
     average_npv_k,
     cumulative_mw,
     cumulative_gwh,
-    cumulative_installations
+    cumulative_installations,
+    total_area_m2,
+    cumulative_area_m2
 )
 WITH irr_bands AS (
     -- Generate 30 ranges, from [0.00,0.01) to [0.29,)
@@ -46,7 +48,9 @@ SELECT
     AVG(cb.npv_k) As average_npv_k,
     SUM(SUM(cb.mw)) OVER w_cost AS cumulative_mw,
     SUM(SUM(cb.gwh)) OVER w_cost AS cumulative_gwh,
-    SUM(COUNT(*)) OVER w_cost AS cumulative_installations
+    SUM(COUNT(*)) OVER w_cost AS cumulative_installations,
+    SUM(cb.area_m2) As total_area_m2,
+    SUM(SUM(cb.area_m2)) OVER w_cost AS cumulative_area_m2
 FROM
     irr_bands
     LEFT JOIN models.pv_cb_best_irr cb ON irr_bands.irr_band @> cb.irr::numeric
