@@ -61,7 +61,7 @@ def model_solar_pv(pg_uri: str,
         masking_strategy='building')
 
     logging.info("Detecting roof planes...")
-    run_ransac(pg_uri, job_id)
+    run_ransac(pg_uri, job_id, resolution_metres=res)
 
     logging.info("Aggregating horizon data by roof plane and filtering...")
     aggregate_horizons(

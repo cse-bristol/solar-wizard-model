@@ -15,6 +15,7 @@ FROM {temp_table} t;
 
 CREATE INDEX ON {clean_table} USING GIST (geom_27700);
 COMMIT;
+START TRANSACTION;
 
 -- Find the intersection of the coverage polygon with the job bounds polygon:
 INSERT into models.lidar_info (job_id, lidar_coverage_4326, lidar_coverage_pct)
@@ -25,6 +26,7 @@ SELECT
 FROM {clean_table} t, models.job_queue q
 WHERE q.job_id = %(job_id)s;
 COMMIT;
+START TRANSACTION;
 
 -- Add info about the number of buildings in the job bounds and the number
 -- that have at least 1 pixel of LiDAR coverage:
@@ -43,6 +45,7 @@ UPDATE models.lidar_info SET
         WHERE l.job_id = %(job_id)s )
     WHERE job_id = %(job_id)s;
 COMMIT;
+START TRANSACTION;
 
 DROP TABLE {temp_table};
 DROP TABLE {clean_table};

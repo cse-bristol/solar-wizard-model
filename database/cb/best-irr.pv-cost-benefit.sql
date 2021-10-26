@@ -17,6 +17,7 @@ CREATE INDEX ON {best_irr} (toid);
 CREATE INDEX ON {best_irr} (irr);
 
 COMMIT;
+START TRANSACTION;
 
 --
 -- Get tenure, abp class, address per toid:
@@ -46,6 +47,7 @@ GROUP by toid;
 CREATE INDEX ON {tenure} (toid);
 
 COMMIT;
+START TRANSACTION;
 
 --
 -- Build outputs table:

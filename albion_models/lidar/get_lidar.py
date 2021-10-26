@@ -1,12 +1,13 @@
 import json
 import logging
 import os
+import re
 import time
 import zipfile
 from collections import defaultdict
 from datetime import datetime
 from os.path import join
-from typing import List
+from typing import List, Dict
 
 from osgeo import gdal, osr
 import requests
@@ -118,7 +119,10 @@ def _start_job(rings: List[List[float]]) -> str:
     })
     res.raise_for_status()
     body = res.json()
-    return body['jobId']
+    if 'jobId' in body:
+        return body['jobId']
+    else:
+        raise ValueError(f"Received unhandled response while submitting LiDAR job: {body}")
 
 
 def _wait_for_job(lidar_job_id: str):
@@ -135,7 +139,10 @@ def _check_job_status(lidar_job_id: str):
     res = requests.get(url, params={"f": "json"})
     res.raise_for_status()
     body = res.json()
-    return body['jobStatus']
+    if 'jobStatus' in body:
+        return body['jobStatus']
+    else:
+        raise ValueError(f"Received unhandled response while checking LiDAR job status: {body}")
 
 
 def _download_tiles(lidar_job_id: str, lidar_dir: str) -> List[str]:
@@ -166,24 +173,52 @@ def _download_tiles(lidar_job_id: str, lidar_dir: str) -> List[str]:
 
     tiff_paths = []
     all_files = os.listdir(lidar_dir)
-    all_zips = [d for d in all_files if d.endswith(".zip")]
-    all_tiffs = [d for d in all_files if d.endswith(".tiff") or d.endswith(".tif")]
+
+    existing_zips = defaultdict(list)
+    existing_tiffs = defaultdict(list)
+    for f in all_files:
+        if f.endswith(".zip"):
+            existing_zips[_zipfile_id(f)].append(f)
+        if f.endswith(".tif") or f.endswith(".tiff"):
+            existing_tiffs[_tile_id(f)].append(f)
 
     for tile_id, resolutions in tiles_dict.items():
-        tile = resolutions['1M'] if '1M' in resolutions else resolutions['2M']
-        tiff_paths.extend(_download_tile(tile['url'], tile['year'], lidar_dir, all_zips, all_tiffs))
+        # Use this instead if 50cm LiDAR can also be used:
+        # tile = resolutions.get('50CM', resolutions.get('1M', resolutions.get('2M')))
+        tile = resolutions.get('1M', resolutions.get('2M'))
+        tiff_paths.extend(_download_tile(tile['url'], tile['year'], lidar_dir, existing_zips, existing_tiffs))
     return tiff_paths
 
 
-def _download_tile(url: str, year: int, lidar_dir: str, all_zips: List[str], all_tiffs: List[str]) -> List[str]:
+def _zipfile_id(filename: str):
+    """
+    Matches the zip file ID in a filename like '2017-LIDAR-DSM-1M-SD72se.zip'
+    """
+    match = re.search("[a-z]{2}[0-9]{2}(?:se|sw|ne|nw)", filename, re.IGNORECASE)
+    return match.group() if match is not None else None
+
+
+def _tile_id(filename: str):
+    """
+    Matches the tile ID in a filename like 'so8707_DSM_1M.tiff'
+    """
+    match = re.search("[a-z]{2}[0-9]{4}", filename, re.IGNORECASE)
+    return match.group() if match is not None else None
+
+
+def _download_tile(url: str,
+                   year: int,
+                   lidar_dir: str,
+                   all_zips: Dict[str, List[str]],
+                   all_tiffs: Dict[str, List[str]]) -> List[str]:
     """
     Check if the zip should be used instead of existing versions,
     extract the .asc files, and convert them to geotiffs.
     """
     zip_name = url.split('/')[-1]
-    zip_id = zip_name.split('.')[0].split('-')[-1]
+    zip_id = _zipfile_id(zip_name)
     zip_name_to_write = f"{year}-{zip_name}"
-    zips_already_downloaded = [d for d in all_zips if zip_id in d]
+    zips_already_downloaded = all_zips[zip_id]
     best_zip = _find_best(zips_already_downloaded + [zip_name_to_write])
     if best_zip != zip_name_to_write or zip_name_to_write in zips_already_downloaded:
         logging.info(f"Skipping download of {url}, already have {best_zip}")
@@ -201,9 +236,9 @@ def _download_tile(url: str, year: int, lidar_dir: str, all_zips: List[str], all
             # Convert to geotiff and add SRS metadata:
             tiff_filename = _asc_to_geotiff(lidar_dir, zipinfo.filename)
             tiff_paths.append(join(lidar_dir, tiff_filename))
-            tile_id = zipinfo.filename.split('_')[0]
+            tile_id = _tile_id(zipinfo.filename)
 
-            already_downloaded = [a for a in all_tiffs if tile_id in a]
+            already_downloaded = all_tiffs[tile_id]
             for existing in already_downloaded:
                 if existing != tiff_filename:
                     os.remove(join(lidar_dir, existing))
@@ -214,7 +249,7 @@ def _download_tile(url: str, year: int, lidar_dir: str, all_zips: List[str], all
 
 def _find_best(filenames: List[str], delim: str = '-') -> str:
     """
-    1. Prefers 1M resolution over 2M
+    1. Prefers 0.5m resolution over 1m over 2m
     2. Prefers newer over older
 
     So will not choose a 2M resolution even if it is newer,
@@ -224,7 +259,15 @@ def _find_best(filenames: List[str], delim: str = '-') -> str:
         return int(filename.split(delim)[0])
 
     def _get_file_res(filename: str) -> int:
-        return int(filename.split(delim)[-2][0])
+        raw = filename.split(delim)[-2].upper()
+        if raw == '50CM':
+            return 50
+        elif raw == '1M':
+            return 100
+        elif raw == '2M':
+            return 200
+        else:
+            raise ValueError(f"Unhandled resolution {raw}")
 
     if len(filenames) == 0:
         raise ValueError("Expects arrays of length >= 1")

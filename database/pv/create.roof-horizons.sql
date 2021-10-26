@@ -12,7 +12,7 @@ SELECT
             ST_Expand(h.en, sqrt(%(resolution)s * %(resolution)s * 2.0) / 2),
             -radians(p.aspect),
             h.en)),
-         -((sqrt(%(resolution)s * %(resolution)s * 2.0) - 1) / 2),
+         -((sqrt(%(resolution)s * %(resolution)s * 2.0) - %(resolution)s) / 2),
         'endcap=square join=mitre quad_segs=2'))::geometry(MultiPolygon, 27700) AS roof_geom_27700,
     p.roof_plane_id,
     p.toid,
@@ -32,7 +32,9 @@ FROM
     ON p.roof_plane_id = h.roof_plane_id
 WHERE {avg_southerly_horizon_rads} <= radians(%(max_avg_southerly_horizon_degrees)s)
 GROUP BY p.roof_plane_id;
+
 COMMIT;
+START TRANSACTION;
 
 --
 -- Mark roof areas as unusable where they don't match the job
@@ -49,7 +51,9 @@ AND raw_area >= %(min_roof_area_m)s;
 
 CREATE INDEX ON {roof_horizons} USING GIST (roof_geom_27700);
 ALTER TABLE {roof_horizons} ADD PRIMARY KEY (roof_plane_id);
+
 COMMIT;
+START TRANSACTION;
 
 --
 -- Constrain roof planes to building polygon:
@@ -57,7 +61,9 @@ COMMIT;
 UPDATE {roof_horizons} h SET roof_geom_27700 = ST_Multi(ST_Intersection(roof_geom_27700, geom_27700))
 FROM {buildings} b
 WHERE h.toid = b.toid;
+
 COMMIT;
+START TRANSACTION;
 
 --
 -- Add easting and northing:
@@ -68,7 +74,9 @@ ALTER TABLE {roof_horizons} ADD COLUMN northing double precision;
 UPDATE {roof_horizons} SET
     easting = ST_X(ST_SetSRID(ST_Centroid(roof_geom_27700), 27700)),
     northing = ST_Y(ST_SetSRID(ST_Centroid(roof_geom_27700), 27700));
+
 COMMIT;
+START TRANSACTION;
 
 --
 -- Add horizon standard deviation info:
@@ -95,7 +103,9 @@ WITH sd AS (
 UPDATE {roof_horizons} SET horizon_sd = sd.horizon_sd, southerly_horizon_sd = sd.southerly_horizon_sd
 FROM sd
 WHERE {roof_horizons}.roof_plane_id = sd.roof_plane_id;
+
 COMMIT;
+START TRANSACTION;
 
 --
 -- Handle flat roofs
@@ -105,7 +115,9 @@ UPDATE {roof_horizons} SET
     aspect = 180,
     raw_area = raw_footprint / cos(radians(%(flat_roof_degrees)s))
 WHERE is_flat;
+
 COMMIT;
+START TRANSACTION;
 
 --
 -- Fix up angles - changes any roof planes where the aspect is almost aligned
@@ -131,7 +143,9 @@ all_angles AS (
 UPDATE {roof_horizons} h SET aspect = a.degs
 FROM all_angles a
 WHERE h.toid = a.toid AND abs(a.degs - aspect) < 15 AND NOT is_flat AND usable;
+
 COMMIT;
+START TRANSACTION;
 
 --
 -- PV panelling:
@@ -184,4 +198,3 @@ UPDATE {panel_horizons} SET panel_geom_27700_3d = ST_Multi(ST_Translate(
     (easting * x_coef) + (northing * y_coef) + intercept))::geometry(MultiPolygonZ, 27700);
 
 CREATE INDEX ON {panel_horizons} USING GIST (panel_geom_27700_3d);
-COMMIT;

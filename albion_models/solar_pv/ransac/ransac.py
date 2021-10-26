@@ -31,6 +31,7 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
                  loss='absolute_loss',
                  random_state=None,
                  # RANSAC for LIDAR additions:
+                 resolution_metres=1,
                  min_points_per_plane=8,
                  min_points_per_plane_perc=0.008,
                  max_slope=None,
@@ -77,6 +78,7 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
         self.max_num_groups = max_num_groups
         self.max_group_area_ratio_to_largest = max_group_area_ratio_to_largest
         self.sd = None
+        self.resolution_metres = resolution_metres
 
     def fit(self, X, y,
             sample_weight=None,
@@ -332,7 +334,8 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
                                         total_points_in_building=total_points_in_building,
                                         max_num_groups=self.max_num_groups,
                                         max_group_area_ratio_to_largest=self.max_group_area_ratio_to_largest,
-                                        include_group_checks=include_group_checks):
+                                        include_group_checks=include_group_checks,
+                                        res=self.resolution_metres):
                 bad_samples.add(tuple(subset_idxs))
                 continue
 
@@ -392,10 +395,10 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
         y_pred = base_estimator.predict(X)
         residuals_subset = loss_function(y, y_pred)
         inlier_mask_best = residuals_subset < residual_threshold
-        inlier_mask_best = _exclude_unconnected(X, min_X, inlier_mask_best)
+        mask_without_excluded = _exclude_unconnected(X, min_X, inlier_mask_best, res=self.resolution_metres)
 
         self.estimator_ = base_estimator
-        self.inlier_mask_ = inlier_mask_best
+        self.inlier_mask_ = mask_without_excluded
         self.sd = sd_best
         return self
 
@@ -430,8 +433,9 @@ def _plane_morphology_ok(X_inlier_subset, min_X,
                          total_points_in_building: int,
                          max_num_groups: int,
                          max_group_area_ratio_to_largest: float,
-                         include_group_checks: bool) -> int:
-    normed_inliers = (X_inlier_subset - min_X).astype(int)
+                         include_group_checks: bool,
+                         res: float) -> int:
+    normed_inliers = ((X_inlier_subset - min_X) / res).astype(int)
 
     image = np.zeros((int(np.amax(normed_inliers[:, 0])) + 1,
                       int(np.amax(normed_inliers[:, 1])) + 1))
@@ -473,13 +477,13 @@ def _plane_morphology_ok(X_inlier_subset, min_X,
     return True
 
 
-def _exclude_unconnected(X, min_X, inlier_mask_best):
+def _exclude_unconnected(X, min_X, inlier_mask_best, res: float):
     """
     Create a new inlier mask which only sets as True those LIDAR pixels that
     form part of the largest contiguous group of pixels fitted to the plane.
     """
 
-    normed = (X - min_X).astype(int)
+    normed = ((X - min_X) / res).astype(int)
     image = np.zeros((int(np.amax(normed[:, 0])) + 1,
                       int(np.amax(normed[:, 1])) + 1))
     idxs = np.zeros((int(np.amax(normed[:, 0])) + 1,

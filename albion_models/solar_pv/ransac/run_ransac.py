@@ -24,6 +24,7 @@ def _get_cpu_count():
 
 def run_ransac(pg_uri: str,
                job_id: int,
+               resolution_metres: float,
                workers: int = _get_cpu_count(),
                building_page_size: int = 10) -> None:
 
@@ -37,7 +38,7 @@ def run_ransac(pg_uri: str,
     start_time = time.time()
 
     with mp.Pool(workers) as pool:
-        wrapped_iterable = ((pg_uri, job_id, seg, building_page_size)
+        wrapped_iterable = ((pg_uri, job_id, seg, building_page_size, resolution_metres)
                             for seg in range(0, segments))
         for res in pool.starmap(_handle_building_page, wrapped_iterable):
             pass
@@ -45,7 +46,7 @@ def run_ransac(pg_uri: str,
     logging.info(f"RANSAC for {building_count} roofs took {round(time.time() - start_time, 2)} s.")
 
 
-def _handle_building_page(pg_uri: str, job_id: int, page: int, page_size: int):
+def _handle_building_page(pg_uri: str, job_id: int, page: int, page_size: int, resolution_metres: float):
     rows = _load(pg_uri, job_id, page, page_size)
     by_toid = defaultdict(list)
     for row in rows:
@@ -53,20 +54,24 @@ def _handle_building_page(pg_uri: str, job_id: int, page: int, page_size: int):
 
     planes = []
     for toid, building in by_toid.items():
-        found = _ransac_building(building, toid)
+        found = _ransac_building(building, toid, resolution_metres)
         if len(found) > 0:
             planes.extend(found)
         elif len(building) > 1000:
             # Retry with relaxed constraints around group checks and with a higher
             # `max_trials` for larger buildings where we care more:
-            found = _ransac_building(building, toid, max_trials=3000, include_group_checks=False)
+            found = _ransac_building(building, toid, resolution_metres, max_trials=3000, include_group_checks=False)
             planes.extend(found)
 
     _save_planes(pg_uri, job_id, planes)
     print(f"Page {page} of buildings complete")
 
 
-def _ransac_building(pixels_in_building: List[dict], toid: str, max_trials: int = 1000, include_group_checks: bool = True) -> List[dict]:
+def _ransac_building(pixels_in_building: List[dict],
+                     toid: str,
+                     resolution_metres: float,
+                     max_trials: int = 1000,
+                     include_group_checks: bool = True) -> List[dict]:
     xyz = np.array([[pixel["easting"], pixel["northing"], pixel["elevation"]] for pixel in pixels_in_building])
     aspect = np.array([pixel["aspect"] for pixel in pixels_in_building])
     pixel_ids = np.array([pixel["pixel_id"] for pixel in pixels_in_building])
@@ -83,7 +88,8 @@ def _ransac_building(pixels_in_building: List[dict], toid: str, max_trials: int 
                                              max_trials=max_trials,
                                              max_slope=75,
                                              min_slope=0,
-                                             min_points_per_plane=min_points_per_plane)
+                                             min_points_per_plane=min_points_per_plane,
+                                             resolution_metres=resolution_metres)
             ransac.fit(XY, Z,
                        aspect=aspect,
                        total_points_in_building=total_points_in_building,
@@ -197,3 +203,12 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[dict]):
             pg_conn.commit()
     finally:
         pg_conn.close()
+
+
+# if __name__ == '__main__':
+#     _handle_building_page(
+#         "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion",
+#         31,
+#         page_size=10,
+#         page=10,
+#         resolution_metres=0.5)
