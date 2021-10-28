@@ -115,6 +115,37 @@ def aspect(cropped_lidar: str, aspect_file: str):
     run(f"gdaldem aspect {cropped_lidar} {aspect_file} -of GTiff -b 1 -zero_for_flat")
 
 
+def merge(files: List[str], output_file: str, res: float, nodata: int):
+    """
+    Merge raster tiles. They do not need to have the same resolution.
+    Tiles later in the list will overwrite tiles earlier in the list
+    (except where the earlier tile pixel is NODATA)
+    """
+    logging.info(f"Merging tiles {files} into {output_file}...")
+    run(f"gdal_merge.py -ps {res} {res} -n {nodata} -a_nodata {nodata} -o {output_file} {' '.join(files)}")
+    return output_file
+
+
+def count_raster_pixels(tiff: str, value, band: int = 1) -> int:
+    """
+    Count the pixels in a raster that have value `value`
+    """
+    file = gdal.Open(tiff)
+    band = file.GetRasterBand(band)
+    a = band.ReadAsArray()
+    return (a == value).sum()
+
+
+def count_raster_pixels_pct(tiff: str, value, band: int = 1) -> float:
+    """
+    Count the percentage of pixels in a raster that have value `value`
+    """
+    file = gdal.Open(tiff)
+    band = file.GetRasterBand(band)
+    a = band.ReadAsArray()
+    return (a == value).sum() / a.size
+
+
 def run(command: str):
     res = subprocess.run(command.replace("\n", " "), capture_output=True, text=True, shell=True)
     print(res.stdout)

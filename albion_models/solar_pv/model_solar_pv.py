@@ -58,7 +58,8 @@ def model_solar_pv(pg_uri: str,
         lidar_vrt_file=lidar_vrt_file,
         horizon_search_radius=horizon_search_radius,
         horizon_slices=horizon_slices,
-        masking_strategy='building')
+        masking_strategy='building',
+        debug_mode=debug_mode)
 
     logging.info("Detecting roof planes...")
     run_ransac(pg_uri, job_id, resolution_metres=res)

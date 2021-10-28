@@ -6,6 +6,7 @@ from psycopg2.sql import SQL, Literal, Identifier
 
 from albion_models.db_funcs import connect, sql_script_with_bindings
 from albion_models import gdal_helpers
+from albion_models.lidar.get_lidar import LIDAR_VRT
 
 
 def calculate_lidar_coverage(job_id: int, lidar_dir: str, pg_uri: str):
@@ -21,7 +22,7 @@ def calculate_lidar_coverage(job_id: int, lidar_dir: str, pg_uri: str):
      Results are in table `models.lidar_info`.
     """
     job_lidar_dir = join(lidar_dir, f"job_{job_id}")
-    lidar_vrt_file = join(job_lidar_dir, 'tiles.vrt')
+    lidar_vrt_file = join(job_lidar_dir, LIDAR_VRT)
     srid = gdal_helpers.get_srid(lidar_vrt_file, fallback=27700)
     res = gdal_helpers.get_res(lidar_vrt_file)
 

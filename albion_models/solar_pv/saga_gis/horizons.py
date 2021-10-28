@@ -21,7 +21,8 @@ def find_horizons(pg_uri: str,
                   horizon_slices: int,
                   masking_strategy: str,
                   mask_table: str = "mastermap.building",
-                  override_res: float = None) -> float:
+                  override_res: float = None,
+                  debug_mode=False) -> float:
     """
     Detect the horizon height in degrees for each `horizon_slices` slice of the
     compass for each LIDAR pixel that falls inside one of the OS MasterMap building
@@ -53,13 +54,11 @@ def find_horizons(pg_uri: str,
         mask_file = mask.create_buildings_mask(job_id, solar_dir, pg_uri, res=res, mask_table=mask_table, srid=srid)
     elif masking_strategy == 'bounds':
         mask_file = mask.create_bounds_mask(job_id, solar_dir, pg_uri, res=res, srid=srid)
+        gdal_helpers.crop_or_expand(mask_file, lidar_vrt_file, mask_file, adjust_resolution=False)
     else:
         raise ValueError(f"Unknown masking strategy {masking_strategy}")
 
     logging.info("Cropping lidar to mask dimensions...")
-    if masking_strategy == 'bounds':
-        gdal_helpers.crop_or_expand(mask_file, lidar_vrt_file, mask_file, adjust_resolution=False)
-
     cropped_lidar = join(solar_dir, 'cropped_lidar.tif')
     gdal_helpers.crop_or_expand(lidar_vrt_file, mask_file, cropped_lidar, adjust_resolution=True)
 
@@ -68,8 +67,13 @@ def find_horizons(pg_uri: str,
     _get_horizons(cropped_lidar, solar_dir, mask_file, horizons_csv, horizon_search_radius, horizon_slices)
     _load_horizons_to_db(pg_uri, job_id, horizons_csv, horizon_slices, srid)
 
-    logging.info("Deleting unneeded horizon files...")
-    _delete_tmp_files(solar_dir, [mask_file, cropped_lidar, horizons_csv])
+    if not debug_mode:
+        logging.info("Deleting unneeded horizon files...")
+        _delete_tmp_files(solar_dir, [mask_file, cropped_lidar, horizons_csv])
+    else:
+        logging.info("Deleting unneeded horizon files (debug mode: keeping LiDAR and building mask)...")
+        _delete_tmp_files(solar_dir, [horizons_csv])
+
     return res
 
 
@@ -116,9 +120,10 @@ def _load_horizons_to_db(pg_uri: str, job_id: int, horizon_csv: str, horizon_sli
         pg_conn.close()
 
 
-def _delete_tmp_files(solar_dir: str, other_files: List[str]):
-    for f in other_files:
-        os.remove(f)
+def _delete_tmp_files(solar_dir: str, other_files: List[str] = None):
+    if other_files is not None:
+        for f in other_files:
+            os.remove(f)
     for p in Path(solar_dir).glob("vis_out.*"):
         p.unlink()
     for p in Path(solar_dir).glob("svf_out.*"):

@@ -1,7 +1,9 @@
+"""
+DEFRA LiDAR API client
+"""
 import json
 import logging
 import os
-import re
 import time
 import zipfile
 from collections import defaultdict
@@ -13,8 +15,12 @@ from osgeo import gdal, osr
 import requests
 from psycopg2.sql import SQL, Identifier
 
-from albion_models import gdal_helpers
+from albion_models.lidar.lidar import ZippedTiles, LidarTile, LidarJobTiles
 from albion_models.paths import SQL_DIR
+
+
+LIDAR_VRT = "tiles.vrt"
+_DEFRA_API = "https://environment.data.gov.uk/arcgis/rest"
 
 
 def get_all_lidar(pg_conn, job_id: int, lidar_dir: str) -> str:
@@ -23,22 +29,21 @@ def get_all_lidar(pg_conn, job_id: int, lidar_dir: str) -> str:
     than those already downloaded.
     """
     job_lidar_dir = join(lidar_dir, f"job_{job_id}")
-    job_lidar_vrt = join(job_lidar_dir, "tiles.vrt")
+    job_lidar_vrt = join(job_lidar_dir, LIDAR_VRT)
 
     if os.path.exists(job_lidar_vrt):
         logging.info("LiDAR .vrt exists, using files referenced")
         return job_lidar_vrt
 
     gridded_bounds = _get_gridded_bounds(pg_conn, job_id)
-    tiff_paths = []
+    job_tiles = LidarJobTiles()
     logging.info(f"{len(gridded_bounds)} LiDAR jobs to run")
     for rings in gridded_bounds:
-        tiff_paths.extend(_get_lidar(rings=rings, lidar_dir=lidar_dir))
+        job_tiles.merge(_get_lidar(rings=rings, lidar_dir=lidar_dir))
 
-    os.makedirs(job_lidar_dir, exist_ok=True)
-    gdal_helpers.create_vrt(tiff_paths, job_lidar_vrt)
+    job_tiles.create_merged_vrt(job_lidar_dir, job_lidar_vrt)
+    job_tiles.delete_unmerged_tiles()
     logging.info(f"Created LiDAR vrt {job_lidar_vrt}")
-
     return job_lidar_vrt
 
 
@@ -73,7 +78,7 @@ def _wkt_to_rings(wkt: str) -> List[List[float]]:
         return []
 
 
-def _get_lidar(rings: List[List[float]], lidar_dir: str) -> List[str]:
+def _get_lidar(rings: List[List[float]], lidar_dir: str) -> LidarJobTiles:
     """
     Get Lidar data from the defra internal API.
 
@@ -89,13 +94,13 @@ def _get_lidar(rings: List[List[float]], lidar_dir: str) -> List[str]:
         raise ValueError(f"Lidar job {lidar_job_id} failed: status {status}")
     logging.info(f"LiDAR job {lidar_job_id} completed with status {status}, downloading...")
 
-    tiff_paths = _download_tiles(lidar_job_id, lidar_dir)
+    job_tiles = _download_tiles(lidar_job_id, lidar_dir)
     logging.info(f"LiDAR data for {lidar_job_id} downloaded")
-    return tiff_paths
+    return job_tiles
 
 
 def _start_job(rings: List[List[float]]) -> str:
-    url = 'https://environment.data.gov.uk/arcgis/rest/services/gp/DataDownload/GPServer/DataDownload/submitJob'
+    url = f'{_DEFRA_API}/services/gp/DataDownload/GPServer/DataDownload/submitJob'
     res = requests.get(url, params={
         "f":  "json",
         "OutputFormat": 0,
@@ -125,7 +130,7 @@ def _start_job(rings: List[List[float]]) -> str:
         raise ValueError(f"Received unhandled response while submitting LiDAR job: {body}")
 
 
-def _wait_for_job(lidar_job_id: str):
+def _wait_for_job(lidar_job_id: str) -> str:
     while True:
         status = _check_job_status(lidar_job_id)
         if status not in ('esriJobSubmitted', 'esriJobExecuting'):
@@ -134,8 +139,8 @@ def _wait_for_job(lidar_job_id: str):
     return status
 
 
-def _check_job_status(lidar_job_id: str):
-    url = f'https://environment.data.gov.uk/arcgis/rest/services/gp/DataDownload/GPServer/DataDownload/jobs/{lidar_job_id}'
+def _check_job_status(lidar_job_id: str) -> str:
+    url = f'{_DEFRA_API}/services/gp/DataDownload/GPServer/DataDownload/jobs/{lidar_job_id}'
     res = requests.get(url, params={"f": "json"})
     res.raise_for_status()
     body = res.json()
@@ -145,8 +150,8 @@ def _check_job_status(lidar_job_id: str):
         raise ValueError(f"Received unhandled response while checking LiDAR job status: {body}")
 
 
-def _download_tiles(lidar_job_id: str, lidar_dir: str) -> List[str]:
-    url = f'https://environment.data.gov.uk/arcgis/rest/directories/arcgisjobs/gp/datadownload_gpserver/{lidar_job_id}/scratch/results.json'
+def _download_tiles(lidar_job_id: str, lidar_dir: str) -> LidarJobTiles:
+    url = f'{_DEFRA_API}/directories/arcgisjobs/gp/datadownload_gpserver/{lidar_job_id}/scratch/results.json'
     res = requests.get(url)
     res.raise_for_status()
     body = res.json()
@@ -158,120 +163,56 @@ def _download_tiles(lidar_job_id: str, lidar_dir: str) -> List[str]:
         return 9999 if year == 'Latest' else int(year)
     latest = [max(p['years'], key=lambda year: year_to_key(year)) for p in products]
 
-    tiles_dict = defaultdict(dict)
+    all_files = os.listdir(lidar_dir)
+
+    existing_zips: Dict[str, List[ZippedTiles]] = defaultdict(list)
+    for f in all_files:
+        if f.endswith(".zip"):
+            zt = ZippedTiles.from_filename(f)
+            existing_zips[zt.zip_id].append(zt)
+
+    job_tiles = LidarJobTiles()
     for la in latest:
         for resolution in la['resolutions']:
             for tile in resolution['tiles']:
-                split_name = tile['tileName'].split('-')
-                tile_id = split_name[-1]
-                tile_res = split_name[-2]
                 year = int(la['year']) if la['year'] != 'Latest' else datetime.now().year
-                tiles_dict[tile_id][tile_res] = {
-                    'url': tile['url'],
-                    'year': year,
-                }
+                url = tile['url']
+                zt = ZippedTiles.from_url(url, year)
+                if zt:
+                    job_tiles.add_tiles(_download_zip(zt, lidar_dir, existing_zips[zt.zip_id]))
 
-    tiff_paths = []
-    all_files = os.listdir(lidar_dir)
-
-    existing_zips = defaultdict(list)
-    existing_tiffs = defaultdict(list)
-    for f in all_files:
-        if f.endswith(".zip"):
-            existing_zips[_zipfile_id(f)].append(f)
-        if f.endswith(".tif") or f.endswith(".tiff"):
-            existing_tiffs[_tile_id(f)].append(f)
-
-    for tile_id, resolutions in tiles_dict.items():
-        # Use this instead if 50cm LiDAR can also be used:
-        # tile = resolutions.get('50CM', resolutions.get('1M', resolutions.get('2M')))
-        tile = resolutions.get('1M', resolutions.get('2M'))
-        tiff_paths.extend(_download_tile(tile['url'], tile['year'], lidar_dir, existing_zips, existing_tiffs))
-    return tiff_paths
+    return job_tiles
 
 
-def _zipfile_id(filename: str):
-    """
-    Matches the zip file ID in a filename like '2017-LIDAR-DSM-1M-SD72se.zip'
-    """
-    match = re.search("[a-z]{2}[0-9]{2}(?:se|sw|ne|nw)", filename, re.IGNORECASE)
-    return match.group() if match is not None else None
-
-
-def _tile_id(filename: str):
-    """
-    Matches the tile ID in a filename like 'so8707_DSM_1M.tiff'
-    """
-    match = re.search("[a-z]{2}[0-9]{4}", filename, re.IGNORECASE)
-    return match.group() if match is not None else None
-
-
-def _download_tile(url: str,
-                   year: int,
-                   lidar_dir: str,
-                   all_zips: Dict[str, List[str]],
-                   all_tiffs: Dict[str, List[str]]) -> List[str]:
+def _download_zip(zt: ZippedTiles,
+                  lidar_dir: str,
+                  existing_zips: List[ZippedTiles]) -> List[LidarTile]:
     """
     Check if the zip should be used instead of existing versions,
     extract the .asc files, and convert them to geotiffs.
     """
-    zip_name = url.split('/')[-1]
-    zip_id = _zipfile_id(zip_name)
-    zip_name_to_write = f"{year}-{zip_name}"
-    zips_already_downloaded = all_zips[zip_id]
-    best_zip = _find_best(zips_already_downloaded + [zip_name_to_write])
-    if best_zip != zip_name_to_write or zip_name_to_write in zips_already_downloaded:
-        logging.info(f"Skipping download of {url}, already have {best_zip}")
+    zips_already_downloaded = [z for z in existing_zips if z.resolution == zt.resolution]
+    best_zip = sorted(zips_already_downloaded + [zt], key=lambda zzt: -zzt.year)[0]
+
+    if best_zip != zt or zt in zips_already_downloaded:
+        logging.info(f"Skipping download of {zt.url}, already have {best_zip.filename}")
     else:
-        res = requests.get(url)
+        res = requests.get(zt.url)
         res.raise_for_status()
-        with open(join(lidar_dir, zip_name_to_write), 'wb') as wz:
+        with open(join(lidar_dir, zt.filename), 'wb') as wz:
             wz.write(res.content)
-        logging.info(f"Downloaded {url}")
+        logging.info(f"Downloaded {zt.url}")
 
     tiff_paths = []
-    with zipfile.ZipFile(join(lidar_dir, best_zip)) as z:
+    with zipfile.ZipFile(join(lidar_dir, best_zip.filename)) as z:
         for zipinfo in z.infolist():
             z.extract(zipinfo, lidar_dir)
             # Convert to geotiff and add SRS metadata:
             tiff_filename = _asc_to_geotiff(lidar_dir, zipinfo.filename)
-            tiff_paths.append(join(lidar_dir, tiff_filename))
-            tile_id = _tile_id(zipinfo.filename)
-
-            already_downloaded = all_tiffs[tile_id]
-            for existing in already_downloaded:
-                if existing != tiff_filename:
-                    os.remove(join(lidar_dir, existing))
-                    logging.info(f"Removing old tile {existing}")
+            tiff_paths.append(
+                LidarTile.from_filename(join(lidar_dir, tiff_filename), zt.year))
 
     return tiff_paths
-
-
-def _find_best(filenames: List[str], delim: str = '-') -> str:
-    """
-    1. Prefers 0.5m resolution over 1m over 2m
-    2. Prefers newer over older
-
-    So will not choose a 2M resolution even if it is newer,
-    but otherwise will only choose newer versions.
-    """
-    def _get_file_year(filename: str) -> int:
-        return int(filename.split(delim)[0])
-
-    def _get_file_res(filename: str) -> int:
-        raw = filename.split(delim)[-2].upper()
-        if raw == '50CM':
-            return 50
-        elif raw == '1M':
-            return 100
-        elif raw == '2M':
-            return 200
-        else:
-            raise ValueError(f"Unhandled resolution {raw}")
-
-    if len(filenames) == 0:
-        raise ValueError("Expects arrays of length >= 1")
-    return sorted(filenames, key=lambda name: (_get_file_res(name), -_get_file_year(name)))[0]
 
 
 def _asc_to_geotiff(lidar_dir: str, asc_filename: str) -> str:

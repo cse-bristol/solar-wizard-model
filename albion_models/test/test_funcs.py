@@ -1,5 +1,8 @@
 import random
+import unittest
 from datetime import datetime
+from typing import List
+
 from psycopg2.extras import Json
 
 
@@ -33,3 +36,12 @@ def insert_job(pg_conn, job_id: int, bounds: str, project: str):
              False, False, 'NOT_STARTED', None, Json({}))
         )
         pg_conn.commit()
+
+
+class ParameterisedTestCase(unittest.TestCase):
+    def parameterised_test(self, mapping: List[tuple], fn):
+        for tup in mapping:
+            with self.subTest():
+                expected = tup[-1]
+                actual = fn(*tup[:-1])
+                assert expected == actual, f"\nExpected: {expected}\nActual  : {actual}"

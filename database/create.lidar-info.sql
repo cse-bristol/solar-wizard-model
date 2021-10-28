@@ -9,7 +9,7 @@ DROP TABLE IF EXISTS {clean_table};
 CREATE TABLE {clean_table} AS
 SELECT
     ST_SetSrid(
-        ST_CollectionExtract(ST_MakeValid(ST_Union(ST_MakeValid(t.geom_27700))), 3),
+        ST_Multi(ST_CollectionExtract(ST_MakeValid(ST_Union(ST_MakeValid(t.geom_27700))), 3)),
         27700)::geometry(multipolygon, 27700) AS geom_27700
 FROM {temp_table} t;
 
@@ -21,7 +21,7 @@ START TRANSACTION;
 INSERT into models.lidar_info (job_id, lidar_coverage_4326, lidar_coverage_pct)
 SELECT
     %(job_id)s,
-    ST_Transform(ST_Intersection(t.geom_27700, q.bounds), 4326),
+    ST_Multi(ST_Transform(ST_Intersection(t.geom_27700, q.bounds), 4326)),
     ST_Area(ST_Intersection(t.geom_27700, q.bounds)) / ST_Area(q.bounds)
 FROM {clean_table} t, models.job_queue q
 WHERE q.job_id = %(job_id)s;

@@ -8,7 +8,8 @@ import unittest
 from typing import List
 from unittest import mock
 
-from albion_models.lidar.get_lidar import _get_lidar, _find_best, _wkt_to_rings
+from albion_models.lidar.get_lidar import _get_lidar, _wkt_to_rings
+from albion_models.lidar.lidar import LidarJobTiles
 from albion_models.paths import PROJECT_ROOT
 
 _lidar_dir = join(PROJECT_ROOT, "tmp")
@@ -44,7 +45,7 @@ def mocked_requests_get(*args, **kwargs):
 
     # get tile zips:
     elif url.startswith('https://environment.data.gov.uk/UserDownloads/interactive/'):
-        with open(join(PROJECT_ROOT, "testdata", "test_lidar_data.zip"), 'rb') as f:
+        with open(join(PROJECT_ROOT, "testdata", os.path.basename(url)), 'rb') as f:
             return MockResponse(None, 200, f.read())
 
     return MockResponse(None, 404)
@@ -55,36 +56,51 @@ class LidarTestCase(unittest.TestCase):
     @mock.patch('requests.get', side_effect=mocked_requests_get)
     def test_create_tiffs(self, mock_get):
         tiffs = _get_lidar([[]], _lidar_dir)
-        self._assert_tiffs(["tl3555_DSM_1M.tiff", "tl3556_DSM_2M.tiff"], tiffs)
+        self._assert_tiffs([
+            "tl3555_DSM_1M.tiff",
+            "tl3555_DSM_2M.tiff",
+            "tl3556_DSM_1M.tiff",
+            "tl3556_DSM_2M.tiff",
+        ], tiffs)
 
     @mock.patch('requests.get', side_effect=mocked_requests_get)
     def test_dont_redownload_same_year(self, mock_get):
         os.makedirs(_lidar_dir, exist_ok=True)
-        self._create_zip_file("2017-LIDAR-DSM-1M-TL35ne.zip")
+        self._create_zip_file("2017-LIDAR-DSM-1M-TL35ne.zip", from_zip="LIDAR-DSM-1M-TL35ne.zip")
 
         tiffs = _get_lidar([[]], _lidar_dir)
 
         self.assertNotIn(
             mock.call('https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARCOMP/LIDAR-DSM-1M-TL35ne.zip'),
             mock_get.call_args_list)
-        self._assert_tiffs(["tl3555_DSM_1M.tiff", "tl3556_DSM_2M.tiff"], tiffs)
+        self._assert_tiffs([
+            "tl3555_DSM_1M.tiff",
+            "tl3555_DSM_2M.tiff",
+            "tl3556_DSM_1M.tiff",
+            "tl3556_DSM_2M.tiff",
+        ], tiffs)
 
     @mock.patch('requests.get', side_effect=mocked_requests_get)
     def test_dont_overwrite_newer_files(self, mock_get):
         os.makedirs(_lidar_dir, exist_ok=True)
-        self._create_zip_file("2018-LIDAR-DSM-1M-TL35ne.zip")
+        self._create_zip_file("2018-LIDAR-DSM-1M-TL35ne.zip", from_zip="LIDAR-DSM-1M-TL35ne.zip")
 
         tiffs = _get_lidar([[]], _lidar_dir)
 
         self.assertNotIn(
             mock.call('https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARCOMP/LIDAR-DSM-1M-TL35ne.zip'),
             mock_get.call_args_list)
-        self._assert_tiffs(["tl3555_DSM_1M.tiff", "tl3556_DSM_2M.tiff"], tiffs)
+        self._assert_tiffs([
+            "tl3555_DSM_1M.tiff",
+            "tl3555_DSM_2M.tiff",
+            "tl3556_DSM_1M.tiff",
+            "tl3556_DSM_2M.tiff",
+        ], tiffs)
 
     @mock.patch('requests.get', side_effect=mocked_requests_get)
     def test_handle_existing_tiffs_from_old_approach(self, mock_get):
         os.makedirs(_lidar_dir, exist_ok=True)
-        self._create_zip_file("2018-LIDAR-DSM-1M-TL35ne.zip")
+        self._create_zip_file("2018-LIDAR-DSM-1M-TL35ne.zip", from_zip="LIDAR-DSM-1M-TL35ne.zip")
         self._create_file("2018_tl3555_DSM_1M.tiff")
         self._create_file("2018_tl3556_DSM_1M.tiff")
 
@@ -93,7 +109,12 @@ class LidarTestCase(unittest.TestCase):
         self.assertNotIn(
             mock.call('https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARCOMP/LIDAR-DSM-1M-TL35ne.zip'),
             mock_get.call_args_list)
-        self._assert_tiffs(["tl3555_DSM_1M.tiff", "tl3556_DSM_2M.tiff"], tiffs)
+        self._assert_tiffs([
+            "tl3555_DSM_1M.tiff",
+            "tl3555_DSM_2M.tiff",
+            "tl3556_DSM_1M.tiff",
+            "tl3556_DSM_2M.tiff",
+        ], tiffs)
 
     @mock.patch('requests.get', side_effect=mocked_requests_get)
     def test_prefer_1m(self, mock_get):
@@ -108,15 +129,6 @@ class LidarTestCase(unittest.TestCase):
     #     get_lidar(538822.036345393, 251052.546217778, 539221.042792384, 265279.552500898, _lidar_dir)
     #     tiffs = os.listdir(_lidar_dir)
     #     assert len(tiffs) == 100, f"Wanted 100 tiffs, found {len(tiffs)}:\n {tiffs}"
-
-    def test_find_best(self):
-        self._parameterised_test([
-            (['2015-LIDAR-DSM-2M-TL35ne.zip'], '2015-LIDAR-DSM-2M-TL35ne.zip'),
-            (['2015-LIDAR-DSM-2M-TL35ne.zip', '2015-LIDAR-DSM-2M-TL35ne.zip'], '2015-LIDAR-DSM-2M-TL35ne.zip'),
-            (['2015-LIDAR-DSM-2M-TL35ne.zip', '2015-LIDAR-DSM-1M-TL35ne.zip'], '2015-LIDAR-DSM-1M-TL35ne.zip'),
-            (['2014-LIDAR-DSM-2M-TL35ne.zip', '2015-LIDAR-DSM-2M-TL35ne.zip'], '2015-LIDAR-DSM-2M-TL35ne.zip'),
-            (['2014-LIDAR-DSM-1M-TL35ne.zip', '2015-LIDAR-DSM-2M-TL35ne.zip'], '2014-LIDAR-DSM-1M-TL35ne.zip'),
-        ], _find_best)
 
     def test_wkt_to_rings(self):
         self._parameterised_test([
@@ -133,9 +145,9 @@ class LidarTestCase(unittest.TestCase):
     def _create_file(self, name: str):
         open(join(_lidar_dir, name), 'w').close()
 
-    def _create_zip_file(self, name: str):
+    def _create_zip_file(self, name: str, from_zip: str):
         from shutil import copyfile
-        copyfile(join(PROJECT_ROOT, "testdata", "test_lidar_data.zip"), join(_lidar_dir, name))
+        copyfile(join(PROJECT_ROOT, "testdata", from_zip), join(_lidar_dir, name))
 
     def _parameterised_test(self, mapping: List[tuple], fn):
         for tup in mapping:
@@ -143,12 +155,11 @@ class LidarTestCase(unittest.TestCase):
             actual = fn(*tup[:-1])
             assert expected == actual, f"\n{tup[:-1]}\nExpected: {expected}\nActual  : {actual}"
 
-    def _assert_tiffs(self, expected: List[str], ret_value: List[str]):
-        actual = [f for f in os.listdir(_lidar_dir) if f.endswith(".tiff")]
-        assert len(actual) == len(expected) == len(ret_value), f"{expected} length != {ret_value} length != {actual} length"
+    def _assert_tiffs(self, expected: List[str], ret_value: LidarJobTiles):
+        in_tiles_object = ret_value.all_filenames()
+        assert len(expected) == len(in_tiles_object), f"{expected} length != {in_tiles_object} length"
         for name in expected:
-            assert name in actual
-            assert join(_lidar_dir, name) in ret_value
+            assert join(_lidar_dir, name) in in_tiles_object
 
     def setUp(self):
         logging.basicConfig(level=logging.DEBUG, format='[%(asctime)s] %(levelname)s: %(message)s')
