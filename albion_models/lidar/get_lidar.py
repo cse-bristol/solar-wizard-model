@@ -15,6 +15,7 @@ from osgeo import gdal, osr
 import requests
 from psycopg2.sql import SQL, Identifier
 
+from albion_models.lidar.grid_ref import os_grid_ref_to_wkt
 from albion_models.lidar.lidar import ZippedTiles, LidarTile, LidarJobTiles
 from albion_models.paths import SQL_DIR
 
@@ -39,7 +40,7 @@ def get_all_lidar(pg_conn, job_id: int, lidar_dir: str) -> str:
     job_tiles = LidarJobTiles()
     logging.info(f"{len(gridded_bounds)} LiDAR jobs to run")
     for rings in gridded_bounds:
-        job_tiles.merge(_get_lidar(rings=rings, lidar_dir=lidar_dir))
+        job_tiles.merge(_get_lidar(pg_conn, job_id=job_id, rings=rings, lidar_dir=lidar_dir))
 
     job_tiles.create_merged_vrt(job_lidar_dir, job_lidar_vrt)
     job_tiles.delete_unmerged_tiles()
@@ -78,7 +79,7 @@ def _wkt_to_rings(wkt: str) -> List[List[float]]:
         return []
 
 
-def _get_lidar(rings: List[List[float]], lidar_dir: str) -> LidarJobTiles:
+def _get_lidar(pg_conn, job_id: int, rings: List[List[float]], lidar_dir: str) -> LidarJobTiles:
     """
     Get Lidar data from the defra internal API.
 
@@ -94,7 +95,7 @@ def _get_lidar(rings: List[List[float]], lidar_dir: str) -> LidarJobTiles:
         raise ValueError(f"Lidar job {lidar_job_id} failed: status {status}")
     logging.info(f"LiDAR job {lidar_job_id} completed with status {status}, downloading...")
 
-    job_tiles = _download_tiles(lidar_job_id, lidar_dir)
+    job_tiles = _download_tiles(pg_conn, job_id, lidar_job_id, lidar_dir)
     logging.info(f"LiDAR data for {lidar_job_id} downloaded")
     return job_tiles
 
@@ -150,7 +151,7 @@ def _check_job_status(lidar_job_id: str) -> str:
         raise ValueError(f"Received unhandled response while checking LiDAR job status: {body}")
 
 
-def _download_tiles(lidar_job_id: str, lidar_dir: str) -> LidarJobTiles:
+def _download_tiles(pg_conn, job_id: int, lidar_job_id: str, lidar_dir: str) -> LidarJobTiles:
     url = f'{_DEFRA_API}/directories/arcgisjobs/gp/datadownload_gpserver/{lidar_job_id}/scratch/results.json'
     res = requests.get(url)
     res.raise_for_status()
@@ -179,12 +180,14 @@ def _download_tiles(lidar_job_id: str, lidar_dir: str) -> LidarJobTiles:
                 url = tile['url']
                 zt = ZippedTiles.from_url(url, year)
                 if zt:
-                    job_tiles.add_tiles(_download_zip(zt, lidar_dir, existing_zips[zt.zip_id]))
+                    job_tiles.add_tiles(_download_zip(pg_conn, job_id, zt, lidar_dir, existing_zips[zt.zip_id]))
 
     return job_tiles
 
 
-def _download_zip(zt: ZippedTiles,
+def _download_zip(pg_conn,
+                  job_id: int,
+                  zt: ZippedTiles,
                   lidar_dir: str,
                   existing_zips: List[ZippedTiles]) -> List[LidarTile]:
     """
@@ -209,8 +212,9 @@ def _download_zip(zt: ZippedTiles,
             z.extract(zipinfo, lidar_dir)
             # Convert to geotiff and add SRS metadata:
             tiff_filename = _asc_to_geotiff(lidar_dir, zipinfo.filename)
-            tiff_paths.append(
-                LidarTile.from_filename(join(lidar_dir, tiff_filename), zt.year))
+            tile = LidarTile.from_filename(join(lidar_dir, tiff_filename), zt.year)
+            if _tile_intersects_bounds(pg_conn, job_id, tile.tile_id):
+                tiff_paths.append(tile)
 
     return tiff_paths
 
@@ -233,3 +237,16 @@ def _asc_to_geotiff(lidar_dir: str, asc_filename: str) -> str:
     gdal_tiff_file = None
     os.remove(join(lidar_dir, asc_filename))
     return tiff_filename
+
+
+def _tile_intersects_bounds(pg_conn, job_id: int, tile_id: str) -> bool:
+    with pg_conn.cursor() as cursor:
+        cursor.execute("""
+            SELECT ST_Intersects(bounds, ST_GeomFromText(%(tile_wkt)s, 27700))
+            FROM models.job_queue WHERE job_id = %(job_id)s
+        """, {
+            'tile_wkt': os_grid_ref_to_wkt(tile_id),
+            'job_id': job_id
+        })
+        pg_conn.commit()
+        return cursor.fetchone()[0]
