@@ -142,7 +142,11 @@ all_angles AS (
 )
 UPDATE {roof_horizons} h SET aspect = a.degs
 FROM all_angles a
-WHERE h.toid = a.toid AND abs(a.degs - aspect) < 15 AND NOT is_flat AND usable;
+WHERE h.toid = a.toid AND usable AND (
+    (NOT is_flat AND abs(a.degs - aspect) < 15) OR
+    -- for flat roofs, if there is a sensible angle near-South, align the panels
+    -- with that:
+    (is_flat AND abs(a.degs - aspect) < 45));
 
 COMMIT;
 START TRANSACTION;
