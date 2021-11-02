@@ -64,6 +64,7 @@ def create_cb_report_data(job_id: int, pg_conn):
                    "Privately rented",
                    "Council/housing association",
                    "Non-residential",
+                   "Unknown",
                    "All"):
         sql_script_with_bindings(
             pg_conn,
