@@ -19,7 +19,9 @@ INSERT INTO models.pv_cb_report (
     cumulative_gwh,
     cumulative_installations,
     total_area_m2,
-    cumulative_area_m2
+    cumulative_area_m2,
+    already_have_pv_count,
+    listed_building_count
 )
 WITH irr_bands AS (
     -- Generate 30 ranges, from [0.00,0.01) to [0.29,)
@@ -50,7 +52,9 @@ SELECT
     SUM(SUM(cb.gwh)) OVER w_cost AS cumulative_gwh,
     SUM(COUNT(*)) OVER w_cost AS cumulative_installations,
     SUM(cb.area_m2) As total_area_m2,
-    SUM(SUM(cb.area_m2)) OVER w_cost AS cumulative_area_m2
+    SUM(SUM(cb.area_m2)) OVER w_cost AS cumulative_area_m2,
+    COUNT(*) FILTER (WHERE cb.already_has_pv) AS already_have_pv_count,
+    COUNT(*) FILTER (WHERE cb.listed_building_grade IS NOT NULL) AS listed_building_count
 FROM
     irr_bands
     LEFT JOIN models.pv_cb_best_irr cb ON irr_bands.irr_band @> cb.irr::numeric

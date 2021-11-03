@@ -160,6 +160,9 @@ def _handle_job(pg_conn, job: dict) -> bool:
         med_inst_vat = params["med_inst_vat"]
         large_inst_vat = params["large_inst_vat"]
 
+        exclude_already_have_pv = params["exclude_already_have_pv"]
+        exclude_listed = params["exclude_listed"]
+
         model_cost_benefit(
             pg_uri=pg_uri,
             job_id=job_id,
@@ -175,7 +178,9 @@ def _handle_job(pg_conn, job: dict) -> bool:
             large_inst_fixed_cost=large_inst_fixed_cost,
             small_inst_vat=small_inst_vat,
             med_inst_vat=med_inst_vat,
-            large_inst_vat=large_inst_vat)
+            large_inst_vat=large_inst_vat,
+            exclude_already_have_pv=exclude_already_have_pv,
+            exclude_listed=exclude_listed)
 
     logging.info(f"Completed job {job_id}, project {project}")
     _send_success_email(job['email'], job_id, project)

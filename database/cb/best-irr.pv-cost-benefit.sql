@@ -73,7 +73,9 @@ INSERT INTO models.pv_cb_best_irr (
     irr,
     irr_percentile,
     irr_rank,
-    panel_geom_4326
+    panel_geom_4326,
+    already_has_pv,
+    listed_building_grade
 )
 SELECT
     irr.job_id,
@@ -103,10 +105,14 @@ SELECT
     irr.irr,
     percent_rank() OVER (PARTITION BY electricity_kwh_cost ORDER BY irr) AS irr_percentile,
     rank() OVER (PARTITION BY electricity_kwh_cost ORDER BY irr DESC) AS irr_rank,
-    irr.geom_4326 AS panel_geom_4326
+    irr.geom_4326 AS panel_geom_4326,
+    pv.toid IS NOT NULL AS already_has_pv,
+    lb.grade::text AS listed_building_grade
 FROM
     {best_irr} irr
     LEFT JOIN {tenure} t USING (toid)
+    LEFT JOIN historic_england.listed_buildings lb USING (toid)
+    LEFT JOIN pv_installations.has_pv pv USING (toid)
     LEFT JOIN addressbase.classification_scheme cs ON t.main_class = cs.concatenated_classification;
 
 --

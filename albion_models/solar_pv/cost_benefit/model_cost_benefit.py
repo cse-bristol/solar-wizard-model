@@ -21,7 +21,9 @@ def model_cost_benefit(pg_uri: str,
                        large_inst_fixed_cost: float,
                        small_inst_vat: float,
                        med_inst_vat: float,
-                       large_inst_vat: float):
+                       large_inst_vat: float,
+                       exclude_already_have_pv: bool,
+                       exclude_listed: bool):
     pg_conn = connect(pg_uri, cursor_factory=psycopg2.extras.DictCursor)
     try:
         for electricity_kwh_cost in electricity_kwh_costs:
@@ -40,7 +42,9 @@ def model_cost_benefit(pg_uri: str,
                 large_inst_fixed_cost=large_inst_fixed_cost,
                 small_inst_vat=small_inst_vat,
                 med_inst_vat=med_inst_vat,
-                large_inst_vat=large_inst_vat)
+                large_inst_vat=large_inst_vat,
+                exclude_already_have_pv=exclude_already_have_pv,
+                exclude_listed=exclude_listed)
         _create_view(pg_conn, job_id)
 
         create_cb_report_data(job_id, pg_conn)
@@ -87,7 +91,9 @@ def _do_model(pg_conn,
               large_inst_fixed_cost: float,
               small_inst_vat: float,
               med_inst_vat: float,
-              large_inst_vat: float):
+              large_inst_vat: float,
+              exclude_already_have_pv: bool,
+              exclude_listed: bool):
     sql_script_with_bindings(
         pg_conn, 'cb/create.pv-cost-benefit.sql', {
             "job_id": job_id,
@@ -104,6 +110,8 @@ def _do_model(pg_conn,
             "small_inst_vat": small_inst_vat,
             "med_inst_vat": med_inst_vat,
             "large_inst_vat": large_inst_vat,
+            "exclude_already_have_pv": exclude_already_have_pv,
+            "exclude_listed": exclude_listed,
         })
 
     installations = _get_installations(pg_conn, job_id, electricity_kwh_cost)

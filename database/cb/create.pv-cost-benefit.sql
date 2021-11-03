@@ -39,7 +39,11 @@ SELECT
     ST_Multi(ST_CollectionHomogenize(ST_Collect(pv.roof_geom_4326) OVER w)) AS geom_4326
 FROM models.solar_pv pv
 LEFT JOIN models.job_queue jq ON pv.job_id = jq.job_id
+LEFT JOIN historic_england.listed_buildings lb USING (toid)
+LEFT JOIN pv_installations.has_pv has_pv USING (toid)
 WHERE pv.job_id = %(solar_pv_job_id)s
+    AND (lb.grade IS NULL OR NOT %(exclude_listed)s)
+    AND (has_pv.toid IS NULL OR NOT %(exclude_already_have_pv)s)
 WINDOW w AS (
     PARTITION BY pv.toid
     ORDER BY pv.total_avg_energy_prod_kwh_per_year / pv.area DESC
