@@ -157,10 +157,13 @@ class LidarJobTiles:
         matches = [t for t in tiles if t.tile_id == tile_id]
         return matches[0] if len(matches) > 0 else None
 
-    def create_merged_vrt(self, job_lidar_dir: str, vrt_name: str):
+    def create_merged_vrt(self, job_lidar_dir: str, vrt_name: str, coverage_vrt_name: str):
         """
         For each tile, merge the 50cm, 1m and 2m resolution versions into a single
         tile (giving priority to higher resolutions).
+
+        Also creates a coverage raster for each tile showing what the highest resolution
+        available is for each pixel.
 
         Excludes 50cm LiDAR if the 50cm LiDAR has less than 25% pixel coverage of the
         entire area (as using 50cm LiDAR slows down several parts of the PV model, so
@@ -185,19 +188,29 @@ class LidarJobTiles:
             return
 
         merged_tiles = []
+        coverage_tiles = []
         for tile_id, tiles in by_id.items():
             if len(tiles) == 1:
                 merged_tiles.append(tiles[0])
             elif len(tiles) > 1:
                 res = tiles[-1].resolution.value
+                filenames = [tile.filename for tile in tiles]
                 merged = gdal_helpers.merge(
-                    [tile.filename for tile in tiles],
+                    filenames,
                     join(job_lidar_dir, f"{tile_id}_DSM_merged.tiff"),
                     res=res,
                     nodata=LIDAR_NODATA)
+
                 merged_tiles.append(merged)
 
+            per_res_cov_raster = lidar_per_res_coverage(
+                tiles,
+                join(job_lidar_dir, f"{tile_id}_DSM_res_cov.tiff"),
+                nodata=LIDAR_NODATA)
+            coverage_tiles.append(per_res_cov_raster)
+
         gdal_helpers.create_vrt(merged_tiles, vrt_name)
+        gdal_helpers.create_vrt(coverage_tiles, coverage_vrt_name)
 
     def _get_50cm_coverage(self) -> float:
         """
@@ -228,6 +241,25 @@ class LidarJobTiles:
     def delete_unmerged_tiles(self):
         for tile in itertools.chain(self.tiles_2m, self.tiles_1m, self.tiles_50cm):
             os.remove(tile.filename)
+
+
+def lidar_per_res_coverage(resolutions: List[LidarTile], outfile: str, nodata: int):
+    """
+    Create a raster which represents the per-resolution coverage of the tile.
+    Each pixel will have the value of the highest-resolution coverage of that pixel.
+    (e.g. either 0.5, 1.0 or 2.0)
+    """
+    to_merge = [gdal_helpers.create_resolution_raster(
+                t.filename, t.filename + '.rmap.tiff', t.resolution.value, nodata)
+                for t in resolutions]
+
+    highest_res = resolutions[-1].resolution.value
+    gdal_helpers.merge(to_merge, outfile, highest_res, nodata)
+
+    for f in to_merge:
+        os.remove(f)
+
+    return outfile
 
 
 def _zipfile_id(filename: str):

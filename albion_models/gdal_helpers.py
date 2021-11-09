@@ -2,9 +2,11 @@ import json
 import logging
 import os
 import subprocess
-from typing import List, Tuple
+import textwrap
+from typing import List, Tuple, Optional
 
 import gdal
+from osgeo import ogr
 
 
 def create_vrt(tiles: List[str], vrt_file: str):
@@ -111,6 +113,19 @@ def crop_or_expand(file_to_crop: str,
     to_crop = None
 
 
+def set_resolution(in_tiff: str,
+                   out_tiff: str,
+                   res: float):
+    """
+    Output a new version of a raster with the specified resolution
+    """
+    gdal.UseExceptions()
+    in_f = gdal.Open(in_tiff)
+    _, xres, _, _, _, yres = in_f.GetGeoTransform()
+    gdal.Warp(out_tiff, in_f, xRes=res, yRes=res)
+    return out_tiff
+
+
 def aspect(cropped_lidar: str, aspect_file: str):
     run(f"gdaldem aspect {cropped_lidar} {aspect_file} -of GTiff -b 1 -zero_for_flat")
 
@@ -146,9 +161,53 @@ def count_raster_pixels_pct(tiff: str, value, band: int = 1) -> float:
     return (a == value).sum() / a.size
 
 
+def create_resolution_raster(in_tiff: str, out_tiff: str, res: float, nodata: int) -> str:
+    run(f'''
+        gdal_calc.py 
+        -A {in_tiff}
+        --outfile={out_tiff}
+        --quiet
+        --NoDataValue={nodata}
+        --calc="numpy.where(A!={nodata}, {res}, {nodata})" 
+    ''')
+    return out_tiff
+
+
+def polygonize(in_tiff: str, out_gpkg: str, out_layer: str, out_field: str, connectedness_8: bool = True):
+    """
+    Polygonize a raster. See `gdal_polygonize.py` in GDAL.
+    
+    This uses `FPolygonize` rather than `Polygonize`, so it doesn't cast float rasters
+    to ints before running.
+    
+    :param in_tiff: raster to polygonize 
+    :param out_gpkg: out geopackage (should not exist)
+    :param out_layer: name of table in geopackage
+    :param out_field: name of field to write pixel values to
+    :param connectedness_8: if True, use 8-connectedness to detect polygons. Otherwise
+    uses 4-connectedness.
+    :return: the name of the geopackage.
+    """
+    in_file = gdal.Open(in_tiff)
+    band = in_file.GetRasterBand(1)
+
+    drv = ogr.GetDriverByName("GPKG")
+    dst_ds = drv.CreateDataSource(out_gpkg)
+    srs = in_file.GetSpatialRef()
+    dst_layer = dst_ds.CreateLayer(out_layer, geom_type=ogr.wkbPolygon, srs=srs)
+
+    fd = ogr.FieldDefn(out_field, ogr.OFTReal)
+    dst_layer.CreateField(fd)
+    options = ['8CONNECTED=8'] if connectedness_8 else []
+
+    gdal.FPolygonize(band, band.GetMaskBand(), dst_layer, 0, options, callback=None)
+    return out_gpkg
+
+
 def run(command: str):
-    res = subprocess.run(command.replace("\n", " "), capture_output=True, text=True, shell=True)
-    print(res.stdout)
-    print(res.stderr)
+    command = textwrap.dedent(command).replace("\n", " ").strip()
+    res = subprocess.run(command, capture_output=True, text=True, shell=True)
+    print(res.stdout.strip())
     if res.returncode != 0:
+        print(res.stderr.strip())
         raise ValueError(res.stderr)

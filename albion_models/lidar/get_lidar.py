@@ -21,6 +21,7 @@ from albion_models.paths import SQL_DIR
 
 
 LIDAR_VRT = "tiles.vrt"
+LIDAR_COV_VRT = "per_res_coverage.vrt"
 _DEFRA_API = "https://environment.data.gov.uk/arcgis/rest"
 
 
@@ -31,9 +32,10 @@ def get_all_lidar(pg_conn, job_id: int, lidar_dir: str) -> str:
     """
     job_lidar_dir = join(lidar_dir, f"job_{job_id}")
     job_lidar_vrt = join(job_lidar_dir, LIDAR_VRT)
+    coverage_vrt = join(job_lidar_dir, LIDAR_COV_VRT)
 
-    if os.path.exists(job_lidar_vrt):
-        logging.info("LiDAR .vrt exists, using files referenced")
+    if os.path.exists(job_lidar_vrt) and os.path.exists(coverage_vrt):
+        logging.info("LiDAR .vrts exist, using files referenced")
         return job_lidar_vrt
 
     gridded_bounds = _get_gridded_bounds(pg_conn, job_id)
@@ -42,7 +44,7 @@ def get_all_lidar(pg_conn, job_id: int, lidar_dir: str) -> str:
     for rings in gridded_bounds:
         job_tiles.merge(_get_lidar(pg_conn, job_id=job_id, rings=rings, lidar_dir=lidar_dir))
 
-    job_tiles.create_merged_vrt(job_lidar_dir, job_lidar_vrt)
+    job_tiles.create_merged_vrt(job_lidar_dir, job_lidar_vrt, coverage_vrt)
     job_tiles.delete_unmerged_tiles()
     logging.info(f"Created LiDAR vrt {job_lidar_vrt}")
     return job_lidar_vrt

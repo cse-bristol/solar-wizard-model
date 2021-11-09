@@ -6,7 +6,7 @@ from psycopg2.sql import SQL, Literal, Identifier
 
 from albion_models.db_funcs import connect, sql_script_with_bindings
 from albion_models import gdal_helpers
-from albion_models.lidar.get_lidar import LIDAR_VRT
+from albion_models.lidar.get_lidar import LIDAR_COV_VRT
 
 
 def calculate_lidar_coverage(job_id: int, lidar_dir: str, pg_uri: str):
@@ -22,26 +22,17 @@ def calculate_lidar_coverage(job_id: int, lidar_dir: str, pg_uri: str):
      Results are in table `models.lidar_info`.
     """
     job_lidar_dir = join(lidar_dir, f"job_{job_id}")
-    lidar_vrt_file = join(job_lidar_dir, LIDAR_VRT)
-    srid = gdal_helpers.get_srid(lidar_vrt_file, fallback=27700)
-    res = gdal_helpers.get_res(lidar_vrt_file)
+    cov_vrt_file = join(job_lidar_dir, LIDAR_COV_VRT)
+    srid = gdal_helpers.get_srid(cov_vrt_file, fallback=27700)
+    res = gdal_helpers.get_res(cov_vrt_file)
 
     bounds_mask = _create_bounds_mask(job_id, job_lidar_dir, pg_uri, res, srid)
 
-    cropped_lidar = join(job_lidar_dir, "cropped_lidar.tif")
-    gdal_helpers.crop_or_expand(lidar_vrt_file, bounds_mask, cropped_lidar, adjust_resolution=True)
+    cropped_lidar = join(job_lidar_dir, "cropped_per_res.tif")
+    gdal_helpers.crop_or_expand(cov_vrt_file, bounds_mask, cropped_lidar, adjust_resolution=True)
 
-    lidar_cov_tif = join(job_lidar_dir, "lidar_cov.tif")
-    gdal_helpers.run(f'''
-        gdal_calc.py 
-        -A {cropped_lidar}
-        -B {bounds_mask} 
-        --outfile={lidar_cov_tif}
-        --quiet
-        --calc="logical_and(A!=-9999,B==1)" ''')
-
-    lidar_cov_gpkg = join(job_lidar_dir, "lidar_cov.gpkg")
-    gdal_helpers.run(f'gdal_polygonize.py -8 -q {lidar_cov_tif} {lidar_cov_gpkg} lidar_cov')
+    lidar_cov_gpkg = gdal_helpers.polygonize(
+        cropped_lidar, join(job_lidar_dir, "lidar_cov.gpkg"), 'lidar_cov', 'resolution')
 
     gdal_helpers.run(f'''
         ogr2ogr
@@ -49,10 +40,10 @@ def calculate_lidar_coverage(job_id: int, lidar_dir: str, pg_uri: str):
         -overwrite
         -nln models.lidar_cov_temp_{job_id}
         -nlt MULTIPOLYGON
-        -lco GEOMETRY_NAME=geom_27700
+        -lco GEOMETRY_NAME=geom_4326
         -gt 65536
         -s_srs EPSG:{srid}
-        -t_srs EPSG:27700
+        -t_srs EPSG:4326
         {lidar_cov_gpkg}
         --config PG_USE_COPY YES
     ''')
@@ -70,7 +61,6 @@ def calculate_lidar_coverage(job_id: int, lidar_dir: str, pg_uri: str):
 
     os.remove(bounds_mask)
     os.remove(cropped_lidar)
-    os.remove(lidar_cov_tif)
     os.remove(lidar_cov_gpkg)
 
 
