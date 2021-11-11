@@ -19,9 +19,9 @@ def find_horizons(pg_uri: str,
                   lidar_vrt_file: str,
                   horizon_search_radius: int,
                   horizon_slices: int,
-                  masking_strategy: str,
-                  mask_table: str = "mastermap.building",
+                  override_mask_sql: str = None,
                   override_res: float = None,
+                  shrink_lidar_to_mask: bool = False,
                   debug_mode=False) -> float:
     """
     Detect the horizon height in degrees for each `horizon_slices` slice of the
@@ -50,13 +50,23 @@ def find_horizons(pg_uri: str,
                          f"not 1m: was {unit} {unit_dims}")
 
     logging.info("Creating raster mask...")
-    if masking_strategy == 'building':
-        mask_file = mask.create_buildings_mask(job_id, solar_dir, pg_uri, res=res, mask_table=mask_table, srid=srid)
-    elif masking_strategy == 'bounds':
-        mask_file = mask.create_bounds_mask(job_id, solar_dir, pg_uri, res=res, srid=srid)
-        gdal_helpers.crop_or_expand(mask_file, lidar_vrt_file, mask_file, adjust_resolution=False)
+    if override_mask_sql:
+        mask_sql = override_mask_sql
     else:
-        raise ValueError(f"Unknown masking strategy {masking_strategy}")
+        mask_sql = mask.buildings_mask_sql(pg_uri, job_id, buffer=1)
+
+    mask_file = mask.create_mask(mask_sql, solar_dir, pg_uri, res=res, srid=srid)
+
+    if shrink_lidar_to_mask:
+        gdal_helpers.crop_or_expand(mask_file, lidar_vrt_file, mask_file, adjust_resolution=False)
+
+    # if masking_strategy == 'building':
+    #     mask_file = mask.create_buildings_mask(job_id, solar_dir, pg_uri, res=res, srid=srid, buffer=1)
+    # elif masking_strategy == 'bounds':
+    #     mask_file = mask.create_bounds_mask(job_id, solar_dir, pg_uri, res=res, srid=srid)
+    #     gdal_helpers.crop_or_expand(mask_file, lidar_vrt_file, mask_file, adjust_resolution=False)
+    # else:
+    #     raise ValueError(f"Unknown masking strategy {masking_strategy}")
 
     logging.info("Cropping lidar to mask dimensions...")
     cropped_lidar = join(solar_dir, 'cropped_lidar.tif')

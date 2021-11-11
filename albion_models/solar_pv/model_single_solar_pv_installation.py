@@ -4,6 +4,7 @@ from os.path import join
 from typing import List
 
 from albion_models.db_funcs import process_pg_uri
+from albion_models.solar_pv import mask
 from albion_models.solar_pv.aggregate_horizons import aggregate_user_submitted_polygon_horizons
 from albion_models.solar_pv.saga_gis.horizons import find_horizons
 from albion_models.solar_pv.model_solar_pv import _init_schema
@@ -48,7 +49,8 @@ def model_single_solar_pv_installation(pg_uri: str,
         lidar_paths=lidar_paths,
         horizon_search_radius=horizon_search_radius,
         horizon_slices=horizon_slices,
-        masking_strategy='bounds')
+        override_mask_sql=mask.bounds_mask_sql(pg_uri, job_id, 27700),
+        shrink_lidar_to_mask=True)
 
     logging.info("Aggregating horizon data by user-submitted polygons and filtering...")
     aggregate_user_submitted_polygon_horizons(pg_uri, job_id, horizon_slices, flat_roof_degrees, aggregate_fn)
