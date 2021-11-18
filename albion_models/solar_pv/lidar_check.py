@@ -1,3 +1,4 @@
+import logging
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Dict, Any, Tuple, List, Optional
@@ -75,9 +76,12 @@ def check_lidar(pg_uri: str, job_id: int):
     detects all buildings as flat (or like the ground that they were built on was) -
     or occasionally with a now-nonexistent building intersecting the polygon weirdly.
     """
-    # todo skip if done
     pg_conn = connect(pg_uri, cursor_factory=psycopg2.extras.DictCursor)
     try:
+        if _already_checked(pg_conn, job_id):
+            logging.info("Already checked LiDAR coverage, skipping...")
+            return
+
         rows = _load_building_pixels(pg_conn, job_id)
         by_toid = defaultdict(HeightAggregator)
         for row in rows:
@@ -134,3 +138,17 @@ def _load_building_pixels(pg_conn, job_id: int):
         ))
         pg_conn.commit()
         return cursor.fetchall()
+
+
+def _already_checked(pg_conn, job_id: int) -> bool:
+    with pg_conn.cursor() as cursor:
+        cursor.execute(
+            SQL("""
+                SELECT COUNT(*) != 0 FROM {building_exclusion_reasons} 
+                WHERE exclusion_reason IS NOT NULL
+            """).format(
+                building_exclusion_reasons=Identifier(tables.schema(job_id),
+                                                      tables.BUILDING_EXCLUSION_REASONS_TABLE),
+            ))
+        pg_conn.commit()
+        return cursor.fetchone()[0]
