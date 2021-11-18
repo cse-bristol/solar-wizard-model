@@ -25,6 +25,21 @@ WHERE q.job_id=%(job_id)s;
 
 CREATE INDEX IF NOT EXISTS buildings_geom_27700_idx ON {buildings} USING GIST (geom_27700);
 
+-- Building exclusion reasons table:
+CREATE TABLE IF NOT EXISTS {building_exclusion_reasons} AS
+SELECT
+    toid,
+    NULL::models.pv_exclusion_reason AS exclusion_reason
+FROM {buildings};
+
+CREATE UNIQUE INDEX IF NOT EXISTS building_exclusions_toid ON {building_exclusion_reasons} (toid);
+
+-- Single multipolygon of the union of all buildings:
+CREATE TABLE IF NOT EXISTS {all_buildings} AS
+SELECT ST_Union(geom_27700) AS geom_27700 FROM {buildings};
+
+CREATE INDEX IF NOT EXISTS all_buildings_geom_27700_idx ON {all_buildings} USING GIST (geom_27700);
+
 -- Create the table for storing roof planes:
 CREATE TABLE IF NOT EXISTS {roof_planes} (
     roof_plane_id SERIAL PRIMARY KEY,

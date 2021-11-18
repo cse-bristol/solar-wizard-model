@@ -10,6 +10,7 @@ import albion_models.solar_pv.pv_gis.pv_gis_client as pv_gis_client
 import albion_models.solar_pv.tables as tables
 from albion_models.db_funcs import connect, sql_script_with_bindings, process_pg_uri
 from albion_models.solar_pv.aggregate_horizons import aggregate_horizons
+from albion_models.solar_pv.lidar_check import check_lidar
 from albion_models.solar_pv.saga_gis.horizons import find_horizons
 from albion_models.solar_pv.ransac.run_ransac import run_ransac
 
@@ -58,8 +59,10 @@ def model_solar_pv(pg_uri: str,
         lidar_vrt_file=lidar_vrt_file,
         horizon_search_radius=horizon_search_radius,
         horizon_slices=horizon_slices,
-        masking_strategy='building',
         debug_mode=debug_mode)
+
+    logging.info("Checking for outdated LiDAR and missing LiDAR coverage...")
+    check_lidar(pg_uri, job_id)
 
     logging.info("Detecting roof planes...")
     run_ransac(pg_uri, job_id, resolution_metres=res)
@@ -104,6 +107,8 @@ def _init_schema(pg_uri: str, job_id: int):
             bounds_4326=Identifier(tables.schema(job_id), tables.BOUNDS_TABLE),
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
             roof_planes=Identifier(tables.schema(job_id), tables.ROOF_PLANE_TABLE),
+            building_exclusion_reasons=Identifier(tables.schema(job_id), tables.BUILDING_EXCLUSION_REASONS_TABLE),
+            all_buildings=Identifier(tables.schema(job_id), tables.ALL_BUILDINGS_TABLE),
         )
     finally:
         pg_conn.close()

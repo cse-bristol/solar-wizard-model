@@ -43,6 +43,7 @@ def run_ransac(pg_uri: str,
         for res in pool.starmap(_handle_building_page, wrapped_iterable):
             pass
 
+    _mark_buildings_with_no_planes(pg_uri, job_id)
     logging.info(f"RANSAC for {building_count} roofs took {round(time.time() - start_time, 2)} s.")
 
 
@@ -130,7 +131,12 @@ def _load(pg_uri: str, job_id: int, page: int, page_size: int):
         with pg_conn.cursor() as cursor:
             cursor.execute(SQL("""
                 WITH building_page AS (
-                    SELECT b.toid, b.geom_27700 FROM {buildings} b ORDER BY b.toid
+                    SELECT b.toid, b.geom_27700 
+                    FROM 
+                        {buildings} b 
+                        LEFT JOIN {building_exclusion_reasons} ber ON b.toid = ber.toid
+                    WHERE ber.exclusion_reason IS NULL 
+                    ORDER BY b.toid
                     OFFSET %(offset)s LIMIT %(limit)s
                 )
                 SELECT h.pixel_id, h.easting, h.northing, h.elevation, h.aspect, b.toid 
@@ -142,6 +148,7 @@ def _load(pg_uri: str, job_id: int, page: int, page_size: int):
                 """).format(
                 pixel_horizons=Identifier(tables.schema(job_id), tables.PIXEL_HORIZON_TABLE),
                 buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
+                building_exclusion_reasons=Identifier(tables.schema(job_id), tables.BUILDING_EXCLUSION_REASONS_TABLE)
             ), {
                 "offset": page * page_size,
                 "limit": page_size,
@@ -204,6 +211,25 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[dict]):
     finally:
         pg_conn.close()
 
+
+def _mark_buildings_with_no_planes(pg_uri: str, job_id: int):
+    pg_conn = connect(pg_uri)
+    try:
+        with pg_conn.cursor() as cursor:
+            cursor.execute(SQL("""
+                UPDATE {building_exclusion_reasons} ber 
+                SET exclusion_reason = 'NO_ROOF_PLANES_DETECTED'
+                WHERE 
+                    NOT EXISTS (SELECT FROM {roof_planes} rp WHERE rp.toid = ber.toid)
+                    AND ber.exclusion_reason IS NULL
+            """).format(
+                roof_planes=Identifier(tables.schema(job_id), tables.ROOF_PLANE_TABLE),
+                building_exclusion_reasons=Identifier(tables.schema(job_id),
+                                                      tables.BUILDING_EXCLUSION_REASONS_TABLE),
+            ))
+            pg_conn.commit()
+    finally:
+        pg_conn.close()
 
 # if __name__ == '__main__':
 #     _handle_building_page(

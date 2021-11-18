@@ -182,6 +182,16 @@ UPDATE {panel_horizons} p SET usable = false
 WHERE usable = true AND area < %(min_roof_area_m)s;
 
 --
+-- Update building_exclusion_reasons for any buildings that have roof planes but no
+-- usable ones:
+--
+UPDATE {building_exclusion_reasons} ber
+SET exclusion_reason = 'ALL_ROOF_PLANES_UNUSABLE'
+WHERE
+    NOT EXISTS (SELECT FROM {panel_horizons} ph WHERE ph.usable AND ph.toid = ber.toid)
+    AND ber.exclusion_reason IS NULL;
+
+--
 -- Add 3D version of panels:
 --
 ALTER TABLE {panel_horizons} ADD COLUMN panel_geom_27700_3d geometry(MultiPolygonZ, 27700);

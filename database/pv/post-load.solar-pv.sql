@@ -118,3 +118,8 @@ DROP TABLE {solar_pv};
 
 CREATE OR REPLACE VIEW models.{job_view} AS
 SELECT * FROM models.solar_pv WHERE job_id = %(job_id)s;
+
+INSERT INTO models.pv_building_exclusions
+SELECT %(job_id)s, toid, exclusion_reason
+FROM {building_exclusion_reasons}
+WHERE exclusion_reason IS NOT NULL;
