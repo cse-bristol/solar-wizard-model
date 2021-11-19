@@ -14,12 +14,11 @@ def aggregate_horizons(pg_uri: str,
                        min_roof_degrees_from_north: int,
                        flat_roof_degrees: int,
                        max_avg_southerly_horizon_degrees: int,
-                       panel_width_m: float,
-                       panel_height_m: float,
+                       min_dist_to_edge_m: float,
                        resolution_metres: float):
     schema = tables.schema(job_id)
 
-    if count(pg_uri, schema, tables.PANEL_HORIZON_TABLE) > 0:
+    if count(pg_uri, schema, tables.ROOF_HORIZON_TABLE) > 0:
         logging.info("Not aggregating horizon info, horizons already aggregated.")
         return
 
@@ -36,17 +35,14 @@ def aggregate_horizons(pg_uri: str,
                 "min_roof_degrees_from_north": min_roof_degrees_from_north,
                 "flat_roof_degrees": flat_roof_degrees,
                 "max_avg_southerly_horizon_degrees": max_avg_southerly_horizon_degrees,
-                "panel_width_m": panel_width_m,
-                "panel_height_m": panel_height_m,
                 "resolution": resolution_metres,
+                "min_dist_to_edge_m": min_dist_to_edge_m,
             },
             schema=Identifier(schema),
             pixel_horizons=Identifier(schema, tables.PIXEL_HORIZON_TABLE),
             roof_planes=Identifier(schema, tables.ROOF_PLANE_TABLE),
             roof_horizons=Identifier(schema, tables.ROOF_HORIZON_TABLE),
-            panel_horizons=Identifier(schema, tables.PANEL_HORIZON_TABLE),
             buildings=Identifier(schema, tables.BUILDINGS_TABLE),
-            building_exclusion_reasons=Identifier(schema, tables.BUILDING_EXCLUSION_REASONS_TABLE),
             aggregated_horizon_cols=SQL(aggregated_horizon_cols),
             avg_southerly_horizon_rads=SQL(_avg_southerly_horizon_rads(horizon_slices)),
             horizon_cols=SQL(','.join(_horizon_cols(horizon_slices))),

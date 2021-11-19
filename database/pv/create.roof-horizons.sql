@@ -4,7 +4,6 @@
 -- pixels where the southerly horizon is too high.
 --
 
-DROP TABLE IF EXISTS {roof_horizons};
 CREATE TABLE {roof_horizons} AS
 SELECT
     ST_Multi(ST_Buffer(
@@ -56,11 +55,31 @@ COMMIT;
 START TRANSACTION;
 
 --
--- Constrain roof planes to building polygon:
+-- Constrain roof planes to building polygon, and enforce min_dist_to_edge_m:
 --
-UPDATE {roof_horizons} h SET roof_geom_27700 = ST_Multi(ST_Intersection(roof_geom_27700, geom_27700))
+UPDATE {roof_horizons} h
+SET roof_geom_27700 = ST_Multi(ST_Intersection(
+    roof_geom_27700,
+    ST_Buffer(geom_27700, -%(min_dist_to_edge_m)s, 'endcap=square join=mitre')))
 FROM {buildings} b
 WHERE h.toid = b.toid;
+
+COMMIT;
+START TRANSACTION;
+
+--
+-- Don't allow roof plane polygons to overlap:
+--
+UPDATE {roof_horizons} h1
+SET roof_geom_27700 = COALESCE(ST_Multi(ST_Difference(
+    roof_geom_27700,
+    (SELECT ST_Union(h2.roof_geom_27700)
+     FROM {roof_horizons} h2
+     WHERE
+        ST_Intersects(h1.roof_geom_27700, h2.roof_geom_27700)
+        AND h1.toid = h2.toid
+        -- The lowest roof plane IDs take precedence (arbitrarily)
+        AND h1.roof_plane_id > h2.roof_plane_id))), h1.roof_geom_27700);
 
 COMMIT;
 START TRANSACTION;
@@ -79,7 +98,7 @@ COMMIT;
 START TRANSACTION;
 
 --
--- Add horizon standard deviation info:
+-- Add horizon averages and standard deviation info:
 --
 ALTER TABLE {roof_horizons} ADD COLUMN horizon_avg double precision;
 ALTER TABLE {roof_horizons} ADD COLUMN horizon_sd double precision;
@@ -147,68 +166,3 @@ WHERE h.toid = a.toid AND usable AND (
     -- for flat roofs, if there is a sensible angle near-South, align the panels
     -- with that:
     (is_flat AND abs(a.degs - aspect) < 45));
-
-COMMIT;
-START TRANSACTION;
-
---
--- PV panelling:
---
-CREATE TABLE {panel_horizons} AS
-WITH panels AS (
-    SELECT
-        models.pv_grid(
-            roof_geom_27700,
-            %(panel_width_m)s,
-            %(panel_height_m)s,
-            aspect,
-            slope,
-            is_flat
-        )::geometry(MultiPolygon, 27700) AS panel_geom_27700,
-        roof_plane_id
-    FROM {roof_horizons}
-)
-SELECT
-    ph.panel_geom_27700,
-    ST_Area(ph.panel_geom_27700) AS footprint,
-    ST_Area(ph.panel_geom_27700) / cos(radians(rh.slope)) AS area,
-    rh.*
-FROM {roof_horizons} rh INNER JOIN panels ph USING (roof_plane_id);
-
-CREATE INDEX ON {panel_horizons} USING GIST (panel_geom_27700);
-ALTER TABLE {panel_horizons} ADD PRIMARY KEY (roof_plane_id);
-
-UPDATE {panel_horizons} p SET usable = false
-WHERE usable = true AND area < %(min_roof_area_m)s;
-
---
--- Update building_exclusion_reasons for any buildings that have roof planes but no
--- usable ones:
---
-UPDATE {building_exclusion_reasons} ber
-SET exclusion_reason = 'ALL_ROOF_PLANES_UNUSABLE'
-WHERE
-    NOT EXISTS (SELECT FROM {panel_horizons} ph WHERE ph.usable AND ph.toid = ber.toid)
-    AND ber.exclusion_reason IS NULL;
-
---
--- Add 3D version of panels:
---
-ALTER TABLE {panel_horizons} ADD COLUMN panel_geom_27700_3d geometry(MultiPolygonZ, 27700);
-
-UPDATE {panel_horizons} SET panel_geom_27700_3d = ST_Multi(ST_Translate(
-    ST_RotateY(
-        ST_RotateX(
-            ST_Translate(
-                ST_Force3d(ST_Scale(
-                    panel_geom_27700,
-                    ST_MakePoint(sqrt((x_coef * x_coef) + 1), sqrt((y_coef * y_coef) + 1)),
-                    ST_Centroid(panel_geom_27700))),
-                -easting, -northing),
-            atan(y_coef)),
-        atan(x_coef)),
-    easting,
-    northing,
-    (easting * x_coef) + (northing * y_coef) + intercept))::geometry(MultiPolygonZ, 27700);
-
-CREATE INDEX ON {panel_horizons} USING GIST (panel_geom_27700_3d);

@@ -125,6 +125,8 @@ def _handle_job(pg_conn, job: dict) -> bool:
             max_avg_southerly_horizon_degrees = params['max_avg_southerly_horizon_degrees']
             panel_width_m = params['panel_width_m']
             panel_height_m = params['panel_height_m']
+            panel_spacing_m = params['panel_spacing_m']
+            min_dist_to_edge_m = params['min_dist_to_edge_m']
             debug_mode = params.get('debug_mode', False)
             model_solar_pv(
                 pg_uri=pg_uri,
@@ -142,6 +144,8 @@ def _handle_job(pg_conn, job: dict) -> bool:
                 max_avg_southerly_horizon_degrees=max_avg_southerly_horizon_degrees,
                 panel_width_m=panel_width_m,
                 panel_height_m=panel_height_m,
+                panel_spacing_m=panel_spacing_m,
+                min_dist_to_edge_m=min_dist_to_edge_m,
                 debug_mode=debug_mode)
 
     if job['solar_pv_cost_benefit']:

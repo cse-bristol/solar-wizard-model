@@ -11,6 +11,7 @@ import albion_models.solar_pv.tables as tables
 from albion_models.db_funcs import connect, sql_script_with_bindings, process_pg_uri
 from albion_models.solar_pv.aggregate_horizons import aggregate_horizons
 from albion_models.solar_pv.lidar_check import check_lidar
+from albion_models.solar_pv.panels import add_panels
 from albion_models.solar_pv.saga_gis.horizons import find_horizons
 from albion_models.solar_pv.ransac.run_ransac import run_ransac
 
@@ -30,6 +31,8 @@ def model_solar_pv(pg_uri: str,
                    max_avg_southerly_horizon_degrees: int,
                    panel_width_m: float,
                    panel_height_m: float,
+                   panel_spacing_m: float,
+                   min_dist_to_edge_m: float,
                    debug_mode: bool):
 
     pg_uri = process_pg_uri(pg_uri)
@@ -77,9 +80,17 @@ def model_solar_pv(pg_uri: str,
         min_roof_degrees_from_north=min_roof_degrees_from_north,
         flat_roof_degrees=flat_roof_degrees,
         max_avg_southerly_horizon_degrees=max_avg_southerly_horizon_degrees,
+        min_dist_to_edge_m=min_dist_to_edge_m,
+        resolution_metres=res)
+
+    logging.info("Adding individual PV panels...")
+    add_panels(
+        pg_uri=pg_uri,
+        job_id=job_id,
+        min_roof_area_m=min_roof_area_m,
         panel_width_m=panel_width_m,
         panel_height_m=panel_height_m,
-        resolution_metres=res)
+        panel_spacing_m=panel_spacing_m)
 
     logging.info("Sending requests to PV-GIS...")
     pv_gis_client.pv_gis(
