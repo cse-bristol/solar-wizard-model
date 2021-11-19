@@ -11,7 +11,7 @@ SELECT
         aspect,
         slope,
         is_flat,
-        %(panel_spacing_m)s,
+        %(panel_spacing_m)s
     )::geometry(MultiPolygon, 27700) AS panel_geom_27700,
     0.0::double precision AS footprint,
     0.0::double precision AS area,

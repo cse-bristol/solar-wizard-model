@@ -1,4 +1,5 @@
 import logging
+import math
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Dict, Any, Tuple, List, Optional
@@ -6,7 +7,7 @@ from typing import Dict, Any, Tuple, List, Optional
 import psycopg2.extras
 from psycopg2.sql import SQL, Identifier
 
-from albion_models.db_funcs import connect
+from albion_models.db_funcs import connect, count
 from albion_models.solar_pv import tables
 
 
@@ -57,7 +58,7 @@ class HeightAggregator:
             return None
 
         lidar_height = self.lidar_height()
-        if lidar_height <= 1:
+        if lidar_height <= 1.1:
             if self.osmm_height and abs(self.osmm_height - lidar_height) > 1:
                 return 'OUTDATED_LIDAR_COVERAGE'
             elif not self.osmm_height:
@@ -82,43 +83,58 @@ def check_lidar(pg_uri: str, job_id: int):
             logging.info("Already checked LiDAR coverage, skipping...")
             return
 
-        rows = _load_building_pixels(pg_conn, job_id)
-        by_toid = defaultdict(HeightAggregator)
-        for row in rows:
-            by_toid[row['toid']].aggregate_row(row)
-        rows = None
+        page_size = 1000
+        pages = math.ceil(count(pg_uri, tables.schema(job_id), tables.BUILDINGS_TABLE) / page_size)
+        logging.info(f"{pages} of {page_size} buildings to check LiDAR coverage for")
 
-        to_exclude = []
-        for toid, building in by_toid.items():
-            reason = building.exclusion_reason()
-            if reason:
-                to_exclude.append((toid, reason))
-
-        _write_exclusions(pg_conn, job_id, to_exclude)
+        for page in range(0, pages):
+            _check_lidar_page(pg_conn, job_id, page, page_size)
     finally:
         pg_conn.close()
 
 
-def _write_exclusions(pg_conn, job_id: int, to_exclude: List[Tuple[str, str]], chunk_size: int = 1000):
-    with pg_conn.cursor() as cursor:
-        for i in range(0, len(to_exclude), chunk_size):
-            psycopg2.extras.execute_values(
-                cursor,
-                SQL("""
-                    UPDATE {building_exclusion_reasons} 
-                    SET exclusion_reason = data.exclusion_reason::models.pv_exclusion_reason
-                    FROM (VALUES %s) AS data (toid, exclusion_reason) 
-                    WHERE {building_exclusion_reasons}.toid = data.toid;     
-                """).format(
-                    building_exclusion_reasons=Identifier(tables.schema(job_id),
-                                                          tables.BUILDING_EXCLUSION_REASONS_TABLE),
-                ), argslist=to_exclude[i:i + chunk_size])
-            pg_conn.commit()
+def _check_lidar_page(pg_conn, job_id: int, page: int, page_size: int = 1000):
+    rows = _load_building_pixels(pg_conn, job_id, page, page_size)
+    by_toid = defaultdict(HeightAggregator)
+    for row in rows:
+        by_toid[row['toid']].aggregate_row(row)
+    rows = None
+
+    to_exclude = []
+    for toid, building in by_toid.items():
+        reason = building.exclusion_reason()
+        if reason:
+            to_exclude.append((toid, reason))
+
+    _write_exclusions(pg_conn, job_id, to_exclude)
+    logging.info(f"Checked page {page} of LiDAR")
 
 
-def _load_building_pixels(pg_conn, job_id: int):
+def _write_exclusions(pg_conn, job_id: int, to_exclude: List[Tuple[str, str]]):
     with pg_conn.cursor() as cursor:
-        cursor.execute(SQL("""            
+        psycopg2.extras.execute_values(
+            cursor,
+            SQL("""
+                UPDATE {building_exclusion_reasons} 
+                SET exclusion_reason = data.exclusion_reason::models.pv_exclusion_reason
+                FROM (VALUES %s) AS data (toid, exclusion_reason) 
+                WHERE {building_exclusion_reasons}.toid = data.toid;     
+            """).format(
+                building_exclusion_reasons=Identifier(tables.schema(job_id),
+                                                      tables.BUILDING_EXCLUSION_REASONS_TABLE),
+            ), argslist=to_exclude)
+        pg_conn.commit()
+
+
+def _load_building_pixels(pg_conn, job_id: int, page: int, page_size: int = 1000):
+    with pg_conn.cursor() as cursor:
+        cursor.execute(SQL("""
+            WITH building_page AS (
+                SELECT b.toid, b.geom_27700 
+                FROM {buildings} b
+                ORDER BY b.toid
+                OFFSET %(offset)s LIMIT %(limit)s
+            )
             SELECT 
                 h.pixel_id,
                 h.elevation,
@@ -126,7 +142,7 @@ def _load_building_pixels(pg_conn, job_id: int):
                 ST_Contains(b.geom_27700, h.en) AS within_building,
                 NOT ST_Contains((SELECT geom_27700 FROM {all_buildings}), h.en) AS without_building,
                 hh.height
-            FROM {buildings} b 
+            FROM building_page b 
             LEFT JOIN mastermap.height hh ON b.toid = hh.toid
             LEFT JOIN {pixel_horizons} h ON ST_Contains(ST_Buffer(b.geom_27700, 1), h.en)
             WHERE h.elevation != -9999
@@ -135,7 +151,10 @@ def _load_building_pixels(pg_conn, job_id: int):
             all_buildings=Identifier(tables.schema(job_id), tables.ALL_BUILDINGS_TABLE),
             pixel_horizons=Identifier(tables.schema(job_id), tables.PIXEL_HORIZON_TABLE),
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
-        ))
+        ), {
+            "offset": page * page_size,
+            "limit": page_size,
+        })
         pg_conn.commit()
         return cursor.fetchall()
 
@@ -152,3 +171,7 @@ def _already_checked(pg_conn, job_id: int) -> bool:
             ))
         pg_conn.commit()
         return cursor.fetchone()[0]
+
+
+if __name__ == '__main__':
+    check_lidar("postgresql://albion_ddl:albion320@localhost:5432/albion", 61)

@@ -55,12 +55,17 @@ COMMIT;
 START TRANSACTION;
 
 --
--- Constrain roof planes to building polygon, and enforce min_dist_to_edge_m:
+-- Constrain roof planes to building polygon, and enforce min_dist_to_edge_m
+-- and min_dist_to_edge_large_m:
 --
 UPDATE {roof_horizons} h
 SET roof_geom_27700 = ST_Multi(ST_Intersection(
     roof_geom_27700,
-    ST_Buffer(geom_27700, -%(min_dist_to_edge_m)s, 'endcap=square join=mitre')))
+    ST_Buffer(geom_27700,
+              CASE WHEN ST_Area(geom_27700) > %(large_building_threshold)s
+                   THEN -%(min_dist_to_edge_large_m)s
+                   ELSE -%(min_dist_to_edge_m)s END,
+              'endcap=square join=mitre')))
 FROM {buildings} b
 WHERE h.toid = b.toid;
 

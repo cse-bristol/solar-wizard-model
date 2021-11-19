@@ -32,7 +32,9 @@ def model_solar_pv(pg_uri: str,
                    panel_width_m: float,
                    panel_height_m: float,
                    panel_spacing_m: float,
+                   large_building_threshold: float,
                    min_dist_to_edge_m: float,
+                   min_dist_to_edge_large_m: float,
                    debug_mode: bool):
 
     pg_uri = process_pg_uri(pg_uri)
@@ -80,7 +82,9 @@ def model_solar_pv(pg_uri: str,
         min_roof_degrees_from_north=min_roof_degrees_from_north,
         flat_roof_degrees=flat_roof_degrees,
         max_avg_southerly_horizon_degrees=max_avg_southerly_horizon_degrees,
+        large_building_threshold=large_building_threshold,
         min_dist_to_edge_m=min_dist_to_edge_m,
+        min_dist_to_edge_large_m=min_dist_to_edge_large_m,
         resolution_metres=res)
 
     logging.info("Adding individual PV panels...")
