@@ -27,7 +27,7 @@ SELECT
     SUM(pv.peak_power) OVER w AS peak_power,
     SUM(pv.area) OVER w AS usable_area,
     SUM(pv.total_avg_energy_prod_kwh_per_year) OVER w AS total_yield_kwh_year,
-    SUM(pv.total_avg_energy_prod_kwh_per_year / pv.area) OVER w AS yield_kwh_m2_year,
+    SUM(pv.total_avg_energy_prod_kwh_per_year) OVER w / SUM(pv.area) OVER w AS yield_kwh_m2_year,
     CASE
         WHEN SUM(pv.peak_power) OVER w <= 10  THEN
             ((SUM(pv.peak_power) OVER w * %(small_inst_cost_per_kwp)s) + %(small_inst_fixed_cost)s) * (1 + %(small_inst_vat)s)
