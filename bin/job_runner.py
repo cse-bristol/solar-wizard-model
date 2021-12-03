@@ -9,7 +9,8 @@ import psycopg2
 import psycopg2.extras
 
 from albion_models import gdal_helpers
-from albion_models.lidar.get_lidar import get_all_lidar
+from albion_models.lidar.bulk_lidar_client import load_from_bulk
+from albion_models.lidar.defra_lidar_api_client import get_all_lidar
 from albion_models.lidar.lidar_coverage import calculate_lidar_coverage
 from albion_models.hard_soft_dig.model_hard_soft_dig import model_hard_soft_dig
 from albion_models.heat_demand.model_heat_demand import model_heat_demand
@@ -105,7 +106,12 @@ def _handle_job(pg_conn, job: dict) -> bool:
 
     if job['heat_demand'] or job['solar_pv'] or job['lidar']:
         lidar_dir = os.environ.get("LIDAR_DIR")
-        lidar_vrt_file = get_all_lidar(pg_conn, job_id, lidar_dir)
+        bulk_lidar_dir = os.environ.get("BULK_LIDAR_DIR", None)
+        if not bulk_lidar_dir:
+            logging.info("LIDAR_BULK_DIR not set, falling back to getting LiDAR from DEFRA API")
+            lidar_vrt_file = get_all_lidar(pg_conn, job_id, lidar_dir)
+        else:
+            lidar_vrt_file = load_from_bulk(pg_conn, job_id, lidar_dir, bulk_lidar_dir)
 
         if job['lidar']:
             calculate_lidar_coverage(job_id, lidar_dir, pg_uri)

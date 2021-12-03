@@ -6,7 +6,7 @@ import os
 import psycopg2
 from psycopg2.extras import Json
 
-from albion_models.lidar.get_lidar import get_all_lidar
+from albion_models.lidar.defra_lidar_api_client import get_all_lidar
 from albion_models.solar_pv.model_single_solar_pv_installation import \
     model_single_solar_pv_installation
 

@@ -1,4 +1,5 @@
-from albion_models.lidar.grid_ref import os_grid_ref_to_en, os_grid_ref_to_wkt
+from albion_models.lidar.grid_ref import os_grid_ref_to_en, os_grid_ref_to_wkt, \
+    en_to_lidar_zip_id
 from albion_models.test.test_funcs import ParameterisedTestCase
 
 
@@ -44,12 +45,57 @@ class GridRefTest(ParameterisedTestCase):
             ('SV0101', (1000, 1000, 1000)),
             ('SV0322', (3000, 22000, 1000)),
             ('SV2322', (23000, 22000, 1000)),
-            ('SV12NE', (12500, 22500, 2500)),
-            ('sv12ne', (12500, 22500, 2500)),
+            ('SV12NE', (15000, 25000, 5000)),
+            ('sv12ne', (15000, 25000, 5000)),
+            ('SK54NE', (455000, 345000, 5000)),
         ], os_grid_ref_to_en)
 
     def test_os_grid_ref_to_wkt(self):
         self.parameterised_test([
-            ('SV12NE', 'POLYGON((12500 22500, 12500 25000, 15000 25000, 15000 22500, 12500 22500))'),
+            ('SV12NE', 'POLYGON((15000 25000, 15000 30000, 20000 30000, 20000 25000, 15000 25000))'),
             ('SV0101', 'POLYGON((1000 1000, 1000 2000, 2000 2000, 2000 1000, 1000 1000))'),
         ], os_grid_ref_to_wkt)
+
+    def test_en_to_lidar_zip_id(self):
+        self.parameterised_test([
+            # Test mapping of 1st letter:
+            (0,      0,       'SV00SW'),
+            (500000, 0,       'TV00SW'),
+            (0,      500000,  'NV00SW'),
+            (500000, 500000,  'OV00SW'),
+            (0,      1000000, 'HV00SW'),
+
+            # Test mapping of 2nd letter:
+            (0,      400000, 'SA00SW'),
+            (100000, 400000, 'SB00SW'),
+            (200000, 400000, 'SC00SW'),
+            (300000, 400000, 'SD00SW'),
+            (400000, 400000, 'SE00SW'),
+            (0,      300000, 'SF00SW'),
+            (100000, 300000, 'SG00SW'),
+            (200000, 300000, 'SH00SW'),
+            (300000, 300000, 'SJ00SW'),
+            (400000, 300000, 'SK00SW'),
+            (0,      200000, 'SL00SW'),
+            (100000, 200000, 'SM00SW'),
+            (200000, 200000, 'SN00SW'),
+            (300000, 200000, 'SO00SW'),
+            (400000, 200000, 'SP00SW'),
+            (0,      100000, 'SQ00SW'),
+            (100000, 100000, 'SR00SW'),
+            (200000, 100000, 'SS00SW'),
+            (300000, 100000, 'ST00SW'),
+            (400000, 100000, 'SU00SW'),
+            (0,      0,      'SV00SW'),
+            (100000, 0,      'SW00SW'),
+            (200000, 0,      'SX00SW'),
+            (300000, 0,      'SY00SW'),
+            (400000, 0,      'SZ00SW'),
+
+            # Rest
+            (50000, 40000, 'SV54SW'),
+            (90000, 90000, 'SV99SW'),
+            (5000, 0, 'SV00SE'),
+            (5000, 5000, 'SV00NE'),
+            (0, 5000, 'SV00NW'),
+        ], en_to_lidar_zip_id)

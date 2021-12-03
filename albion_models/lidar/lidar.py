@@ -2,13 +2,17 @@ import itertools
 import logging
 import os
 import re
+import zipfile
 from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
 from os.path import join
 from typing import Optional, List, Dict
 
+from osgeo import gdal, osr
+
 from albion_models import gdal_helpers
+from albion_models.lidar.grid_ref import os_grid_ref_to_wkt
 
 LIDAR_NODATA = -9999
 """
@@ -22,6 +26,9 @@ start using it. Otherwise only 1m and 2m will be used, as having to work
 at 50cm resolution slows lots of things down (RANSAC, horizon detection, 
 mapping roof planes -> pv installations).
 """
+
+LIDAR_VRT = "tiles.vrt"
+LIDAR_COV_VRT = "per_res_coverage.vrt"
 
 
 class Resolution(Enum):
@@ -75,11 +82,11 @@ class ZippedTiles:
             filename=filename)
 
     @classmethod
-    def from_filename(cls, filename: str):
+    def from_filename(cls, filename: str, year: int = None):
         basename = os.path.basename(filename)
         zip_id = _zipfile_id(basename)
         resolution = _file_res(basename)
-        year = _zip_year(basename)
+        year = year or _zip_year(basename)
         if zip_id is None:
             raise ValueError(f"Could not read zip ID from file: {basename}")
         if resolution is None:
@@ -295,3 +302,50 @@ def _tile_id(filename: str):
     """
     match = re.search("[a-z]{2}[0-9]{4}", filename, re.IGNORECASE)
     return match.group() if match is not None else None
+
+
+def zip_to_geotiffs(pg_conn, job_id: int, zt: ZippedTiles, lidar_dir: str) -> List[LidarTile]:
+    tiff_paths = []
+    with zipfile.ZipFile(join(lidar_dir, zt.filename)) as z:
+        for zipinfo in z.infolist():
+            z.extract(zipinfo, lidar_dir)
+            # Convert to geotiff and add SRS metadata:
+            tiff_filename = _asc_to_geotiff(lidar_dir, zipinfo.filename)
+            tile = LidarTile.from_filename(join(lidar_dir, tiff_filename), zt.year)
+            if _tile_intersects_bounds(pg_conn, job_id, tile.tile_id):
+                tiff_paths.append(tile)
+
+    return tiff_paths
+
+
+def _asc_to_geotiff(lidar_dir: str, asc_filename: str) -> str:
+    """
+    Convert asc file to geotiff, and add SRS metadata to file.
+    """
+    gdal.UseExceptions()
+
+    drv = gdal.GetDriverByName('GTiff')
+    gdal_asc_file = gdal.Open(join(lidar_dir, asc_filename))
+    tiff_filename = asc_filename.split('.')[0] + '.tiff'
+    gdal_tiff_file = drv.CreateCopy(join(lidar_dir, tiff_filename), gdal_asc_file)
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG(27700)
+    gdal_tiff_file.SetProjection(srs.ExportToWkt())
+    # https://gdal.org/api/python_gotchas.html
+    gdal_asc_file = None
+    gdal_tiff_file = None
+    os.remove(join(lidar_dir, asc_filename))
+    return tiff_filename
+
+
+def _tile_intersects_bounds(pg_conn, job_id: int, tile_id: str) -> bool:
+    with pg_conn.cursor() as cursor:
+        cursor.execute("""
+            SELECT ST_Intersects(bounds, ST_GeomFromText(%(tile_wkt)s, 27700))
+            FROM models.job_queue WHERE job_id = %(job_id)s
+        """, {
+            'tile_wkt': os_grid_ref_to_wkt(tile_id),
+            'job_id': job_id
+        })
+        pg_conn.commit()
+        return cursor.fetchone()[0]

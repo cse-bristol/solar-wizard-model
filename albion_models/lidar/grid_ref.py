@@ -56,16 +56,16 @@ def _rest(rest: str) -> Tuple[Easting, Northing, SquareSize]:
     if rest.isdigit():
         return int(rest[0:2]) * _1KM, int(rest[2:4]) * _1KM, _1KM
     else:
-        base = int(rest[0]) * _10KM, int(rest[1]) * _10KM, 2500
+        base = int(rest[0]) * _10KM, int(rest[1]) * _10KM, 5000
         quadrant = rest[2:4]
         if quadrant == 'SW':
             return base
         elif quadrant == 'SE':
-            return base[0], base[1] + 2500, base[2]
+            return base[0], base[1] + 5000, base[2]
         elif quadrant == 'NW':
-            return base[0] + 2500, base[1], base[2]
+            return base[0] + 5000, base[1], base[2]
         elif quadrant == 'NE':
-            return base[0] + 2500, base[1] + 2500, base[2]
+            return base[0] + 5000, base[1] + 5000, base[2]
     raise ValueError(f"Unknown rest of grid ref {rest}")
 
 

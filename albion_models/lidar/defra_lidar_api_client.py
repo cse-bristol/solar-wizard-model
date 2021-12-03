@@ -5,23 +5,18 @@ import json
 import logging
 import os
 import time
-import zipfile
 from collections import defaultdict
 from datetime import datetime
 from os.path import join
 from typing import List, Dict
 
-from osgeo import gdal, osr
 import requests
 from psycopg2.sql import SQL, Identifier
 
-from albion_models.lidar.grid_ref import os_grid_ref_to_wkt
-from albion_models.lidar.lidar import ZippedTiles, LidarTile, LidarJobTiles
+from albion_models.lidar.lidar import ZippedTiles, LidarTile, LidarJobTiles, LIDAR_VRT, \
+    LIDAR_COV_VRT, zip_to_geotiffs
 from albion_models.paths import SQL_DIR
 
-
-LIDAR_VRT = "tiles.vrt"
-LIDAR_COV_VRT = "per_res_coverage.vrt"
 _DEFRA_API = "https://environment.data.gov.uk/arcgis/rest"
 
 
@@ -208,47 +203,6 @@ def _download_zip(pg_conn,
             wz.write(res.content)
         logging.info(f"Downloaded {zt.url}")
 
-    tiff_paths = []
-    with zipfile.ZipFile(join(lidar_dir, best_zip.filename)) as z:
-        for zipinfo in z.infolist():
-            z.extract(zipinfo, lidar_dir)
-            # Convert to geotiff and add SRS metadata:
-            tiff_filename = _asc_to_geotiff(lidar_dir, zipinfo.filename)
-            tile = LidarTile.from_filename(join(lidar_dir, tiff_filename), zt.year)
-            if _tile_intersects_bounds(pg_conn, job_id, tile.tile_id):
-                tiff_paths.append(tile)
+    tiff_paths = zip_to_geotiffs(pg_conn, job_id, best_zip, lidar_dir)
 
     return tiff_paths
-
-
-def _asc_to_geotiff(lidar_dir: str, asc_filename: str) -> str:
-    """
-    Convert asc file to geotiff, and add SRS metadata to file.
-    """
-    gdal.UseExceptions()
-
-    drv = gdal.GetDriverByName('GTiff')
-    gdal_asc_file = gdal.Open(join(lidar_dir, asc_filename))
-    tiff_filename = asc_filename.split('.')[0] + '.tiff'
-    gdal_tiff_file = drv.CreateCopy(join(lidar_dir, tiff_filename), gdal_asc_file)
-    srs = osr.SpatialReference()
-    srs.ImportFromEPSG(27700)
-    gdal_tiff_file.SetProjection(srs.ExportToWkt())
-    # https://gdal.org/api/python_gotchas.html
-    gdal_asc_file = None
-    gdal_tiff_file = None
-    os.remove(join(lidar_dir, asc_filename))
-    return tiff_filename
-
-
-def _tile_intersects_bounds(pg_conn, job_id: int, tile_id: str) -> bool:
-    with pg_conn.cursor() as cursor:
-        cursor.execute("""
-            SELECT ST_Intersects(bounds, ST_GeomFromText(%(tile_wkt)s, 27700))
-            FROM models.job_queue WHERE job_id = %(job_id)s
-        """, {
-            'tile_wkt': os_grid_ref_to_wkt(tile_id),
-            'job_id': job_id
-        })
-        pg_conn.commit()
-        return cursor.fetchone()[0]

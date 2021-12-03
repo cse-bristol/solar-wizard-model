@@ -8,7 +8,7 @@ import unittest
 from typing import List
 from unittest import mock
 
-from albion_models.lidar.get_lidar import _get_lidar, _wkt_to_rings
+from albion_models.lidar.defra_lidar_api_client import _get_lidar, _wkt_to_rings
 from albion_models.lidar.lidar import LidarJobTiles
 from albion_models.paths import PROJECT_ROOT
 

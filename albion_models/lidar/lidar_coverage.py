@@ -6,7 +6,7 @@ from psycopg2.sql import SQL, Literal, Identifier
 
 from albion_models.db_funcs import connect, sql_script_with_bindings
 from albion_models import gdal_helpers
-from albion_models.lidar.get_lidar import LIDAR_COV_VRT
+from albion_models.lidar.lidar import LIDAR_COV_VRT
 
 
 def calculate_lidar_coverage(job_id: int, lidar_dir: str, pg_uri: str):
