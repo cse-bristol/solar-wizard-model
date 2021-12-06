@@ -310,15 +310,20 @@ def zip_to_geotiffs(pg_conn, job_id: int, zt: ZippedTiles, lidar_dir: str) -> Li
         for zipinfo in z.infolist():
             z.extract(zipinfo, lidar_dir)
             # Convert to geotiff and add SRS metadata:
-            tiff_filename = _asc_to_geotiff(lidar_dir, zipinfo.filename)
+            tiff_filename = _get_tiff_filename(zipinfo.filename)
             tile = LidarTile.from_filename(join(lidar_dir, tiff_filename), zt.year)
             if _tile_intersects_bounds(pg_conn, job_id, tile.tile_id):
+                _asc_to_geotiff(lidar_dir, zipinfo.filename, tiff_filename)
                 tiff_paths.append(tile)
 
     return tiff_paths
 
 
-def _asc_to_geotiff(lidar_dir: str, asc_filename: str) -> str:
+def _get_tiff_filename(asc_filename: str) -> str:
+    return asc_filename.split('.')[0] + '.tiff'
+
+
+def _asc_to_geotiff(lidar_dir: str, asc_filename: str, tiff_filename: str) -> None:
     """
     Convert asc file to geotiff, and add SRS metadata to file.
     """
@@ -326,7 +331,6 @@ def _asc_to_geotiff(lidar_dir: str, asc_filename: str) -> str:
 
     drv = gdal.GetDriverByName('GTiff')
     gdal_asc_file = gdal.Open(join(lidar_dir, asc_filename))
-    tiff_filename = asc_filename.split('.')[0] + '.tiff'
     gdal_tiff_file = drv.CreateCopy(join(lidar_dir, tiff_filename), gdal_asc_file)
     srs = osr.SpatialReference()
     srs.ImportFromEPSG(27700)
@@ -335,7 +339,6 @@ def _asc_to_geotiff(lidar_dir: str, asc_filename: str) -> str:
     gdal_asc_file = None
     gdal_tiff_file = None
     os.remove(join(lidar_dir, asc_filename))
-    return tiff_filename
 
 
 def _tile_intersects_bounds(pg_conn, job_id: int, tile_id: str) -> bool:

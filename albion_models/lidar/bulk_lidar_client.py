@@ -30,11 +30,11 @@ def load_from_bulk(pg_conn, job_id: int, lidar_dir: str, bulk_lidar_dir: str) ->
         for res in Resolution:
             zip_path = _get_zip_path(bulk_lidar_dir, zip_id, res)
             if os.path.exists(zip_path):
-                logging.info(f"Using LiDAR tile with ID {zip_id} and resolution {res}")
+                logging.info(f"Using LiDAR zip {zip_id} at res {res.value}m")
                 zt = ZippedTiles.from_filename(zip_path, _BULK_LIDAR_YEAR)
                 job_tiles.add_tiles(zip_to_geotiffs(pg_conn, job_id, zt, job_lidar_dir))
             else:
-                logging.info(f"LiDAR tile with ID {zip_id} at resolution {res} not "
+                logging.info(f"LiDAR zip {zip_id} at res {res.value}m not "
                              f"found in bulk LiDAR")
 
     if len(job_tiles.all_filenames()) == 0:

@@ -108,7 +108,7 @@ def _handle_job(pg_conn, job: dict) -> bool:
         lidar_dir = os.environ.get("LIDAR_DIR")
         bulk_lidar_dir = os.environ.get("BULK_LIDAR_DIR", None)
         if not bulk_lidar_dir:
-            logging.info("LIDAR_BULK_DIR not set, falling back to getting LiDAR from DEFRA API")
+            logging.info("BULK_LIDAR_DIR not set, falling back to getting LiDAR from DEFRA API")
             lidar_vrt_file = get_all_lidar(pg_conn, job_id, lidar_dir)
         else:
             lidar_vrt_file = load_from_bulk(pg_conn, job_id, lidar_dir, bulk_lidar_dir)
