@@ -177,10 +177,11 @@ def _irr(period_years: int,
 def _get_installations(pg_conn, job_id: int, electricity_kwh_cost: float) -> List[dict]:
     with pg_conn.cursor() as cursor:
         cursor.execute("""
-            SELECT 
+            SELECT
                 job_id, toid, installation_job_id, total_yield_kwh_year, installation_cost
             FROM models.pv_cost_benefit
-            WHERE job_id = %(job_id)s AND electricity_kwh_cost = %(electricity_kwh_cost)s
+            WHERE job_id = %(job_id)s
+            AND electricity_kwh_cost = %(electricity_kwh_cost)s
         """, {
             "job_id": job_id,
             "electricity_kwh_cost": electricity_kwh_cost})
@@ -216,11 +217,11 @@ def _update_npv_irr(pg_conn, installations: List[tuple]):
     with pg_conn.cursor() as cursor:
         psycopg2.extras.execute_values(cursor, SQL("""
             UPDATE models.pv_cost_benefit cb
-            SET npv = data.npv, irr = data.irr 
-            FROM (VALUES %s) AS data (job_id, toid, installation_job_id, electricity_kwh_cost, npv, irr) 
+            SET npv = data.npv, irr = data.irr
+            FROM (VALUES %s) AS data (job_id, toid, installation_job_id, electricity_kwh_cost, npv, irr)
             WHERE cb.job_id = data.job_id
-            AND cb.toid = data.toid 
-            AND cb.electricity_kwh_cost = data.electricity_kwh_cost 
+            AND cb.toid = data.toid
+            AND cb.electricity_kwh_cost = data.electricity_kwh_cost
             AND cb.installation_job_id = data.installation_job_id
         """), argslist=installations)
         pg_conn.commit()

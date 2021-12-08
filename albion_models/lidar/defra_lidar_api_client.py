@@ -100,20 +100,20 @@ def _get_lidar(pg_conn, job_id: int, rings: List[List[float]], lidar_dir: str) -
 def _start_job(rings: List[List[float]]) -> str:
     url = f'{_DEFRA_API}/services/gp/DataDownload/GPServer/DataDownload/submitJob'
     res = requests.get(url, params={
-        "f":  "json",
+        "f": "json",
         "OutputFormat": 0,
-        "RequestMode":  "Survey",
+        "RequestMode": "Survey",
         "AOI": json.dumps({
             "geometryType": "esriGeometryPolygon",
             "features": [{
-                    "geometry": {
-                        "rings": [rings],
-                        "spatialReference": {
-                            "wkid": 27700,
-                            "latestWkid": 27700
-                        }
+                "geometry": {
+                    "rings": [rings],
+                    "spatialReference": {
+                        "wkid": 27700,
+                        "latestWkid": 27700
                     }
-                }],
+                }
+            }],
             "sr": {
                 "wkid": 27700,
                 "latestWkid": 27700

@@ -1,5 +1,5 @@
 import re
-from typing import Tuple, Dict, List
+from typing import Tuple, Dict
 
 Easting = int
 Northing = int
@@ -11,11 +11,11 @@ _10KM = 10000
 _1KM = 1000
 
 _1ST_LETTER: Dict[str, Tuple[Easting, Northing]] = {
-    'S': (0,      0),
+    'S': (0, 0),
     'T': (_500KM, 0),
-    'N': (0,      _500KM),
+    'N': (0, _500KM),
     'O': (_500KM, _500KM),
-    'H': (0,      _500KM * 2),
+    'H': (0, _500KM * 2),
 }
 """
 The 1st letter in an OS national grid ref (e.g the 'S' in 'SP2621').

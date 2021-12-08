@@ -59,6 +59,6 @@ def en_to_lidar_zip_id(easting: Easting, northing: Northing) -> str:
     letter_2 = _get_2nd_letter(easting, northing)
     # How many 10kms above the nearest multiple of 100km the easting/northing are:
     numbers = str(_round_down_to(easting % _100KM, _10KM) // _10KM) + \
-              str(_round_down_to(northing % _100KM, _10KM) // _10KM)
+        str(_round_down_to(northing % _100KM, _10KM) // _10KM)
     corner = _get_quadrant(easting, northing)
     return letter_1 + letter_2 + numbers + corner

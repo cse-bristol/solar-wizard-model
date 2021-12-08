@@ -41,9 +41,9 @@ def _get_rows(pg_conn, bounds: str) -> List[dict]:
     with pg_conn.cursor() as cursor:
         cursor.execute(
             """
-            SELECT toid, ST_AsText(geom_4326) as geom_wkt, is_residential, height 
+            SELECT toid, ST_AsText(geom_4326) as geom_wkt, is_residential, height
             FROM building.building
-            WHERE ST_Intersects(ST_GeomFromText(%(bounds)s, 4326), geom_4326) 
+            WHERE ST_Intersects(ST_GeomFromText(%(bounds)s, 4326), geom_4326)
             """,
             {'bounds': bounds}
         )
@@ -132,26 +132,25 @@ def _load_output_to_database(pg_conn, file_name: str, job_id: int, heat_degree_d
 
         cursor.execute(SQL(
             """
-            INSERT INTO models.heat_demand 
-            SELECT 
-                r.*, 
-                %(job_id)s, 
-                b.geom_4326, 
+            INSERT INTO models.heat_demand
+            SELECT
+                r.*,
+                %(job_id)s,
+                b.geom_4326,
                 %(heat_degree_days)s,
                 b.num_addresses = 0 AND b.num_epc_certs = 0 AS ignore,
                 b.ignore_reasons AS ignore_reasons
-            FROM models.raw_heat_demand r 
+            FROM models.raw_heat_demand r
             LEFT JOIN building.building b ON r.toid = b.toid;
-            
+
             DROP TABLE models.raw_heat_demand;
-            
+
             DROP VIEW IF EXISTS models.{job_view};
-            CREATE VIEW models.{job_view} AS 
+            CREATE VIEW models.{job_view} AS
             SELECT * FROM models.heat_demand WHERE job_id = %(job_id)s;
             """).format(
                 job_view=Identifier(f"heat_demand_job_{job_id}")),
             {
                 'job_id': job_id,
-                'heat_degree_days': heat_degree_days,
-            })
+                'heat_degree_days': heat_degree_days})
         pg_conn.commit()

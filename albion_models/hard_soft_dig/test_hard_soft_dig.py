@@ -20,11 +20,15 @@ class HardSoftDigTestCase(unittest.TestCase):
     """
 
     @classmethod
-    def setUpClass(self):
+    def setUpClass(cls):
         pg_uri = os.environ.get("PG_URI")
-        self.pg_conn = psycopg2.connect(pg_uri, cursor_factory=psycopg2.extras.DictCursor)
+        if pg_uri:
+            cls.pg_conn = psycopg2.connect(pg_uri, cursor_factory=psycopg2.extras.DictCursor)
+        else:
+            cls.pg_conn = None
         logging.basicConfig(level=logging.DEBUG, format='[%(asctime)s] %(levelname)s: %(message)s')
 
+    @unittest.skipIf(os.environ.get("PG_URI") is None, "No database connection, skipping")
     def test_overlapping_roads(self):
         bounds = gen_multipolygon()
         insert_job(self.pg_conn, 999, bounds, 'test')
@@ -35,7 +39,7 @@ class HardSoftDigTestCase(unittest.TestCase):
                 SELECT COUNT(*) FROM (
                     SELECT ST_Length(ST_Intersection(d1.geom_4326, d2.geom_4326)) len
                     FROM models.hard_soft_dig d1
-                        INNER JOIN models.hard_soft_dig d2 
+                        INNER JOIN models.hard_soft_dig d2
                         ON ST_Intersects(d1.geom_4326, d2.geom_4326)
                         AND d1.ctid != d2.ctid
                         WHERE d1.job_id = 999 AND d2.job_id = 999
@@ -47,6 +51,9 @@ class HardSoftDigTestCase(unittest.TestCase):
             assert count == 0, f"bounds {bounds} had {count} overlapping roads"
 
     def tearDown(self):
+        if not self.pg_conn:
+            return
+
         self.pg_conn.rollback()
         with self.pg_conn.cursor() as cursor:
             cursor.execute("DELETE FROM models.hard_soft_dig WHERE job_id = 999")

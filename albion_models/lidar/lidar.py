@@ -23,7 +23,7 @@ _USE_50CM_THRESHOLD = 0.25
 """
 At least this % of the job area must be covered by 50cm LiDAR to
 start using it. Otherwise only 1m and 2m will be used, as having to work
-at 50cm resolution slows lots of things down (RANSAC, horizon detection, 
+at 50cm resolution slows lots of things down (RANSAC, horizon detection,
 mapping roof planes -> pv installations).
 """
 

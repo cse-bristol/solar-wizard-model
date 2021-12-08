@@ -152,7 +152,7 @@ def _validate_params(lidar_vrt_file: str,
                      panel_width_m: float,
                      panel_height_m: float):
     if not lidar_vrt_file or not os.path.exists(lidar_vrt_file):
-        raise ValueError(f"No LIDAR tiles available, cannot run solar PV modelling.")
+        raise ValueError("No LIDAR tiles available, cannot run solar PV modelling.")
     if horizon_search_radius < 0 or horizon_search_radius > 10000:
         raise ValueError(f"horizon search radius must be between 0 and 10000, was {horizon_search_radius}")
     if horizon_slices > 64 or horizon_slices < 8:

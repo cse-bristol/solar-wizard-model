@@ -131,16 +131,16 @@ def _load(pg_uri: str, job_id: int, page: int, page_size: int):
         with pg_conn.cursor() as cursor:
             cursor.execute(SQL("""
                 WITH building_page AS (
-                    SELECT b.toid, b.geom_27700 
-                    FROM 
-                        {buildings} b 
+                    SELECT b.toid, b.geom_27700
+                    FROM
+                        {buildings} b
                         LEFT JOIN {building_exclusion_reasons} ber ON b.toid = ber.toid
-                    WHERE ber.exclusion_reason IS NULL 
+                    WHERE ber.exclusion_reason IS NULL
                     ORDER BY b.toid
                     OFFSET %(offset)s LIMIT %(limit)s
                 )
-                SELECT h.pixel_id, h.easting, h.northing, h.elevation, h.aspect, b.toid 
-                FROM building_page b 
+                SELECT h.pixel_id, h.easting, h.northing, h.elevation, h.aspect, b.toid
+                FROM building_page b
                 LEFT JOIN {pixel_horizons} h
                 ON ST_Contains(b.geom_27700, h.en)
                 WHERE h.elevation != -9999
@@ -191,7 +191,7 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[dict]):
             """).format(
                 roof_planes=Identifier(tables.schema(job_id), tables.ROOF_PLANE_TABLE),
             ), argslist=planes, fetch=True,
-               template="(%(toid)s, %(x_coef)s, %(y_coef)s, %(intercept)s, %(slope)s, %(aspect)s, %(sd)s)")
+                template="(%(toid)s, %(x_coef)s, %(y_coef)s, %(intercept)s, %(slope)s, %(aspect)s, %(sd)s)")
 
             pixel_plane_data = []
             for i in range(0, len(plane_ids)):
@@ -201,9 +201,9 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[dict]):
 
             psycopg2.extras.execute_values(cursor, SQL("""
                 UPDATE {pixel_horizons}
-                SET roof_plane_id = data.roof_plane_id 
-                FROM (VALUES %s) AS data (pixel_id, roof_plane_id) 
-                WHERE {pixel_horizons}.pixel_id = data.pixel_id;     
+                SET roof_plane_id = data.roof_plane_id
+                FROM (VALUES %s) AS data (pixel_id, roof_plane_id)
+                WHERE {pixel_horizons}.pixel_id = data.pixel_id;
             """).format(
                 pixel_horizons=Identifier(tables.schema(job_id), tables.PIXEL_HORIZON_TABLE),
             ), argslist=pixel_plane_data)
@@ -217,9 +217,9 @@ def _mark_buildings_with_no_planes(pg_uri: str, job_id: int):
     try:
         with pg_conn.cursor() as cursor:
             cursor.execute(SQL("""
-                UPDATE {building_exclusion_reasons} ber 
+                UPDATE {building_exclusion_reasons} ber
                 SET exclusion_reason = 'NO_ROOF_PLANES_DETECTED'
-                WHERE 
+                WHERE
                     NOT EXISTS (SELECT FROM {roof_planes} rp WHERE rp.toid = ber.toid)
                     AND ber.exclusion_reason IS NULL
             """).format(

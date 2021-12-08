@@ -70,7 +70,7 @@ def _validate_params(lidar_paths: List[str],
                      flat_roof_degrees: int,
                      peak_power_per_m2: float):
     if not lidar_paths or len(lidar_paths) == 0:
-        raise ValueError(f"No LIDAR tiles available, cannot run solar PV modelling.")
+        raise ValueError("No LIDAR tiles available, cannot run solar PV modelling.")
     if horizon_search_radius < 0 or horizon_search_radius > 10000:
         raise ValueError(
             f"horizon search radius must be between 0 and 10000, was {horizon_search_radius}")

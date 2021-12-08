@@ -190,7 +190,6 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
                 "loss should be 'absolute_loss', 'squared_loss' or a callable."
                 "Got %s. " % self.loss)
 
-
         random_state = check_random_state(self.random_state)
 
         try:  # Not all estimator accept a random_state
@@ -517,11 +516,11 @@ def _sample(n_samples, min_samples, random_state, aspect):
 
         choose_from = np.asarray(aspect_diff < max_aspect_range).nonzero()[0]
         choose_from = choose_from[choose_from != initial_sample]
-        if len(choose_from) < min_samples-1:
+        if len(choose_from) < min_samples - 1:
             continue
         if (sample_attempts + 1) % 100 == 0:
             max_aspect_range += 5
-        chosen = np.random.choice(choose_from, min_samples-1)
+        chosen = np.random.choice(choose_from, min_samples - 1)
         return np.append([initial_sample], chosen)
 
     raise ValueError("Cannot find initial sample with aspect similarity")

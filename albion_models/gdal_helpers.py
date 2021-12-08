@@ -3,7 +3,7 @@ import logging
 import os
 import subprocess
 import textwrap
-from typing import List, Tuple, Optional
+from typing import List, Tuple
 
 import gdal
 from osgeo import ogr
@@ -73,12 +73,12 @@ def get_srid(filename: str, fallback: int = None) -> int:
 
 def rasterize(pg_uri: str, mask_sql: str, mask_file: str, res: float, srid: int):
     res = subprocess.run(f"""
-        gdal_rasterize 
-        -sql '{mask_sql}' 
+        gdal_rasterize
+        -sql '{mask_sql}'
         -burn 1 -tr {res} {res}
-        -init 0 -ot Int16 
-        -of GTiff -a_srs EPSG:{srid} 
-        "PG:{pg_uri}" 
+        -init 0 -ot Int16
+        -of GTiff -a_srs EPSG:{srid}
+        "PG:{pg_uri}"
         {mask_file}
         """.replace("\n", " "), capture_output=True, text=True, shell=True)
     print(res.stdout)
@@ -105,12 +105,9 @@ def crop_or_expand(file_to_crop: str,
     lrx = ulx + (ref.RasterXSize * xres)
     lry = uly + (ref.RasterYSize * yres)
     if adjust_resolution:
-        ds = gdal.Warp(out_tiff, to_crop, outputBounds=(ulx, lry, lrx, uly), xRes=xres, yRes=yres)
+        gdal.Warp(out_tiff, to_crop, outputBounds=(ulx, lry, lrx, uly), xRes=xres, yRes=yres)
     else:
-        ds = gdal.Warp(out_tiff, to_crop, outputBounds=(ulx, lry, lrx, uly))
-    ds = None
-    ref = None
-    to_crop = None
+        gdal.Warp(out_tiff, to_crop, outputBounds=(ulx, lry, lrx, uly))
 
 
 def set_resolution(in_tiff: str,
@@ -163,12 +160,12 @@ def count_raster_pixels_pct(tiff: str, value, band: int = 1) -> float:
 
 def create_resolution_raster(in_tiff: str, out_tiff: str, res: float, nodata: int) -> str:
     run(f'''
-        gdal_calc.py 
+        gdal_calc.py
         -A {in_tiff}
         --outfile={out_tiff}
         --quiet
         --NoDataValue={nodata}
-        --calc="numpy.where(A!={nodata}, {res}, {nodata})" 
+        --calc="numpy.where(A!={nodata}, {res}, {nodata})"
     ''')
     return out_tiff
 
@@ -176,11 +173,11 @@ def create_resolution_raster(in_tiff: str, out_tiff: str, res: float, nodata: in
 def polygonize(in_tiff: str, out_gpkg: str, out_layer: str, out_field: str, connectedness_8: bool = True):
     """
     Polygonize a raster. See `gdal_polygonize.py` in GDAL.
-    
+
     This uses `FPolygonize` rather than `Polygonize`, so it doesn't cast float rasters
     to ints before running.
-    
-    :param in_tiff: raster to polygonize 
+
+    :param in_tiff: raster to polygonize
     :param out_gpkg: out geopackage (should not exist)
     :param out_layer: name of table in geopackage
     :param out_field: name of field to write pixel values to

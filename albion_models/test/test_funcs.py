@@ -25,11 +25,11 @@ def insert_job(pg_conn, job_id: int, bounds: str, project: str):
     with pg_conn.cursor() as cursor:
         cursor.execute(
             """
-            INSERT INTO models.job_queue 
-            (job_id, project, created_at, bounds, solar_pv, heat_demand, soft_dig, 
-             lidar, solar_pv_cost_benefit, status, email, params) 
-            VALUES 
-            (%s, %s, %s, ST_Transform(ST_Multi(ST_GeomFromText(%s, 4326)), 27700), %s, %s, %s, 
+            INSERT INTO models.job_queue
+            (job_id, project, created_at, bounds, solar_pv, heat_demand, soft_dig,
+             lidar, solar_pv_cost_benefit, status, email, params)
+            VALUES
+            (%s, %s, %s, ST_Transform(ST_Multi(ST_GeomFromText(%s, 4326)), 27700), %s, %s, %s,
              %s, %s, %s, %s, %s)
             """,
             (job_id, project, datetime.now(), bounds, False, False, True,

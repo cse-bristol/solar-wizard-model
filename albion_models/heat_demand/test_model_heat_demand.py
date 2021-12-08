@@ -24,15 +24,20 @@ class HeatDemandModelTestCase(unittest.TestCase):
     @classmethod
     def setUpClass(self):
         pg_uri = os.environ.get("PG_URI")
-        self.pg_conn = psycopg2.connect(pg_uri, cursor_factory=psycopg2.extras.DictCursor)
+        if pg_uri:
+            self.pg_conn = psycopg2.connect(pg_uri, cursor_factory=psycopg2.extras.DictCursor)
         logging.basicConfig(level=logging.DEBUG, format='[%(asctime)s] %(levelname)s: %(message)s')
 
+    @unittest.skipIf(os.environ.get("PG_URI") is None, "No database connection, skipping")
     def test_model_integration(self):
         bounds = gen_multipolygon()
         insert_job(self.pg_conn, 999, bounds, 'test')
         model_heat_demand(self.pg_conn, 999, bounds, [], join(PROJECT_ROOT, 'heat_demand'), 2033.313)
 
     def tearDown(self):
+        if not self.pg_conn:
+            return
+
         self.pg_conn.rollback()
         with self.pg_conn.cursor() as cursor:
             cursor.execute("DELETE FROM models.heat_demand WHERE job_id = 999")

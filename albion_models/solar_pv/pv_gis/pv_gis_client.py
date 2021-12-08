@@ -168,7 +168,7 @@ def _get_pvgis(lon: float,
     global _session
     url = 'https://re.jrc.ec.europa.eu/api/PVcalc'
     res = _session.get(url, params={
-        "outputformat":  "json",
+        "outputformat": "json",
         "browser": 0,
         "userhorizon": ','.join([str(i) for i in horizon]),
         "lon": lon,

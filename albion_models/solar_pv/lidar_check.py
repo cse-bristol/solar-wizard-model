@@ -115,10 +115,10 @@ def _write_exclusions(pg_conn, job_id: int, to_exclude: List[Tuple[str, str]]):
         psycopg2.extras.execute_values(
             cursor,
             SQL("""
-                UPDATE {building_exclusion_reasons} 
+                UPDATE {building_exclusion_reasons}
                 SET exclusion_reason = data.exclusion_reason::models.pv_exclusion_reason
-                FROM (VALUES %s) AS data (toid, exclusion_reason) 
-                WHERE {building_exclusion_reasons}.toid = data.toid;     
+                FROM (VALUES %s) AS data (toid, exclusion_reason)
+                WHERE {building_exclusion_reasons}.toid = data.toid;
             """).format(
                 building_exclusion_reasons=Identifier(tables.schema(job_id),
                                                       tables.BUILDING_EXCLUSION_REASONS_TABLE),
@@ -130,19 +130,19 @@ def _load_building_pixels(pg_conn, job_id: int, page: int, page_size: int = 1000
     with pg_conn.cursor() as cursor:
         cursor.execute(SQL("""
             WITH building_page AS (
-                SELECT b.toid, b.geom_27700 
+                SELECT b.toid, b.geom_27700
                 FROM {buildings} b
                 ORDER BY b.toid
                 OFFSET %(offset)s LIMIT %(limit)s
             )
-            SELECT 
+            SELECT
                 h.pixel_id,
                 h.elevation,
                 b.toid,
                 ST_Contains(b.geom_27700, h.en) AS within_building,
                 NOT ST_Contains((SELECT geom_27700 FROM {all_buildings}), h.en) AS without_building,
                 hh.height
-            FROM building_page b 
+            FROM building_page b
             LEFT JOIN mastermap.height hh ON b.toid = hh.toid
             LEFT JOIN {pixel_horizons} h ON ST_Contains(ST_Buffer(b.geom_27700, 1), h.en)
             WHERE h.elevation != -9999
@@ -163,7 +163,7 @@ def _already_checked(pg_conn, job_id: int) -> bool:
     with pg_conn.cursor() as cursor:
         cursor.execute(
             SQL("""
-                SELECT COUNT(*) != 0 FROM {building_exclusion_reasons} 
+                SELECT COUNT(*) != 0 FROM {building_exclusion_reasons}
                 WHERE exclusion_reason IS NOT NULL
             """).format(
                 building_exclusion_reasons=Identifier(tables.schema(job_id),

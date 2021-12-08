@@ -18,9 +18,9 @@ def _load_data(filename: str) -> List[dict]:
 class RansacTestCase(unittest.TestCase):
 
     def test_ransac_end_terrace(self):
-        planes = _ransac_building(_load_data(join(_RANSAC_DATA, 'end_terrace.csv')), 'toid')
+        planes = _ransac_building(_load_data(join(_RANSAC_DATA, 'end_terrace.csv')), 'toid', 1)
         assert len(planes) == 4, f"\nExpected: {4}\nActual  : {len(planes)}"
 
     def test_ransac_all_one_plane(self):
-        planes = _ransac_building(_load_data(join(_RANSAC_DATA, 'all_one_plane.csv')), 'toid')
+        planes = _ransac_building(_load_data(join(_RANSAC_DATA, 'all_one_plane.csv')), 'toid', 1)
         assert len(planes) == 1, f"\nExpected: {1}\nActual  : {len(planes)}"
