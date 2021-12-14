@@ -42,7 +42,7 @@ def _get_rows(pg_conn, bounds: str) -> List[dict]:
         cursor.execute(
             """
             SELECT toid, ST_AsText(geom_4326) as geom_wkt, is_residential, height
-            FROM building.building
+            FROM aggregates.building
             WHERE ST_Intersects(ST_GeomFromText(%(bounds)s, 4326), geom_4326)
             """,
             {'bounds': bounds}
@@ -141,7 +141,7 @@ def _load_output_to_database(pg_conn, file_name: str, job_id: int, heat_degree_d
                 b.num_addresses = 0 AND b.num_epc_certs = 0 AS ignore,
                 b.ignore_reasons AS ignore_reasons
             FROM models.raw_heat_demand r
-            LEFT JOIN building.building b ON r.toid = b.toid;
+            LEFT JOIN aggregates.building b ON r.toid = b.toid;
 
             DROP TABLE models.raw_heat_demand;
 
