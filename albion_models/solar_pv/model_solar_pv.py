@@ -123,7 +123,6 @@ def _init_schema(pg_uri: str, job_id: int):
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
             roof_planes=Identifier(tables.schema(job_id), tables.ROOF_PLANE_TABLE),
             building_exclusion_reasons=Identifier(tables.schema(job_id), tables.BUILDING_EXCLUSION_REASONS_TABLE),
-            all_buildings=Identifier(tables.schema(job_id), tables.ALL_BUILDINGS_TABLE),
         )
     finally:
         pg_conn.close()

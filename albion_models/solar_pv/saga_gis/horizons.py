@@ -124,6 +124,7 @@ def _load_horizons_to_db(pg_uri: str, job_id: int, horizon_csv: str, horizon_sli
         sql_script(
             pg_conn, 'pv/post-load.pixel-horizons.sql',
             pixel_horizons=Identifier(schema, pixel_horizons_table),
+            buildings=Identifier(schema, tables.BUILDINGS_TABLE),
             srid=Literal(srid)
         )
     finally:

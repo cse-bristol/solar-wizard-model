@@ -103,6 +103,8 @@ def _load_output_to_database(pg_conn, file_name: str, job_id: int, heat_degree_d
     """Load heat demand data from tabfile using the postgres COPY command"""
     with pg_conn.cursor() as cursor, open(file_name, encoding='utf-8') as results:
         cursor.execute("""
+            DROP TABLE IF EXISTS models.raw_heat_demand;
+            
             CREATE TABLE models.raw_heat_demand (
                 toid text NOT NULL,
                 annual_demand double precision NOT NULL,
@@ -132,6 +134,8 @@ def _load_output_to_database(pg_conn, file_name: str, job_id: int, heat_degree_d
 
         cursor.execute(SQL(
             """
+            DELETE FROM models.heat_demand WHERE job_id = %(job_id)s;
+            
             INSERT INTO models.heat_demand
             SELECT
                 r.*,

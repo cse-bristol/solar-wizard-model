@@ -140,7 +140,7 @@ def _load_building_pixels(pg_conn, job_id: int, page: int, page_size: int = 1000
                 h.elevation,
                 b.toid,
                 ST_Contains(b.geom_27700, h.en) AS within_building,
-                NOT ST_Contains((SELECT geom_27700 FROM {all_buildings}), h.en) AS without_building,
+                h.toid IS NULL AS without_building,
                 hh.height
             FROM building_page b
             LEFT JOIN mastermap.height hh ON b.toid = hh.toid
@@ -148,7 +148,6 @@ def _load_building_pixels(pg_conn, job_id: int, page: int, page_size: int = 1000
             WHERE h.elevation != -9999
             ORDER BY b.toid;
             """).format(
-            all_buildings=Identifier(tables.schema(job_id), tables.ALL_BUILDINGS_TABLE),
             pixel_horizons=Identifier(tables.schema(job_id), tables.PIXEL_HORIZON_TABLE),
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
         ), {

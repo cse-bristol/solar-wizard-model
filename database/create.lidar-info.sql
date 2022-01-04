@@ -20,6 +20,8 @@ CREATE INDEX ON {clean_table} USING GIST (geom_4326);
 COMMIT;
 START TRANSACTION;
 
+DELETE FROM models.lidar_info WHERE job_id = %(job_id)s;
+
 -- Total coverage:
 INSERT into models.lidar_info (
     job_id,

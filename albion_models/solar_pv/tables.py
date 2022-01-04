@@ -25,9 +25,6 @@ BUILDING_EXCLUSION_REASONS_TABLE = 'building_exclusion_reasons'
 """A lookup from toid to the reason why the building has no PV
 (or null if the building has PV)"""
 
-ALL_BUILDINGS_TABLE = 'all_buildings'
-"""A single multipolygon of the union of all buildings in the job"""
-
 
 def schema(job_id: int) -> str:
     """Get the solar PV schema given a job_id."""
