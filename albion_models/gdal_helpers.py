@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import shlex
 import subprocess
 import textwrap
 from typing import List, Tuple
@@ -12,7 +13,16 @@ from osgeo import ogr
 def create_vrt(tiles: List[str], vrt_file: str):
     logging.info("Creating vrt...")
     if tiles and len(tiles) > 0:
-        run(f"gdalbuildvrt -resolution highest {vrt_file} {' '.join(tiles)}")
+        command = f"gdalbuildvrt -resolution highest {vrt_file} {' '.join(tiles)}"
+
+        logging.info("Running command:")
+        logging.info(command)
+
+        res = subprocess.run(shlex.split(command), capture_output=True, text=True)
+        print(res.stdout.strip())
+        if res.returncode != 0:
+            print(res.stderr.strip())
+            raise ValueError(res.stderr)
     else:
         logging.warning("No tiles passed, not creating vrt")
 
