@@ -198,7 +198,7 @@ class LidarJobTiles:
         coverage_tiles = []
         for tile_id, tiles in by_id.items():
             if len(tiles) == 1:
-                merged_tiles.append(tiles[0])
+                merged_tiles.append(tiles[0].filename)
             elif len(tiles) > 1:
                 res = tiles[-1].resolution.value
                 filenames = [tile.filename for tile in tiles]
