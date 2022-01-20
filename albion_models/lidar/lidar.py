@@ -1,3 +1,5 @@
+import shutil
+
 import itertools
 import logging
 import os
@@ -197,18 +199,22 @@ class LidarJobTiles:
         merged_tiles = []
         coverage_tiles = []
         for tile_id, tiles in by_id.items():
-            if len(tiles) == 1:
-                merged_tiles.append(tiles[0].filename)
-            elif len(tiles) > 1:
-                res = tiles[-1].resolution.value
-                filenames = [tile.filename for tile in tiles]
-                merged = gdal_helpers.merge(
-                    filenames,
-                    join(job_lidar_dir, f"{tile_id}_DSM_merged.tiff"),
-                    res=res,
-                    nodata=LIDAR_NODATA)
+            merged_filename = join(job_lidar_dir, f"{tile_id}_DSM_merged.tiff")
+            if not os.path.exists(merged_filename):
+                if len(tiles) == 1:
+                    shutil.copy(tiles[0].filename, merged_filename)
+                elif len(tiles) > 1:
+                    res = tiles[-1].resolution.value
+                    filenames = [tile.filename for tile in tiles]
+                    gdal_helpers.merge(
+                        filenames,
+                        merged_filename,
+                        res=res,
+                        nodata=LIDAR_NODATA)
+            else:
+                logging.info(f"Skipping merge to {merged_filename}, already exists")
 
-                merged_tiles.append(merged)
+            merged_tiles.append(merged_filename)
 
             per_res_cov_raster = lidar_per_res_coverage(
                 tiles,
@@ -247,7 +253,7 @@ class LidarJobTiles:
 
     def delete_unmerged_tiles(self):
         for tile in itertools.chain(self.tiles_2m, self.tiles_1m, self.tiles_50cm):
-            os.remove(tile.filename)
+            _try_remove(tile.filename)
 
 
 def lidar_per_res_coverage(resolutions: List[LidarTile], outfile: str, nodata: int):
@@ -264,7 +270,7 @@ def lidar_per_res_coverage(resolutions: List[LidarTile], outfile: str, nodata: i
     gdal_helpers.merge(to_merge, outfile, highest_res, nodata)
 
     for f in to_merge:
-        os.remove(f)
+        _try_remove(f)
 
     return outfile
 
@@ -308,13 +314,18 @@ def zip_to_geotiffs(pg_conn, job_id: int, zt: ZippedTiles, lidar_dir: str) -> Li
     tiff_paths = []
     with zipfile.ZipFile(join(lidar_dir, zt.filename)) as z:
         for zipinfo in z.infolist():
-            z.extract(zipinfo, lidar_dir)
             # Convert to geotiff and add SRS metadata:
             tiff_filename = _get_tiff_filename(zipinfo.filename)
-            tile = LidarTile.from_filename(join(lidar_dir, tiff_filename), zt.year)
-            if _tile_intersects_bounds(pg_conn, job_id, tile.tile_id):
-                _asc_to_geotiff(lidar_dir, zipinfo.filename, tiff_filename)
-                tiff_paths.append(tile)
+            if not os.path.exists(join(lidar_dir, tiff_filename)):
+                z.extract(zipinfo, lidar_dir)
+                tile = LidarTile.from_filename(join(lidar_dir, tiff_filename), zt.year)
+                if _tile_intersects_bounds(pg_conn, job_id, tile.tile_id):
+                    _asc_to_geotiff(lidar_dir, zipinfo.filename, tiff_filename)
+                    tiff_paths.append(tile)
+                else:
+                    _try_remove(join(lidar_dir, zipinfo.filename))
+            else:
+                logging.info(f"Skipping extraction of {tiff_filename}, already exists")
 
     return tiff_paths
 
@@ -338,7 +349,7 @@ def _asc_to_geotiff(lidar_dir: str, asc_filename: str, tiff_filename: str) -> No
     # https://gdal.org/api/python_gotchas.html
     gdal_asc_file = None
     gdal_tiff_file = None
-    os.remove(join(lidar_dir, asc_filename))
+    _try_remove(join(lidar_dir, asc_filename))
 
 
 def _tile_intersects_bounds(pg_conn, job_id: int, tile_id: str) -> bool:
@@ -352,3 +363,10 @@ def _tile_intersects_bounds(pg_conn, job_id: int, tile_id: str) -> bool:
         })
         pg_conn.commit()
         return cursor.fetchone()[0]
+
+
+def _try_remove(filepath: str):
+    try:
+        os.remove(filepath)
+    except OSError:
+        pass
