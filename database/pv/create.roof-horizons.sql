@@ -59,13 +59,13 @@ START TRANSACTION;
 -- and min_dist_to_edge_large_m:
 --
 UPDATE {roof_horizons} h
-SET roof_geom_27700 = ST_Multi(ST_Intersection(
+SET roof_geom_27700 = ST_Multi(ST_CollectionExtract(ST_MakeValid(ST_Intersection(
     roof_geom_27700,
     ST_Buffer(geom_27700,
               CASE WHEN ST_Area(geom_27700) > %(large_building_threshold)s
                    THEN -%(min_dist_to_edge_large_m)s
                    ELSE -%(min_dist_to_edge_m)s END,
-              'endcap=square join=mitre')))
+              'endcap=square join=mitre'))), 3))
 FROM {buildings} b
 WHERE h.toid = b.toid;
 
@@ -76,7 +76,7 @@ START TRANSACTION;
 -- Don't allow roof plane polygons to overlap:
 --
 UPDATE {roof_horizons} h1
-SET roof_geom_27700 = COALESCE(ST_Multi(ST_Difference(
+SET roof_geom_27700 = COALESCE(ST_Multi(ST_CollectionExtract(ST_MakeValid(ST_Difference(
     roof_geom_27700,
     (SELECT ST_Union(h2.roof_geom_27700)
      FROM {roof_horizons} h2
@@ -84,7 +84,7 @@ SET roof_geom_27700 = COALESCE(ST_Multi(ST_Difference(
         ST_Intersects(h1.roof_geom_27700, h2.roof_geom_27700)
         AND h1.toid = h2.toid
         -- The lowest roof plane IDs take precedence (arbitrarily)
-        AND h1.roof_plane_id > h2.roof_plane_id))), h1.roof_geom_27700);
+        AND h1.roof_plane_id > h2.roof_plane_id))), 3)), h1.roof_geom_27700);
 
 COMMIT;
 START TRANSACTION;
