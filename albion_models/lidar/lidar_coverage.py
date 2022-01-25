@@ -1,3 +1,4 @@
+import logging
 import os
 from os.path import join
 
@@ -23,6 +24,10 @@ def calculate_lidar_coverage(job_id: int, lidar_dir: str, pg_uri: str):
     """
     job_lidar_dir = join(lidar_dir, f"job_{job_id}")
     cov_vrt_file = join(job_lidar_dir, LIDAR_COV_VRT)
+    if not os.path.exists(cov_vrt_file):
+        logging.warning(f"No LiDAR coverage file found at path {cov_vrt_file}")
+        return
+
     srid = gdal_helpers.get_srid(cov_vrt_file, fallback=27700)
     res = gdal_helpers.get_res(cov_vrt_file)
 

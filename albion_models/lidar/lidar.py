@@ -194,6 +194,7 @@ class LidarJobTiles:
             by_id[tile.tile_id].append(tile)
 
         if len(by_id) == 0:
+            logging.warning("No tiles found, cannot create vrts")
             return
 
         merged_tiles = []
