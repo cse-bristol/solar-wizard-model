@@ -124,7 +124,8 @@ def _load_output_to_database(pg_conn, file_name: str, job_id: int, heat_degree_d
                 volume double precision,
                 ext_surface_proportion double precision,
                 ext_surface_per_volume double precision,
-                tot_surface_per_volume double precision
+                tot_surface_per_volume double precision,
+                height_source text
             );
             CREATE INDEX ON models.raw_heat_demand (toid);
             """)
@@ -138,12 +139,31 @@ def _load_output_to_database(pg_conn, file_name: str, job_id: int, heat_degree_d
             
             INSERT INTO models.heat_demand
             SELECT
-                r.*,
+                r.toid,
+                r.annual_demand,
+                r.peak_demand,
+                r.sap_water_demand,
+                r.demand_source,
+                r.floor_area,
+                r.height,
+                r.perimeter,
+                r.shared_perimeter,
+                r.storeys,
+                r.footprint,
+                r.wall_area,
+                r.party_wall_area,
+                r.external_wall_area,
+                r.external_surface_area,
+                r.volume,
+                r.ext_surface_proportion,
+                r.ext_surface_per_volume,
+                r.tot_surface_per_volume,
                 %(job_id)s,
                 b.geom_4326,
                 %(heat_degree_days)s,
                 b.num_addresses = 0 AND b.num_epc_certs = 0 AS ignore,
-                string_to_array(b.ignore_reasons, '|') AS ignore_reasons
+                string_to_array(b.ignore_reasons, '|') AS ignore_reasons,
+                r.height_source
             FROM models.raw_heat_demand r
             LEFT JOIN aggregates.building b ON r.toid = b.toid;
 
