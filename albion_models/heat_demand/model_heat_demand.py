@@ -145,7 +145,7 @@ def _load_output_to_database(pg_conn, file_name: str, job_id: int, heat_degree_d
                 r.sap_water_demand,
                 r.demand_source,
                 r.floor_area,
-                r.height,
+                CASE WHEN r.height_source = ':default' THEN NULL ELSE r.height END AS height,
                 r.perimeter,
                 r.shared_perimeter,
                 r.storeys,
@@ -163,7 +163,11 @@ def _load_output_to_database(pg_conn, file_name: str, job_id: int, heat_degree_d
                 %(heat_degree_days)s,
                 b.num_addresses = 0 AND b.num_epc_certs = 0 AS ignore,
                 string_to_array(b.ignore_reasons, '|') AS ignore_reasons,
-                r.height_source
+                CASE WHEN r.height_source = ':lidar' THEN 'lidar'
+                     WHEN r.height_source = ':fallback' THEN 'osmm'
+                     WHEN r.height_source = ':default' THEN 'ignore'
+                     ELSE r.height_source
+                     END AS height_source
             FROM models.raw_heat_demand r
             LEFT JOIN aggregates.building b ON r.toid = b.toid;
 
