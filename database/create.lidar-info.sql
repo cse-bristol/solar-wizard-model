@@ -2,6 +2,30 @@
 -- Add an entry to the models.lidar_info table
 --
 
+-- Create a copy of the job bounds in 4326:
+CREATE TABLE {bounds_table} AS
+SELECT ST_Transform(bounds, 4326) AS bounds_4326
+FROM models.job_queue
+WHERE job_id = %(job_id)s;
+
+CREATE INDEX ON {bounds_table} USING GIST (bounds_4326);
+
+-- clean up polygonised lidar cov:
+DELETE FROM {temp_table}
+USING {bounds_table}
+WHERE NOT ST_Intersects(geom_4326, bounds_4326);
+
+UPDATE {temp_table}
+SET geom_4326 = ST_Multi(ST_CollectionExtract(ST_Buffer(geom_4326, 0), 3))
+WHERE NOT ST_IsValid(geom_4326);
+
+UPDATE {temp_table}
+SET geom_4326 = ST_Multi(ST_CollectionExtract(ST_Intersection(ST_MakeValid(geom_4326), bounds_4326), 3))
+FROM {bounds_table}
+WHERE ST_Overlaps(geom_4326, bounds_4326);
+
+COMMIT;
+START TRANSACTION;
 
 DROP TABLE IF EXISTS {clean_table};
 
@@ -32,14 +56,12 @@ INSERT into models.lidar_info (
     resolution)
 SELECT
     %(job_id)s,
-    ST_Multi(ST_Intersection(t.geom_4326, ST_Transform(q.bounds, 4326))),
-    ST_Area(ST_Intersection(t.geom_4326, ST_Transform(q.bounds, 4326)))
-        / ST_Area(ST_Transform(q.bounds, 4326)),
+    ST_Multi(t.geom_4326),
+    ST_Area(t.geom_4326) / ST_Area(bounds_4326),
     0,
     0.0,
     'all'
-FROM (SELECT ST_Union(geom_4326) geom_4326 FROM {clean_table}) t, models.job_queue q
-WHERE q.job_id = %(job_id)s;
+FROM (SELECT ST_Union(geom_4326) geom_4326 FROM {clean_table}) t, {bounds_table} q;
 
 --per-resolution coverage:
 INSERT into models.lidar_info (
@@ -51,16 +73,14 @@ INSERT into models.lidar_info (
     resolution)
 SELECT
     %(job_id)s,
-    ST_Multi(ST_Intersection(t.geom_4326, ST_Transform(q.bounds, 4326))),
-    ST_Area(ST_Intersection(t.geom_4326, ST_Transform(q.bounds, 4326)))
-        / ST_Area(ST_Transform(q.bounds, 4326)),
+    ST_Multi(t.geom_4326),
+    ST_Area(t.geom_4326) / ST_Area(bounds_4326),
     0,
     0.0,
     CASE WHEN t.resolution = 0.5 THEN '50cm'::models.lidar_resolution
          WHEN t.resolution = 1.0 THEN '1m'::models.lidar_resolution
          WHEN t.resolution = 2.0 THEN '2m'::models.lidar_resolution END
-FROM {clean_table} t, models.job_queue q
-WHERE q.job_id = %(job_id)s;
+FROM {clean_table} t, {bounds_table} q;
 
 COMMIT;
 START TRANSACTION;
@@ -70,9 +90,8 @@ START TRANSACTION;
 WITH bb AS (
     SELECT count(*) AS count
     FROM mastermap.building b
-    INNER JOIN models.job_queue q
-    ON ST_Intersects(st_transform(q.bounds, 4326), b.geom_4326)
-    WHERE q.job_id = %(job_id)s
+    INNER JOIN {bounds_table} q
+    ON ST_Intersects(bounds_4326, b.geom_4326)
 )
 UPDATE models.lidar_info SET
     buildings_in_bounds = bb.count
@@ -93,3 +112,4 @@ UPDATE models.lidar_info ll SET
 
 DROP TABLE {temp_table};
 DROP TABLE {clean_table};
+DROP TABLE {bounds_table};

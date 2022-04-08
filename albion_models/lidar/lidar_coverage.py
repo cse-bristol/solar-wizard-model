@@ -60,7 +60,8 @@ def calculate_lidar_coverage(job_id: int, lidar_dir: str, pg_uri: str):
             "create.lidar-info.sql",
             {"job_id": job_id},
             temp_table=Identifier("models", f"lidar_cov_temp_{job_id}"),
-            clean_table=Identifier("models", f"lidar_cov_clean_{job_id}"))
+            clean_table=Identifier("models", f"lidar_cov_clean_{job_id}"),
+            bounds_table=Identifier("models", f"lidar_temp_bounds_{job_id}"))
     finally:
         pg_conn.close()
 
