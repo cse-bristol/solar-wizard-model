@@ -3,6 +3,7 @@
 --
 
 -- Create a copy of the job bounds in 4326:
+DROP TABLE IF EXISTS {bounds_table};
 CREATE TABLE {bounds_table} AS
 SELECT ST_Transform(bounds, 4326) AS bounds_4326
 FROM models.job_queue
