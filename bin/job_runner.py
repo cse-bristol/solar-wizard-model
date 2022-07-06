@@ -13,7 +13,8 @@ from albion_models.lidar.bulk_lidar_client import load_from_bulk
 from albion_models.lidar.defra_lidar_api_client import get_all_lidar
 from albion_models.lidar.lidar_coverage import calculate_lidar_coverage
 from albion_models.hard_soft_dig.model_hard_soft_dig import model_hard_soft_dig
-from albion_models.heat_demand.model_heat_demand import model_heat_demand
+from albion_models.heat_demand.model_heat_demand import model_heat_demand, \
+    model_insulation_measure_costs
 from albion_models.solar_pv.model_solar_pv import model_solar_pv
 from albion_models.solar_pv.cost_benefit.model_cost_benefit import model_cost_benefit
 from albion_models.db_funcs import process_pg_uri
@@ -115,10 +116,91 @@ def _handle_job(pg_conn, job: dict) -> bool:
 
         if job['lidar']:
             calculate_lidar_coverage(job_id, lidar_dir, pg_uri)
+
         if job['heat_demand']:
             heat_degree_days = params['heat_degree_days']
             lidar_tiff_paths = gdal_helpers.files_in_vrt(lidar_vrt_file)
-            model_heat_demand(pg_conn, job_id, bounds, lidar_tiff_paths, os.environ.get("HEAT_DEMAND_DIR"), heat_degree_days)
+            model_heat_demand(
+                pg_conn,
+                job_id,
+                bounds,
+                lidar_tiff_paths,
+                os.environ.get("HEAT_DEMAND_DIR"),
+                heat_degree_days)
+
+            include_cwi = params['include_cwi']
+            include_swi = params['include_swi']
+            include_loft_ins = params['include_loft_ins']
+            include_roof_ins = params['include_roof_ins']
+            include_floor_ins = params['include_floor_ins']
+            include_glazing = params['include_glazing']
+
+            cwi_max_pct_area = params['cwi_max_pct_area']
+            swi_max_pct_area = params['swi_max_pct_area']
+            loft_ins_max_pct_area = params['loft_ins_max_pct_area']
+            roof_ins_max_pct_area = params['roof_ins_max_pct_area']
+            floor_ins_max_pct_area = params['floor_ins_max_pct_area']
+            glazing_max_pct_area = params['glazing_max_pct_area']
+
+            cwi_per_m2_cost = params['cwi_per_m2_cost']
+            swi_per_m2_cost = params['swi_per_m2_cost']
+            loft_ins_per_m2_cost = params['loft_ins_per_m2_cost']
+            roof_ins_per_m2_cost = params['roof_ins_per_m2_cost']
+            floor_ins_per_m2_cost = params['floor_ins_per_m2_cost']
+            glazing_per_m2_cost = params['glazing_per_m2_cost']
+
+            cwi_fixed_cost = params['cwi_fixed_cost']
+            swi_fixed_cost = params['swi_fixed_cost']
+            loft_ins_fixed_cost = params['loft_ins_fixed_cost']
+            roof_ins_fixed_cost = params['roof_ins_fixed_cost']
+            floor_ins_fixed_cost = params['floor_ins_fixed_cost']
+            glazing_fixed_cost = params['glazing_fixed_cost']
+
+            cwi_pct_demand_reduction = params['cwi_pct_demand_reduction']
+            swi_pct_demand_reduction = params['swi_pct_demand_reduction']
+            loft_ins_pct_demand_reduction = params['loft_ins_pct_demand_reduction']
+            roof_ins_pct_demand_reduction = params['roof_ins_pct_demand_reduction']
+            floor_ins_pct_demand_reduction = params['floor_ins_pct_demand_reduction']
+            glazing_pct_demand_reduction = params['glazing_pct_demand_reduction']
+
+            model_insulation_measure_costs(
+                pg_conn,
+                job_id=job_id,
+                include_cwi=include_cwi,
+                include_swi=include_swi,
+                include_loft_ins=include_loft_ins,
+                include_roof_ins=include_roof_ins,
+                include_floor_ins=include_floor_ins,
+                include_glazing=include_glazing,
+
+                cwi_max_pct_area=cwi_max_pct_area,
+                swi_max_pct_area=swi_max_pct_area,
+                loft_ins_max_pct_area=loft_ins_max_pct_area,
+                roof_ins_max_pct_area=roof_ins_max_pct_area,
+                floor_ins_max_pct_area=floor_ins_max_pct_area,
+                glazing_max_pct_area=glazing_max_pct_area,
+
+                cwi_per_m2_cost=cwi_per_m2_cost,
+                swi_per_m2_cost=swi_per_m2_cost,
+                loft_ins_per_m2_cost=loft_ins_per_m2_cost,
+                roof_ins_per_m2_cost=roof_ins_per_m2_cost,
+                floor_ins_per_m2_cost=floor_ins_per_m2_cost,
+                glazing_per_m2_cost=glazing_per_m2_cost,
+
+                cwi_fixed_cost=cwi_fixed_cost,
+                swi_fixed_cost=swi_fixed_cost,
+                loft_ins_fixed_cost=loft_ins_fixed_cost,
+                roof_ins_fixed_cost=roof_ins_fixed_cost,
+                floor_ins_fixed_cost=floor_ins_fixed_cost,
+                glazing_fixed_cost=glazing_fixed_cost,
+
+                cwi_pct_demand_reduction=cwi_pct_demand_reduction,
+                swi_pct_demand_reduction=swi_pct_demand_reduction,
+                loft_ins_pct_demand_reduction=loft_ins_pct_demand_reduction,
+                roof_ins_pct_demand_reduction=roof_ins_pct_demand_reduction,
+                floor_ins_pct_demand_reduction=floor_ins_pct_demand_reduction,
+                glazing_pct_demand_reduction=glazing_pct_demand_reduction)
+
         if job['solar_pv']:
             horizon_search_radius = params['horizon_search_radius']
             horizon_slices = params['horizon_slices']

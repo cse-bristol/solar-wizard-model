@@ -6,8 +6,9 @@ from typing import List
 
 import osgeo.ogr as ogr
 import osgeo.osr as osr
-from psycopg2.sql import SQL, Identifier
+from psycopg2.sql import SQL, Identifier, Literal
 
+from albion_models.db_funcs import sql_script_with_bindings, sql_script
 from albion_models.paths import PROJECT_ROOT
 
 
@@ -182,3 +183,81 @@ def _load_output_to_database(pg_conn, file_name: str, job_id: int, heat_degree_d
                 'job_id': job_id,
                 'heat_degree_days': heat_degree_days})
         pg_conn.commit()
+
+
+def model_insulation_measure_costs(
+        pg_conn,
+        job_id: int,
+        include_cwi: bool,
+        include_swi: bool,
+        include_loft_ins: bool,
+        include_roof_ins: bool,
+        include_floor_ins: bool,
+        include_glazing: bool,
+
+        cwi_max_pct_area: float,
+        swi_max_pct_area: float,
+        loft_ins_max_pct_area: float,
+        roof_ins_max_pct_area: float,
+        floor_ins_max_pct_area: float,
+        glazing_max_pct_area: float,
+
+        cwi_per_m2_cost: float,
+        swi_per_m2_cost: float,
+        loft_ins_per_m2_cost: float,
+        roof_ins_per_m2_cost: float,
+        floor_ins_per_m2_cost: float,
+        glazing_per_m2_cost: float,
+
+        cwi_fixed_cost: float,
+        swi_fixed_cost: float,
+        loft_ins_fixed_cost: float,
+        roof_ins_fixed_cost: float,
+        floor_ins_fixed_cost: float,
+        glazing_fixed_cost: float,
+
+        cwi_pct_demand_reduction: float,
+        swi_pct_demand_reduction: float,
+        loft_ins_pct_demand_reduction: float,
+        roof_ins_pct_demand_reduction: float,
+        floor_ins_pct_demand_reduction: float,
+        glazing_pct_demand_reduction: float):
+    """Assumes heat demand model has already run"""
+    sql_script(
+        pg_conn,
+        "ins_measure_costs.sql",
+        job_id=Literal(job_id),
+        include_cwi=Literal(include_cwi),
+        include_swi=Literal(include_swi),
+        include_loft_ins=Literal(include_loft_ins),
+        include_roof_ins=Literal(include_roof_ins),
+        include_floor_ins=Literal(include_floor_ins),
+        include_glazing=Literal(include_glazing),
+
+        cwi_max_pct_area=Literal(cwi_max_pct_area),
+        swi_max_pct_area=Literal(swi_max_pct_area),
+        loft_ins_max_pct_area=Literal(loft_ins_max_pct_area),
+        roof_ins_max_pct_area=Literal(roof_ins_max_pct_area),
+        floor_ins_max_pct_area=Literal(floor_ins_max_pct_area),
+        glazing_max_pct_area=Literal(glazing_max_pct_area),
+
+        cwi_per_m2_cost=Literal(cwi_per_m2_cost),
+        swi_per_m2_cost=Literal(swi_per_m2_cost),
+        loft_ins_per_m2_cost=Literal(loft_ins_per_m2_cost),
+        roof_ins_per_m2_cost=Literal(roof_ins_per_m2_cost),
+        floor_ins_per_m2_cost=Literal(floor_ins_per_m2_cost),
+        glazing_per_m2_cost=Literal(glazing_per_m2_cost),
+
+        cwi_fixed_cost=Literal(cwi_fixed_cost),
+        swi_fixed_cost=Literal(swi_fixed_cost),
+        loft_ins_fixed_cost=Literal(loft_ins_fixed_cost),
+        roof_ins_fixed_cost=Literal(roof_ins_fixed_cost),
+        floor_ins_fixed_cost=Literal(floor_ins_fixed_cost),
+        glazing_fixed_cost=Literal(glazing_fixed_cost),
+
+        cwi_pct_demand_reduction=Literal(cwi_pct_demand_reduction),
+        swi_pct_demand_reduction=Literal(swi_pct_demand_reduction),
+        loft_ins_pct_demand_reduction=Literal(loft_ins_pct_demand_reduction),
+        roof_ins_pct_demand_reduction=Literal(roof_ins_pct_demand_reduction),
+        floor_ins_pct_demand_reduction=Literal(floor_ins_pct_demand_reduction),
+        glazing_pct_demand_reduction=Literal(glazing_pct_demand_reduction))
