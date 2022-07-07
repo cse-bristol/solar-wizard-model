@@ -7,6 +7,7 @@ import textwrap
 from typing import List, Tuple
 
 import gdal
+import numpy as np
 from osgeo import ogr
 
 
@@ -224,12 +225,38 @@ def run(command: str):
         raise ValueError(res.stderr)
 
 
-def raster_to_csv(raster_file: str, csv_out: str):
-    run(f'gdal_translate -of XYZ {raster_file} {csv_out} '
-        f'-co "COLUMN_SEPARATOR=," '
-        f'-co "DECIMAL_PRECISION=1"')
+def raster_to_csv(raster_file: str, csv_out: str,  mask_raster: str = None,
+                  band: int = 1, mask_band: int = 1, mask_keep: int = 1):
+    """
+    Adapted from https://github.com/postmates/gdal/blob/master/scripts/gdal2xyz.py
+    with the addition of an optional mask raster
+
+    mask_keep: if the mask raster has this value at index, it will write the row
+    """
+    r_ds = gdal.Open(raster_file)
+    rb = r_ds.GetRasterBand(band)
+    if mask_raster:
+        mask_ds = gdal.Open(mask_raster)
+        mb = mask_ds.GetRasterBand(mask_band)
+    gt = r_ds.GetGeoTransform()
+
+    with open(csv_out, 'w') as f:
+        for y in range(r_ds.RasterYSize):
+            data = rb.ReadAsArray(0, y, r_ds.RasterXSize, 1)
+            data = np.reshape(data, (r_ds.RasterXSize,))
+            if mask_raster:
+                mask_data = mb.ReadAsArray(0, y, r_ds.RasterXSize, 1)
+                mask_data = np.reshape(mask_data, (r_ds.RasterXSize,))
+
+            for x in range(0, r_ds.RasterXSize):
+                if not mask_raster or int(mask_data[x]) == mask_keep:
+                    geo_x = gt[0] + (x + 0.5) * gt[1] + (y + 0.5) * gt[2]
+                    geo_y = gt[3] + (x + 0.5) * gt[4] + (y + 0.5) * gt[5]
+                    f.write(f"{float(geo_x)},{float(geo_y)},{float(data[x]):.2f}\n")
 
 
 if __name__ == '__main__':
-    file = "/home/neil/data/albion-models/lidar/sp0104_DSM_2M.tiff"
-    slope(file, file + ".slope.tiff")
+    logging.basicConfig(level=logging.DEBUG,
+                        format='[%(asctime)s] %(levelname)s: %(message)s')
+    raster_to_csv("/home/neil/data/albion-models/lidar/sp0104_DSM_1M.tiff",
+                  "/home/neil/data/albion-models/lidar/sp0104_DSM_1M.csv")

@@ -52,7 +52,7 @@ def generate_rasters(pg_uri: str,
     else:
         mask_sql = mask.buildings_mask_sql(pg_uri, job_id, buffer=1)
 
-    mask.create_mask(mask_sql, solar_dir, pg_uri, res=res, srid=srid)
+    mask.create_mask(mask_sql, mask_raster, pg_uri, res=res, srid=srid)
 
     logging.info("Cropping lidar to mask dimensions...")
     gdal_helpers.crop_or_expand(lidar_vrt_file, mask_raster, cropped_lidar,
@@ -65,8 +65,8 @@ def generate_rasters(pg_uri: str,
     gdal_helpers.slope(cropped_lidar, slope_raster)
 
     logging.info("Loading raster data...")
-    _load_rasters_to_db(pg_uri, job_id, srid, solar_dir,
-                        cropped_lidar, aspect_raster, slope_raster, debug_mode)
+    _load_rasters_to_db(pg_uri, job_id, srid, solar_dir, cropped_lidar,
+                        aspect_raster, slope_raster, mask_raster, debug_mode)
 
     return cropped_lidar, aspect_raster, slope_raster, mask_raster
 
@@ -78,6 +78,7 @@ def _load_rasters_to_db(pg_uri: str,
                         cropped_lidar: str,
                         aspect_raster: str,
                         slope_raster: str,
+                        mask_raster: str,
                         debug_mode: bool):
     pg_conn = connect(pg_uri)
     schema = tables.schema(job_id)
@@ -90,9 +91,9 @@ def _load_rasters_to_db(pg_uri: str,
             slope_pixels=Identifier(schema, "slope_pixels"),
         )
 
-        copy_raster(pg_conn, solar_dir, cropped_lidar, f"{schema}.{lidar_pixels_table}", debug_mode)
-        copy_raster(pg_conn, solar_dir, aspect_raster, f"{schema}.aspect_pixels", debug_mode)
-        copy_raster(pg_conn, solar_dir, slope_raster, f"{schema}.slope_pixels", debug_mode)
+        copy_raster(pg_conn, solar_dir, cropped_lidar, f"{schema}.{lidar_pixels_table}", mask_raster, debug_mode)
+        copy_raster(pg_conn, solar_dir, aspect_raster, f"{schema}.aspect_pixels", mask_raster, debug_mode)
+        copy_raster(pg_conn, solar_dir, slope_raster, f"{schema}.slope_pixels", mask_raster, debug_mode)
 
         sql_script(
             pg_conn, 'pv/post-load.lidar-pixels.sql',
@@ -106,9 +107,9 @@ def _load_rasters_to_db(pg_uri: str,
         pg_conn.close()
 
 
-def copy_raster(pg_conn, solar_dir: str, raster: str, table: str, debug_mode: bool):
+def copy_raster(pg_conn, solar_dir: str, raster: str, table: str, mask_raster: str = None, debug_mode: bool = False):
     csv_file = join(solar_dir, f'temp-{table}.csv')
-    gdal_helpers.raster_to_csv(raster, csv_file)
+    gdal_helpers.raster_to_csv(raster, csv_file, mask_raster)
     copy_csv(pg_conn, csv_file, table)
     if not debug_mode:
         try:

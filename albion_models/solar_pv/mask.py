@@ -13,6 +13,10 @@ def create_mask(mask_sql: str,
                 pg_uri: str,
                 res: float,
                 srid: int):
+    """
+    Create a mask raster such that all pixels that intersect polygons
+    selected by `mask_sql` have a value of 1, otherwise 0.
+    """
     gdal_helpers.rasterize(pg_uri, mask_sql, mask_out, res, srid)
 
 
