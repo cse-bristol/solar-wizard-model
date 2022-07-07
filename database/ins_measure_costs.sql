@@ -74,12 +74,12 @@ SELECT
         costs.floor_ins_demand_reduction +
         costs.glazing_demand_reduction) / costs.annual_demand AS pct_demand_reduction,
     costs.annual_demand,
-    costs.annual_demand -
-        costs.cwi_demand_reduction -
-        costs.swi_demand_reduction -
-        costs.loft_ins_demand_reduction -
-        costs.roof_ins_demand_reduction -
-        costs.floor_ins_demand_reduction -
+    costs.annual_demand +
+        costs.cwi_demand_reduction +
+        costs.swi_demand_reduction +
+        costs.loft_ins_demand_reduction +
+        costs.roof_ins_demand_reduction +
+        costs.floor_ins_demand_reduction +
         costs.glazing_demand_reduction AS new_annual_demand,
 
     costs.cwi_applied,
