@@ -24,7 +24,7 @@ def pvgis(pg_uri: str,
     """
 
 
-def _write_results_to_db(pg_conn, job_id: int, solar_dir: str, kwh_raster: str, debug_mode: bool):
+def _write_results_to_db(pg_conn, job_id: int, solar_dir: str, kwh_raster: str, mask_raster: str, debug_mode: bool):
     # TODO:
     #  I don't know how many separate raster outputs we'll get - they'll all need combining
     #  and the SQL scripts below will need editing (they are from the old approach)
@@ -40,7 +40,7 @@ def _write_results_to_db(pg_conn, job_id: int, solar_dir: str, kwh_raster: str, 
         'pv/create.solar-pv.sql',
         solar_pv=Identifier(tables.schema(job_id), tables.SOLAR_PV_TABLE))
 
-    copy_raster(pg_conn, solar_dir, kwh_raster, f'{tables.schema(job_id)}.{tables.SOLAR_PV_TABLE}', debug_mode)
+    copy_raster(pg_conn, solar_dir, kwh_raster, f'{tables.schema(job_id)}.{tables.SOLAR_PV_TABLE}', mask_raster, debug_mode)
 
     sql_script_with_bindings(
         pg_conn,

@@ -1,24 +1,9 @@
+
+-- TODO need to add a db migration in 320-albion-webapp repo which changes the shape of models.solar_pv
 -- TODO this assumes the per-PV-installation approach from the old HTTP PVGIS API
-
-ALTER TABLE {solar_pv} DROP COLUMN jan_month;
-ALTER TABLE {solar_pv} DROP COLUMN feb_month;
-ALTER TABLE {solar_pv} DROP COLUMN mar_month;
-ALTER TABLE {solar_pv} DROP COLUMN apr_month;
-ALTER TABLE {solar_pv} DROP COLUMN may_month;
-ALTER TABLE {solar_pv} DROP COLUMN jun_month;
-ALTER TABLE {solar_pv} DROP COLUMN jul_month;
-ALTER TABLE {solar_pv} DROP COLUMN aug_month;
-ALTER TABLE {solar_pv} DROP COLUMN sep_month;
-ALTER TABLE {solar_pv} DROP COLUMN oct_month;
-ALTER TABLE {solar_pv} DROP COLUMN nov_month;
-ALTER TABLE {solar_pv} DROP COLUMN dec_month;
-
-ALTER TABLE {solar_pv} ALTER COLUMN spectral_loss_percentage SET DATA TYPE real USING
-CASE
-    WHEN spectral_loss_percentage = '?(0)' THEN null
-    ELSE spectral_loss_percentage::real
-END;
-
+-- TODO need to do a spatial join with all {solar_pv} pixels that are within {res} metres
+--  of each panel installation, work out what proportion of the pixel overlaps the installation, and add up the kWh
+-- to get kWh of installation
 INSERT INTO models.solar_pv
 SELECT
     pv.jan_avg_energy_prod_kwh_per_day,
