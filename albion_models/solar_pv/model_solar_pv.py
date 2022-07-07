@@ -9,10 +9,11 @@ from psycopg2.sql import Identifier
 import albion_models.solar_pv.pv_gis.pv_gis_client as pv_gis_client
 import albion_models.solar_pv.tables as tables
 from albion_models.db_funcs import connect, sql_script_with_bindings, process_pg_uri
+from albion_models.gdal_helpers import get_res
+from albion_models.solar_pv.rasters import generate_rasters
 from albion_models.solar_pv.roof_polygons import create_roof_polygons
 from albion_models.solar_pv.lidar_check import check_lidar
 from albion_models.solar_pv.panels import add_panels
-from albion_models.solar_pv.saga_gis.horizons import find_horizons
 from albion_models.solar_pv.ransac.run_ransac import run_ransac
 
 
@@ -55,13 +56,12 @@ def model_solar_pv(pg_uri: str,
     logging.info("Initialising postGIS schema...")
     _init_schema(pg_uri, job_id)
 
-    res = find_horizons(
+    res = get_res(lidar_vrt_file)
+    elevation_raster, aspect_raster, slope_raster, mask_raster = generate_rasters(
         pg_uri=pg_uri,
         job_id=job_id,
         solar_dir=solar_dir,
         lidar_vrt_file=lidar_vrt_file,
-        horizon_search_radius=horizon_search_radius,
-        horizon_slices=horizon_slices,
         debug_mode=debug_mode)
 
     logging.info("Checking for outdated LiDAR and missing LiDAR coverage...")

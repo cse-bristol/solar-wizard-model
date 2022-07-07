@@ -1,4 +1,19 @@
--- Run after 320-albion-saga-gis CSV output is copied into the the table:
+
+ALTER TABLE {lidar_pixels} ADD COLUMN aspect double precision;
+ALTER TABLE {lidar_pixels} ADD COLUMN slope double precision;
+CREATE INDEX lidar_pixels_temp_idx ON {lidar_pixels} (easting, northing);
+
+UPDATE {lidar_pixels} lp SET aspect = a.aspect
+FROM {aspect_pixels} a
+WHERE lp.easting = a.easting AND lp.northing = a.northing;
+
+UPDATE {lidar_pixels} lp SET slope = s.slope
+FROM {slope_pixels} s
+WHERE lp.easting = s.easting AND lp.northing = s.northing;
+
+DROP TABLE {aspect_pixels};
+DROP TABLE {slope_pixels};
+ALTER TABLE {lidar_pixels} DROP CONSTRAINT lidar_pixels_temp_idx;
 
 ALTER TABLE {lidar_pixels} ADD COLUMN en geometry(Point, 27700);
 UPDATE {lidar_pixels} p SET en = ST_Transform(ST_SetSRID(ST_MakePoint(p.easting,p.northing), {srid}), 27700);

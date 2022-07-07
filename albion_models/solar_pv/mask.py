@@ -9,13 +9,11 @@ from albion_models import gdal_helpers
 
 
 def create_mask(mask_sql: str,
-                solar_dir: str,
+                mask_out: str,
                 pg_uri: str,
                 res: float,
                 srid: int):
-    mask_file = join(solar_dir, 'mask.tif')
-    gdal_helpers.rasterize(pg_uri, mask_sql, mask_file, res, srid)
-    return mask_file
+    gdal_helpers.rasterize(pg_uri, mask_sql, mask_out, res, srid)
 
 
 def buildings_mask_sql(pg_uri: str, job_id: int, buffer: int) -> str:

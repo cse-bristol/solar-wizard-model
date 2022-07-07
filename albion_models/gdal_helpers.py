@@ -137,6 +137,10 @@ def aspect(cropped_lidar: str, aspect_file: str):
     run(f"gdaldem aspect {cropped_lidar} {aspect_file} -of GTiff -b 1 -zero_for_flat")
 
 
+def slope(cropped_lidar: str, slope_file: str):
+    run(f"gdaldem slope {cropped_lidar} {slope_file} -of GTiff -b 1")
+
+
 def merge(files: List[str], output_file: str, res: float, nodata: int):
     """
     Merge raster tiles. They do not need to have the same resolution.
@@ -218,3 +222,14 @@ def run(command: str):
     if res.returncode != 0:
         print(res.stderr.strip())
         raise ValueError(res.stderr)
+
+
+def raster_to_csv(raster_file: str, csv_out: str):
+    run(f'gdal_translate -of XYZ {raster_file} {csv_out} '
+        f'-co "COLUMN_SEPARATOR=," '
+        f'-co "DECIMAL_PRECISION=1"')
+
+
+if __name__ == '__main__':
+    file = "/home/neil/data/albion-models/lidar/sp0104_DSM_2M.tiff"
+    slope(file, file + ".slope.tiff")

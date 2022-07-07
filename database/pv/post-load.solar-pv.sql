@@ -1,3 +1,4 @@
+-- TODO this assumes the per-PV-installation approach from the old HTTP PVGIS API
 
 ALTER TABLE {solar_pv} DROP COLUMN jan_month;
 ALTER TABLE {solar_pv} DROP COLUMN feb_month;

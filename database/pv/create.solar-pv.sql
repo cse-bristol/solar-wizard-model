@@ -1,4 +1,5 @@
 
+-- TODO this assumes the per-PV-installation approach from the old HTTP PVGIS API
 DROP TABLE IF EXISTS {solar_pv};
 CREATE TABLE {solar_pv} (
     jan_month int,
