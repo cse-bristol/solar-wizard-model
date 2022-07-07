@@ -223,6 +223,38 @@ def model_insulation_measure_costs(
         floor_ins_pct_demand_reduction: float,
         glazing_pct_demand_reduction: float):
     """Assumes heat demand model has already run"""
+
+    logging.info(f"include_cwi: {include_cwi}")
+    logging.info(f"include_swi: {include_swi}")
+    logging.info(f"include_loft_ins: {include_loft_ins}")
+    logging.info(f"include_roof_ins: {include_roof_ins}")
+    logging.info(f"include_floor_ins: {include_floor_ins}")
+    logging.info(f"include_glazing: {include_glazing}")
+    logging.info(f"cwi_max_pct_area: {cwi_max_pct_area}")
+    logging.info(f"swi_max_pct_area: {swi_max_pct_area}")
+    logging.info(f"loft_ins_max_pct_area: {loft_ins_max_pct_area}")
+    logging.info(f"roof_ins_max_pct_area: {roof_ins_max_pct_area}")
+    logging.info(f"floor_ins_max_pct_area: {floor_ins_max_pct_area}")
+    logging.info(f"glazing_max_pct_area: {glazing_max_pct_area}")
+    logging.info(f"cwi_per_m2_cost: {cwi_per_m2_cost}")
+    logging.info(f"swi_per_m2_cost: {swi_per_m2_cost}")
+    logging.info(f"loft_ins_per_m2_cost: {loft_ins_per_m2_cost}")
+    logging.info(f"roof_ins_per_m2_cost: {roof_ins_per_m2_cost}")
+    logging.info(f"floor_ins_per_m2_cost: {floor_ins_per_m2_cost}")
+    logging.info(f"glazing_per_m2_cost: {glazing_per_m2_cost}")
+    logging.info(f"cwi_fixed_cost: {cwi_fixed_cost}")
+    logging.info(f"swi_fixed_cost: {swi_fixed_cost}")
+    logging.info(f"loft_ins_fixed_cost: {loft_ins_fixed_cost}")
+    logging.info(f"roof_ins_fixed_cost: {roof_ins_fixed_cost}")
+    logging.info(f"floor_ins_fixed_cost: {floor_ins_fixed_cost}")
+    logging.info(f"glazing_fixed_cost: {glazing_fixed_cost}")
+    logging.info(f"cwi_pct_demand_reduction: {cwi_pct_demand_reduction}")
+    logging.info(f"swi_pct_demand_reduction: {swi_pct_demand_reduction}")
+    logging.info(f"loft_ins_pct_demand_reduction: {loft_ins_pct_demand_reduction}")
+    logging.info(f"roof_ins_pct_demand_reduction: {roof_ins_pct_demand_reduction}")
+    logging.info(f"floor_ins_pct_demand_reduction: {floor_ins_pct_demand_reduction}")
+    logging.info(f"glazing_pct_demand_reduction: {glazing_pct_demand_reduction}")
+
     sql_script(
         pg_conn,
         "ins_measure_costs.sql",
