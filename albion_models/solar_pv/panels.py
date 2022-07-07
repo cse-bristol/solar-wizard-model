@@ -13,7 +13,7 @@ def add_panels(pg_uri: str,
                panel_spacing_m: float):
     schema = tables.schema(job_id)
 
-    if count(pg_uri, schema, tables.PANEL_HORIZON_TABLE) > 0:
+    if count(pg_uri, schema, tables.PANEL_POLYGON_TABLE) > 0:
         logging.info("Not adding PV panels, panels already added")
         return
 
@@ -29,8 +29,8 @@ def add_panels(pg_uri: str,
                 "panel_height_m": panel_height_m,
                 "panel_spacing_m": panel_spacing_m,
             },
-            roof_horizons=Identifier(schema, tables.ROOF_HORIZON_TABLE),
-            panel_horizons=Identifier(schema, tables.PANEL_HORIZON_TABLE),
+            roof_polygons=Identifier(schema, tables.ROOF_POLYGON_TABLE),
+            panel_polygons=Identifier(schema, tables.PANEL_POLYGON_TABLE),
             building_exclusion_reasons=Identifier(schema, tables.BUILDING_EXCLUSION_REASONS_TABLE),
         )
     finally:

@@ -210,7 +210,6 @@ def _handle_job(pg_conn, job: dict) -> bool:
             flat_roof_degrees = params['flat_roof_degrees']
             peak_power_per_m2 = params['peak_power_per_m2']
             pv_tech = params['pv_tech']
-            max_avg_southerly_horizon_degrees = params['max_avg_southerly_horizon_degrees']
             panel_width_m = params['panel_width_m']
             panel_height_m = params['panel_height_m']
             panel_spacing_m = params['panel_spacing_m']
@@ -231,7 +230,6 @@ def _handle_job(pg_conn, job: dict) -> bool:
                 flat_roof_degrees=flat_roof_degrees,
                 peak_power_per_m2=peak_power_per_m2,
                 pv_tech=pv_tech,
-                max_avg_southerly_horizon_degrees=max_avg_southerly_horizon_degrees,
                 panel_width_m=panel_width_m,
                 panel_height_m=panel_height_m,
                 panel_spacing_m=panel_spacing_m,

@@ -141,11 +141,11 @@ def _load(pg_uri: str, job_id: int, page: int, page_size: int):
                 )
                 SELECT h.pixel_id, h.easting, h.northing, h.elevation, h.aspect, b.toid
                 FROM building_page b
-                LEFT JOIN {pixel_horizons} h ON h.toid = b.toid
+                LEFT JOIN {lidar_pixels} h ON h.toid = b.toid
                 WHERE h.elevation != -9999
                 ORDER BY b.toid;
                 """).format(
-                pixel_horizons=Identifier(tables.schema(job_id), tables.PIXEL_HORIZON_TABLE),
+                lidar_pixels=Identifier(tables.schema(job_id), tables.LIDAR_PIXEL_TABLE),
                 buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
                 building_exclusion_reasons=Identifier(tables.schema(job_id), tables.BUILDING_EXCLUSION_REASONS_TABLE)
             ), {
@@ -204,7 +204,7 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[dict]):
                 FROM (VALUES %s) AS data (pixel_id, roof_plane_id)
                 WHERE {pixel_horizons}.pixel_id = data.pixel_id;
             """).format(
-                pixel_horizons=Identifier(tables.schema(job_id), tables.PIXEL_HORIZON_TABLE),
+                pixel_horizons=Identifier(tables.schema(job_id), tables.LIDAR_PIXEL_TABLE),
             ), argslist=pixel_plane_data)
             pg_conn.commit()
     finally:
@@ -215,6 +215,8 @@ def _mark_buildings_with_no_planes(pg_uri: str, job_id: int):
     pg_conn = connect(pg_uri)
     try:
         with pg_conn.cursor() as cursor:
+            # TODO this is also picking up things with no LiDAR coverage - need
+            #  to change it so that it checks for at least one pixel whose value is not -9999
             cursor.execute(SQL("""
                 UPDATE {building_exclusion_reasons} ber
                 SET exclusion_reason = 'NO_ROOF_PLANES_DETECTED'

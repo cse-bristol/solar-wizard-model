@@ -12,6 +12,10 @@ from albion_models.db_funcs import sql_script, copy_csv, connect, count
 from albion_models.solar_pv import mask
 from albion_models import gdal_helpers
 
+# TODO - this whole file needs to go. Leaving it for reference until the new adapter is done
+#  in particular, the parts which use GDAL to create a mask and ensure the mask and lidar
+#  match up to each other are probably still usable
+
 
 def find_horizons(pg_uri: str,
                   job_id: int,
@@ -36,7 +40,7 @@ def find_horizons(pg_uri: str,
     else:
         res = override_res
 
-    if count(pg_uri, tables.schema(job_id), tables.PIXEL_HORIZON_TABLE) > 0:
+    if count(pg_uri, tables.schema(job_id), tables.LIDAR_PIXEL_TABLE) > 0:
         logging.info("Not detecting horizon, horizon data already loaded.")
         return res
 
@@ -110,20 +114,20 @@ def _get_horizons(lidar_tif: str, solar_dir: str, mask_tif: str, csv_out: str, s
 def _load_horizons_to_db(pg_uri: str, job_id: int, horizon_csv: str, horizon_slices: int, srid: int):
     pg_conn = connect(pg_uri)
     schema = tables.schema(job_id)
-    pixel_horizons_table = tables.PIXEL_HORIZON_TABLE
+    lidar_pixels_table = tables.LIDAR_PIXEL_TABLE
     horizon_cols = ','.join([f'horizon_slice_{i} double precision' for i in range(0, horizon_slices)])
     try:
         sql_script(
-            pg_conn, 'pv/create.pixel-horizons.sql',
-            pixel_horizons=Identifier(schema, pixel_horizons_table),
+            pg_conn, 'pv/create.lidar-pixels.sql',
+            lidar_pixels=Identifier(schema, lidar_pixels_table),
             horizon_cols=SQL(horizon_cols),
         )
 
-        copy_csv(pg_conn, horizon_csv, f"{schema}.{pixel_horizons_table}")
+        copy_csv(pg_conn, horizon_csv, f"{schema}.{lidar_pixels_table}")
 
         sql_script(
-            pg_conn, 'pv/post-load.pixel-horizons.sql',
-            pixel_horizons=Identifier(schema, pixel_horizons_table),
+            pg_conn, 'pv/post-load.lidar-pixels.sql',
+            lidar_pixels=Identifier(schema, lidar_pixels_table),
             buildings=Identifier(schema, tables.BUILDINGS_TABLE),
             srid=Literal(srid)
         )

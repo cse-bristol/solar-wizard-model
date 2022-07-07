@@ -25,6 +25,8 @@ _ALLOWED_ERRORS = ("Location over the sea. Please, select another location",)
 
 _session: requests.Session
 
+# TODO - this whole file needs to go. Leaving it for reference until the new adapter is done
+
 
 def pv_gis(pg_uri: str, job_id: int, peak_power_per_m2: float, pv_tech: str, solar_dir: str):
     """
@@ -34,8 +36,8 @@ def pv_gis(pg_uri: str, job_id: int, peak_power_per_m2: float, pv_tech: str, sol
     pg_conn = connect(pg_uri, cursor_factory=psycopg2.extras.DictCursor)
     try:
         with pg_conn.cursor() as cursor:
-            cursor.execute(SQL("SELECT * FROM {panel_horizons} WHERE usable = true").format(
-                panel_horizons=Identifier(tables.schema(job_id), tables.PANEL_HORIZON_TABLE))
+            cursor.execute(SQL("SELECT * FROM {panel_polygons} WHERE usable = true").format(
+                panel_polygons=Identifier(tables.schema(job_id), tables.PANEL_POLYGON_TABLE))
             )
             roof_planes = cursor.fetchall()
             pg_conn.commit()
@@ -61,7 +63,7 @@ def _write_results_to_db(pg_conn, job_id: int, csv_file: str):
         'pv/post-load.solar-pv.sql',
         {"job_id": job_id},
         solar_pv=Identifier(tables.schema(job_id), tables.SOLAR_PV_TABLE),
-        panel_horizons=Identifier(tables.schema(job_id), tables.PANEL_HORIZON_TABLE),
+        panel_horizons=Identifier(tables.schema(job_id), tables.PANEL_POLYGON_TABLE),
         building_exclusion_reasons=Identifier(tables.schema(job_id), tables.BUILDING_EXCLUSION_REASONS_TABLE),
         job_view=Identifier(f"solar_pv_job_{job_id}"))
 

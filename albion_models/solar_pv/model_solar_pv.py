@@ -9,7 +9,7 @@ from psycopg2.sql import Identifier
 import albion_models.solar_pv.pv_gis.pv_gis_client as pv_gis_client
 import albion_models.solar_pv.tables as tables
 from albion_models.db_funcs import connect, sql_script_with_bindings, process_pg_uri
-from albion_models.solar_pv.aggregate_horizons import aggregate_horizons
+from albion_models.solar_pv.roof_polygons import create_roof_polygons
 from albion_models.solar_pv.lidar_check import check_lidar
 from albion_models.solar_pv.panels import add_panels
 from albion_models.solar_pv.saga_gis.horizons import find_horizons
@@ -28,7 +28,6 @@ def model_solar_pv(pg_uri: str,
                    flat_roof_degrees: int,
                    peak_power_per_m2: float,
                    pv_tech: str,
-                   max_avg_southerly_horizon_degrees: int,
                    panel_width_m: float,
                    panel_height_m: float,
                    panel_spacing_m: float,
@@ -47,7 +46,6 @@ def model_solar_pv(pg_uri: str,
         min_roof_degrees_from_north=min_roof_degrees_from_north,
         flat_roof_degrees=flat_roof_degrees,
         peak_power_per_m2=peak_power_per_m2,
-        max_avg_southerly_horizon_degrees=max_avg_southerly_horizon_degrees,
         panel_width_m=panel_width_m,
         panel_height_m=panel_height_m)
 
@@ -72,16 +70,14 @@ def model_solar_pv(pg_uri: str,
     logging.info("Detecting roof planes...")
     run_ransac(pg_uri, job_id, resolution_metres=res)
 
-    logging.info("Aggregating horizon data by roof plane and filtering...")
-    aggregate_horizons(
+    logging.info("Creating and filtering roof polygons...")
+    create_roof_polygons(
         pg_uri=pg_uri,
         job_id=job_id,
-        horizon_slices=horizon_slices,
         max_roof_slope_degrees=max_roof_slope_degrees,
         min_roof_area_m=min_roof_area_m,
         min_roof_degrees_from_north=min_roof_degrees_from_north,
         flat_roof_degrees=flat_roof_degrees,
-        max_avg_southerly_horizon_degrees=max_avg_southerly_horizon_degrees,
         large_building_threshold=large_building_threshold,
         min_dist_to_edge_m=min_dist_to_edge_m,
         min_dist_to_edge_large_m=min_dist_to_edge_large_m,
@@ -147,7 +143,6 @@ def _validate_params(lidar_vrt_file: str,
                      min_roof_degrees_from_north: int,
                      flat_roof_degrees: int,
                      peak_power_per_m2: float,
-                     max_avg_southerly_horizon_degrees: int,
                      panel_width_m: float,
                      panel_height_m: float):
     if not lidar_vrt_file or not os.path.exists(lidar_vrt_file):
@@ -158,8 +153,6 @@ def _validate_params(lidar_vrt_file: str,
         raise ValueError(f"horizon slices must be between 8 and 64, was {horizon_slices}")
     if max_roof_slope_degrees < 0 or max_roof_slope_degrees > 90:
         raise ValueError(f"max_roof_slope_degrees must be between 0 and 90, was {max_roof_slope_degrees}")
-    if max_avg_southerly_horizon_degrees < 0 or max_avg_southerly_horizon_degrees > 90:
-        raise ValueError(f"max_avg_southerly_horizon_degrees must be between 0 and 90, was {max_avg_southerly_horizon_degrees}")
     if min_roof_area_m < 0:
         raise ValueError(f"min_roof_area_m must be greater than or equal to 0, was {min_roof_area_m}")
     if min_roof_degrees_from_north < 0 or min_roof_degrees_from_north > 180:

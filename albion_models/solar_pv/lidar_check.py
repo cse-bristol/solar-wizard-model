@@ -144,11 +144,11 @@ def _load_building_pixels(pg_conn, job_id: int, page: int, page_size: int = 1000
                 hh.height
             FROM building_page b
             LEFT JOIN mastermap.height hh ON b.toid = hh.toid
-            LEFT JOIN {pixel_horizons} h ON ST_Contains(ST_Buffer(b.geom_27700, 1), h.en)
+            LEFT JOIN {lidar_pixels} h ON ST_Contains(ST_Buffer(b.geom_27700, 1), h.en)
             WHERE h.elevation != -9999
             ORDER BY b.toid;
             """).format(
-            pixel_horizons=Identifier(tables.schema(job_id), tables.PIXEL_HORIZON_TABLE),
+            lidar_pixels=Identifier(tables.schema(job_id), tables.LIDAR_PIXEL_TABLE),
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
         ), {
             "offset": page * page_size,

@@ -2,7 +2,7 @@
 --
 -- PV panelling:
 --
-CREATE TABLE {panel_horizons} AS
+CREATE TABLE {panel_polygons} AS
 SELECT
     models.pv_grid(
         roof_geom_27700,
@@ -16,17 +16,17 @@ SELECT
     0.0::double precision AS footprint,
     0.0::double precision AS area,
     rh.*
-FROM {roof_horizons} rh;
+FROM {roof_polygons} rh;
 
-UPDATE {panel_horizons} SET
+UPDATE {panel_polygons} SET
     footprint = ST_Area(panel_geom_27700),
     area = ST_Area(panel_geom_27700) / cos(radians(slope));
 
-UPDATE {panel_horizons} SET usable = false
+UPDATE {panel_polygons} SET usable = false
 WHERE usable = true AND area < %(min_roof_area_m)s;
 
-CREATE INDEX ON {panel_horizons} USING GIST (panel_geom_27700);
-ALTER TABLE {panel_horizons} ADD PRIMARY KEY (roof_plane_id);
+CREATE INDEX ON {panel_polygons} USING GIST (panel_geom_27700);
+ALTER TABLE {panel_polygons} ADD PRIMARY KEY (roof_plane_id);
 
 --
 -- Update building_exclusion_reasons for any buildings that have roof planes but no
@@ -35,16 +35,16 @@ ALTER TABLE {panel_horizons} ADD PRIMARY KEY (roof_plane_id);
 UPDATE {building_exclusion_reasons} ber
 SET exclusion_reason = 'ALL_ROOF_PLANES_UNUSABLE'
 WHERE
-    NOT EXISTS (SELECT FROM {panel_horizons} ph WHERE ph.usable AND ph.toid = ber.toid)
+    NOT EXISTS (SELECT FROM {panel_polygons} ph WHERE ph.usable AND ph.toid = ber.toid)
     AND ber.exclusion_reason IS NULL;
 
 --
 -- Add 3D version of panels:
 --
 
---ALTER TABLE {panel_horizons} ADD COLUMN panel_geom_27700_3d geometry(MultiPolygonZ, 27700);
+--ALTER TABLE {panel_polygons} ADD COLUMN panel_geom_27700_3d geometry(MultiPolygonZ, 27700);
 --
---UPDATE {panel_horizons} SET panel_geom_27700_3d = ST_Multi(ST_Translate(
+--UPDATE {panel_polygons} SET panel_geom_27700_3d = ST_Multi(ST_Translate(
 --    ST_RotateY(
 --        ST_RotateX(
 --            ST_Translate(
@@ -59,4 +59,4 @@ WHERE
 --    northing,
 --    (easting * x_coef) + (northing * y_coef) + intercept))::geometry(MultiPolygonZ, 27700);
 --
---CREATE INDEX ON {panel_horizons} USING GIST (panel_geom_27700_3d);
+--CREATE INDEX ON {panel_polygons} USING GIST (panel_geom_27700_3d);
