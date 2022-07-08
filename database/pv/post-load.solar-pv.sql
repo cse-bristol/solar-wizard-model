@@ -1,106 +1,66 @@
 
 -- TODO need to add a db migration in 320-albion-webapp repo which changes the shape of models.solar_pv
--- TODO this assumes the per-PV-installation approach from the old HTTP PVGIS API
--- TODO need to do a spatial join with all {solar_pv} pixels that are within {res} metres
---  of each panel installation, work out what proportion of the pixel overlaps the installation, and add up the kWh
--- to get kWh of installation
+--  maybe move the existing table to somewhere like solar_pv_old?
+
+-- These are the fields needed by the cost-benefit model:
+-- pv.toid
+-- pv.job_id
+-- pv.peak_power
+-- pv.kwh_year
+-- pv.roof_plane_id
+-- pv.roof_geom_4326
+-- pv.area
+
+-- do a spatial join with all {solar_pv} pixels that intersect each
+-- panel installation, work out what proportion of the pixel overlaps
+-- the installation, and add up the kWh to get kWh of installation:
+DROP TABLE IF EXISTS {toid_kwh};
+CREATE TABLE {toid_kwh} AS
+SELECT
+    pp.toid,
+    -- sum of the kwh of each pixel that intersects the panel,
+    -- multiplied by the proportion of the pixel that intersects the panel:
+    SUM(
+        (ST_Area(ST_Intersection(
+            ST_Buffer(pv.en, {res} / 2.0, 'endcap=square'),
+            pp.panel_geom_27700
+        )) / ({res} * {res})) *  pv.kwh_year
+    ) AS kwh_year
+FROM
+    {panel_polygons} pp
+    -- Make the square of the pixel by buffering its centre point and join spatially:
+    LEFT JOIN {solar_pv} pv ON ST_Intersects(
+        ST_Buffer(pv.en, {res} / 2.0, 'endcap=square'),
+        pp.panel_geom_27700
+    )
+GROUP BY pp.toid;
+
+ALTER TABLE {toid_kwh} ADD PRIMARY KEY (toid);
+
+ALTER TABLE {solar_pv} ADD COLUMN en geometry(Point, 27700);
+UPDATE {solar_pv} p SET en = ST_Transform(ST_SetSRID(ST_MakePoint(p.easting,p.northing), {srid}), 27700);
+CREATE INDEX ON {solar_pv} USING GIST (en);
+UPDATE {solar_pv} SET easting = ST_X(en), northing = ST_Y(en);
+
 INSERT INTO models.solar_pv
 SELECT
-    pv.jan_avg_energy_prod_kwh_per_day,
-    pv.jan_avg_energy_prod_kwh_per_month,
-    pv.jan_avg_irr_kwh_per_m2_per_day,
-    pv.jan_avg_irr_kwh_per_m2_per_month,
-    pv.jan_energy_std_dev_m,
-    pv.feb_avg_energy_prod_kwh_per_day,
-    pv.feb_avg_energy_prod_kwh_per_month,
-    pv.feb_avg_irr_kwh_per_m2_per_day,
-    pv.feb_avg_irr_kwh_per_m2_per_month,
-    pv.feb_energy_std_dev_m,
-    pv.mar_avg_energy_prod_kwh_per_day,
-    pv.mar_avg_energy_prod_kwh_per_month,
-    pv.mar_avg_irr_kwh_per_m2_per_day,
-    pv.mar_avg_irr_kwh_per_m2_per_month,
-    pv.mar_energy_std_dev_m,
-    pv.apr_avg_energy_prod_kwh_per_day,
-    pv.apr_avg_energy_prod_kwh_per_month,
-    pv.apr_avg_irr_kwh_per_m2_per_day,
-    pv.apr_avg_irr_kwh_per_m2_per_month,
-    pv.apr_energy_std_dev_m,
-    pv.may_avg_energy_prod_kwh_per_day,
-    pv.may_avg_energy_prod_kwh_per_month,
-    pv.may_avg_irr_kwh_per_m2_per_day,
-    pv.may_avg_irr_kwh_per_m2_per_month,
-    pv.may_energy_std_dev_m,
-    pv.jun_avg_energy_prod_kwh_per_day,
-    pv.jun_avg_energy_prod_kwh_per_month,
-    pv.jun_avg_irr_kwh_per_m2_per_day,
-    pv.jun_avg_irr_kwh_per_m2_per_month,
-    pv.jun_energy_std_dev_m,
-    pv.jul_avg_energy_prod_kwh_per_day,
-    pv.jul_avg_energy_prod_kwh_per_month,
-    pv.jul_avg_irr_kwh_per_m2_per_day,
-    pv.jul_avg_irr_kwh_per_m2_per_month,
-    pv.jul_energy_std_dev_m,
-    pv.aug_avg_energy_prod_kwh_per_day,
-    pv.aug_avg_energy_prod_kwh_per_month,
-    pv.aug_avg_irr_kwh_per_m2_per_day,
-    pv.aug_avg_irr_kwh_per_m2_per_month,
-    pv.aug_energy_std_dev_m,
-    pv.sep_avg_energy_prod_kwh_per_day,
-    pv.sep_avg_energy_prod_kwh_per_month,
-    pv.sep_avg_irr_kwh_per_m2_per_day,
-    pv.sep_avg_irr_kwh_per_m2_per_month,
-    pv.sep_energy_std_dev_m,
-    pv.oct_avg_energy_prod_kwh_per_day,
-    pv.oct_avg_energy_prod_kwh_per_month,
-    pv.oct_avg_irr_kwh_per_m2_per_day,
-    pv.oct_avg_irr_kwh_per_m2_per_month,
-    pv.oct_energy_std_dev_m,
-    pv.nov_avg_energy_prod_kwh_per_day,
-    pv.nov_avg_energy_prod_kwh_per_month,
-    pv.nov_avg_irr_kwh_per_m2_per_day,
-    pv.nov_avg_irr_kwh_per_m2_per_month,
-    pv.nov_energy_std_dev_m,
-    pv.dec_avg_energy_prod_kwh_per_day,
-    pv.dec_avg_energy_prod_kwh_per_month,
-    pv.dec_avg_irr_kwh_per_m2_per_day,
-    pv.dec_avg_irr_kwh_per_m2_per_month,
-    pv.dec_energy_std_dev_m,
-    pv.total_avg_energy_prod_kwh_per_day,
-    pv.total_avg_energy_prod_kwh_per_month,
-    pv.total_avg_energy_prod_kwh_per_year,
-    pv.total_avg_irr_kwh_per_m2_per_day,
-    pv.total_avg_irr_kwh_per_m2_per_month,
-    pv.total_avg_irr_kwh_per_m2_per_year,
-    pv.total_energy_std_dev_m,
-    pv.total_energy_std_dev_y,
-    pv.aoi_loss_percentage,
-    pv.spectral_loss_percentage,
-    pv.temp_irr_loss_percentage,
-    pv.total_loss_percentage,
-    pv.easting,
-    pv.northing,
-    pv.toid,
-    pv.roof_plane_id,
-    pv.peak_power,
-    ST_SetSrid(ST_Transform(h.panel_geom_27700, 4326), 4326)::geometry(multipolygon, 4326) AS roof_geom_4326,
-    h.slope,
-    h.aspect,
-    h.sky_view_factor,
-    h.percent_visible,
-    h.area,
-    h.footprint,
+    pp.toid,
+    pp.roof_plane_id,
     %(job_id)s AS job_id,
-    pv.horizon_sd,
-    pv.southerly_horizon_sd,
-    h.x_coef,
-    h.y_coef,
-    h.intercept,
-    h.is_flat
-FROM {solar_pv} pv
-LEFT JOIN {panel_horizons} h ON pv.roof_plane_id = h.roof_plane_id;
-
-DROP TABLE {solar_pv};
+    ST_SetSrid(ST_Transform(pp.panel_geom_27700, 4326), 4326)::geometry(multipolygon, 4326) AS panel_geom_4326,
+    kwh.kwh_year,
+    pp.area * %(peak_power_per_m2)s AS kwp,
+    pp.slope,
+    pp.aspect,
+    pp.area,
+    pp.footprint,
+    pp.x_coef,
+    pp.y_coef,
+    pp.intercept,
+    pp.is_flat
+FROM
+    {panel_polygons} pp
+    LEFT JOIN {toid_kwh} kwh ON kwh.toid = pp.toid;
 
 CREATE OR REPLACE VIEW models.{job_view} AS
 SELECT * FROM models.solar_pv WHERE job_id = %(job_id)s;

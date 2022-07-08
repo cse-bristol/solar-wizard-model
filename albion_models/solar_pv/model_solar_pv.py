@@ -10,6 +10,7 @@ import albion_models.solar_pv.pv_gis.pv_gis_client as pv_gis_client
 import albion_models.solar_pv.tables as tables
 from albion_models.db_funcs import connect, sql_script_with_bindings, process_pg_uri
 from albion_models.gdal_helpers import get_res
+from albion_models.solar_pv.pvgis import pvgis
 from albion_models.solar_pv.rasters import generate_rasters
 from albion_models.solar_pv.roof_polygons import create_roof_polygons
 from albion_models.solar_pv.lidar_check import check_lidar
@@ -56,6 +57,7 @@ def model_solar_pv(pg_uri: str,
     logging.info("Initialising postGIS schema...")
     _init_schema(pg_uri, job_id)
 
+    logging.info("Generating and loading rasters...")
     res = get_res(lidar_vrt_file)
     elevation_raster, aspect_raster, slope_raster, mask_raster = generate_rasters(
         pg_uri=pg_uri,
@@ -92,13 +94,19 @@ def model_solar_pv(pg_uri: str,
         panel_height_m=panel_height_m,
         panel_spacing_m=panel_spacing_m)
 
-    logging.info("Sending requests to PV-GIS...")
-    pv_gis_client.pv_gis(
-        pg_uri=pg_uri,
-        job_id=job_id,
-        peak_power_per_m2=peak_power_per_m2,
-        pv_tech=pv_tech,
-        solar_dir=solar_dir)
+    logging.info("Running PV-GIS...")
+    pvgis(pg_uri=pg_uri,
+          job_id=job_id,
+          solar_dir=solar_dir,
+          pv_tech=pv_tech,
+          horizon_search_radius=horizon_search_radius,
+          horizon_slices=horizon_slices,
+          peak_power_per_m2=peak_power_per_m2,
+          elevation_raster=elevation_raster,
+          aspect_raster=aspect_raster,
+          slope_raster=slope_raster,
+          mask_raster=mask_raster,
+          debug_mode=debug_mode)
 
     if not debug_mode:
         logging.info("Removing temp dir...")
