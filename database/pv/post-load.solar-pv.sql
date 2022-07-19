@@ -21,6 +21,8 @@ SELECT
     pp.toid,
     -- sum of the kwh of each pixel that intersects the panel,
     -- multiplied by the proportion of the pixel that intersects the panel:
+    -- TODO: PVMAPS produces kWh values per pixel as if a pixel was a 1kWp panel
+    -- so the ratio of pixel coverage to installation kWp will need adjusting
     SUM(
         (ST_Area(ST_Intersection(
             ST_Buffer(pv.en, {res} / 2.0, 'endcap=square'),
