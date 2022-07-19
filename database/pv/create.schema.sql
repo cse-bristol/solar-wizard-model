@@ -25,7 +25,15 @@ SELECT
     ST_SetSrid(ST_Transform(geom_4326, 27700),27700)::geometry(polygon,27700) as geom_27700
 FROM mastermap.building b
 LEFT JOIN {bounds_4326} q ON ST_Intersects(b.geom_4326, q.bounds)
-WHERE q.job_id=%(job_id)s;
+WHERE q.job_id=%(job_id)s
+-- Only take buildings where the centroid is within the bounds
+-- or, if the centroid touches the bounds, the bbox cannot overlap the bounds
+-- above or to the left, so that buildings that overlap multiple tiles for
+-- open solar runs don't get run twice:
+AND ST_Intersects(ST_Centroid(b.geom_4326), q.bounds)
+AND (NOT ST_Touches(ST_Centroid(b.geom_4326), q.bounds)
+     OR b.geom_4326 &<| q.bounds
+     OR b.geom_4326 &>  q.bounds);
 
 CREATE INDEX IF NOT EXISTS buildings_geom_27700_idx ON {buildings} USING GIST (geom_27700);
 

@@ -97,6 +97,7 @@ def _load_rasters_to_db(pg_uri: str,
 
         sql_script(
             pg_conn, 'pv/post-load.lidar-pixels.sql',
+            schema=Identifier(schema),
             lidar_pixels=Identifier(schema, lidar_pixels_table),
             aspect_pixels=Identifier(schema, "aspect_pixels"),
             slope_pixels=Identifier(schema, "slope_pixels"),

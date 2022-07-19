@@ -63,7 +63,9 @@ def _get_next_job(pg_conn) -> Optional[dict]:
                 LIMIT 1
                 FOR UPDATE SKIP LOCKED
             )
-            UPDATE models.job_queue q SET status = 'IN_PROGRESS' FROM next
+            UPDATE models.job_queue q 
+            SET status = 'IN_PROGRESS', started_at = NOW() 
+            FROM next
             WHERE next.job_id = q.job_id
             RETURNING
                 q.job_id,
@@ -86,7 +88,7 @@ def _get_next_job(pg_conn) -> Optional[dict]:
 def _set_job_status(pg_conn, job_id: int, status: str, error: str = None):
     with pg_conn.cursor() as cursor:
         cursor.execute("UPDATE models.job_queue "
-                       "SET status = %s, error = %s WHERE job_id = %s",
+                       "SET status = %s, error = %s, finished_at = NOW() WHERE job_id = %s",
                        (status, error, job_id))
         pg_conn.commit()
 

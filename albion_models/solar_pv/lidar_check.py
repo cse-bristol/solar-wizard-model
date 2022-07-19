@@ -85,7 +85,7 @@ def check_lidar(pg_uri: str, job_id: int):
 
         page_size = 1000
         pages = math.ceil(count(pg_uri, tables.schema(job_id), tables.BUILDINGS_TABLE) / page_size)
-        logging.info(f"{pages} of {page_size} buildings to check LiDAR coverage for")
+        logging.info(f"{pages} pages of size {page_size} buildings to check LiDAR coverage for")
 
         for page in range(0, pages):
             _check_lidar_page(pg_conn, job_id, page, page_size)

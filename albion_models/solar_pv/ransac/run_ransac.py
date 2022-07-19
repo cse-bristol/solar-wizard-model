@@ -216,7 +216,10 @@ def _mark_buildings_with_no_planes(pg_uri: str, job_id: int):
     try:
         with pg_conn.cursor() as cursor:
             # TODO this is also picking up things with no LiDAR coverage - need
-            #  to change it so that it checks for at least one pixel whose value is not -9999
+            #  to change it so that it checks for at least one pixel whose value is not -9999.
+            #  Update:
+            #  I think this is resolved now (as previously nodata pixels were not being loaded
+            #  in to the db - now they are), due to not using SAGA any more. Need to test!
             cursor.execute(SQL("""
                 UPDATE {building_exclusion_reasons} ber
                 SET exclusion_reason = 'NO_ROOF_PLANES_DETECTED'

@@ -13,7 +13,7 @@ WHERE lp.easting = s.easting AND lp.northing = s.northing;
 
 DROP TABLE {aspect_pixels};
 DROP TABLE {slope_pixels};
-ALTER TABLE {lidar_pixels} DROP CONSTRAINT lidar_pixels_temp_idx;
+DROP INDEX {schema}.lidar_pixels_temp_idx;
 
 ALTER TABLE {lidar_pixels} ADD COLUMN en geometry(Point, 27700);
 UPDATE {lidar_pixels} p SET en = ST_Transform(ST_SetSRID(ST_MakePoint(p.easting,p.northing), {srid}), 27700);

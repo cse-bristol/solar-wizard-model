@@ -1,6 +1,7 @@
 
 -- TODO need to add a db migration in 320-albion-webapp repo which changes the shape of models.solar_pv
 --  maybe move the existing table to somewhere like solar_pv_old?
+-- TODO also update the PV table creation in create.db.sql script in 320-albion-webapp
 
 -- These are the fields needed by the cost-benefit model:
 -- pv.toid
@@ -67,5 +68,4 @@ SELECT * FROM models.solar_pv WHERE job_id = %(job_id)s;
 
 INSERT INTO models.pv_building_exclusions
 SELECT %(job_id)s, toid, exclusion_reason
-FROM {building_exclusion_reasons}
-WHERE exclusion_reason IS NOT NULL;
+FROM {building_exclusion_reasons};

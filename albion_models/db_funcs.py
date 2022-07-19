@@ -1,21 +1,108 @@
+import os
+import shlex
+
+import subprocess
+
+import logging
+
+from contextlib import ExitStack
 from os.path import join
+from typing import Union, Optional
 
 import psycopg2
-from psycopg2.sql import SQL, Identifier
+from psycopg2.sql import SQL, Identifier, Composed
 
 from albion_models.paths import SQL_DIR
 
 PG_NULL = "\\N"
 
 
-def sql_script(pg_conn, script_name: str, **kwargs):
-    """Run one of the SQL scripts in the `database` directory"""
-    with pg_conn.cursor() as cursor:
-        with open(join(SQL_DIR, script_name)) as schema_file:
-            cursor.execute(SQL(schema_file.read()).format(**kwargs))
+def sql_command(pg_conn, command: Union[str, Composed], bindings: dict = None, result_extractor=None, **kwargs):
+    """
+    Execute a SQL command, with optional named prepared-statement bindings
+    (https://www.psycopg.org/docs/usage.html#query-parameters).
+
+    The SQL will be interpolated with the keyword args in the standard psycopg2 way
+    (https://www.psycopg.org/docs/sql.html#module-psycopg2.sql).
+    """
+    with ExitStack() as stack:
+        if hasattr(pg_conn, 'cursor'):
+            cursor = stack.enter_context(pg_conn.cursor())
+            in_tx = False
+        else:
+            cursor = pg_conn
+            in_tx = True
+
+        if len(kwargs) != 0:
+            if isinstance(command, str):
+                command = SQL(command).format(**kwargs)
+            else:
+                command = command.format(**kwargs)
+
+        if bindings is not None:
+            cursor.execute(command, bindings)
+        else:
+            cursor.execute(command)
+
+        if not in_tx:
             pg_conn.commit()
+        if result_extractor is not None:
+            return result_extractor(cursor.fetchall())
 
 
+def sql_script(pg_conn, script_name: str, bindings: dict = None, result_extractor=None, **kwargs):
+    """
+    Run one of the SQL scripts in the `sql` directory, with optional named
+    prepared-statement bindings (https://www.psycopg.org/docs/usage.html#query-parameters).
+
+    The SQL will be interpolated with the keyword args in the standard psycopg2 way
+    (https://www.psycopg.org/docs/sql.html#module-psycopg2.sql).
+    """
+    with open(join(SQL_DIR, script_name)) as schema_file:
+        return sql_command(pg_conn, schema_file.read(), bindings, result_extractor, **kwargs)
+
+
+def command_to_gpkg(pg_conn,
+                    pg_uri: str,
+                    filename: str,
+                    table_name: str,
+                    command: str,
+                    src_srs: int,
+                    dst_srs: int,
+                    **kwargs) -> Optional[str]:
+    logging.info(f"Loading {table_name} into {filename}")
+    path = join(os.environ.get("GPKG_DIR"), filename)
+    exists = os.path.exists(path)
+
+    if len(kwargs) != 0:
+        if isinstance(command, str):
+            command = SQL(command).format(**kwargs).as_string(pg_conn)
+        else:
+            command = command.format(**kwargs).as_string(pg_conn)
+
+    res = subprocess.run(shlex.split(
+        f"""ogr2ogr
+        -f GPKG {path}
+        -sql "{command}"
+        -gt 65536
+        -nln {table_name}
+        {"-update" if exists else ""}
+        -s_srs EPSG:{src_srs}
+        -t_srs EPSG:{dst_srs}
+        "PG:{process_pg_uri(pg_uri)}"
+        """),
+        capture_output=True, text=True)
+
+    if res.stdout:
+        logging.info(res.stdout)
+    if res.returncode != 0:
+        logging.error(res.stderr)
+        return res.stderr
+
+    return None
+
+
+# TODO remove
 def sql_script_with_bindings(pg_conn, script_name: str, bindings: dict, **kwargs):
     """Run one of the SQL scripts in the `database` directory, with named
     prepared-statement bindings. """
@@ -42,11 +129,25 @@ def copy_csv(pg_conn, file_name: str, table: str, encoding='utf-8'):
 
 
 def to_csv(pg_conn, file_name: str, table: str, encoding='utf-8'):
+    """Using the postgres COPY command, export a table to a CSV file."""
     with pg_conn.cursor() as cursor:
         with open(file_name, 'w', encoding=encoding) as f:
             copy_sql = SQL("COPY {} TO stdin (FORMAT 'csv', HEADER)").format(Identifier(*table.split(".")))
             cursor.copy_expert(copy_sql, f)
             pg_conn.commit()
+
+
+def command_to_csv(pg_conn, file_name: str, command: str, encoding='utf-8', **kwargs):
+    """Using the postgres COPY command, export the output of a SQL command to a CSV file."""
+    with pg_conn.cursor() as cursor, open(file_name, 'w', encoding=encoding) as f:
+        copy_sql = SQL("COPY ({}) TO stdin (FORMAT 'csv', HEADER)").format(SQL(command).format(**kwargs))
+        cursor.copy_expert(copy_sql, f)
+        pg_conn.commit()
+
+
+def script_to_csv(pg_conn, file_name: str, script: str, encoding='utf-8', **kwargs):
+    with open(join(SQL_DIR, script)) as schema_file:
+        return command_to_csv(pg_conn, file_name, schema_file.read(), encoding, **kwargs)
 
 
 def process_pg_uri(pg_uri: str) -> str:
