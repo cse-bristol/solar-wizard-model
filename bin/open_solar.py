@@ -6,7 +6,7 @@ import psycopg2.extras
 import sys
 from psycopg2.extras import Json
 from psycopg2.sql import Literal
-from typing import List
+from typing import List, Optional
 
 from albion_models.db_funcs import sql_command, sql_script, connect, command_to_gpkg
 
@@ -70,7 +70,7 @@ model_params = {
 }
 
 
-def create_run(pg_conn, name: str, cell_size: int, params: dict) -> int:
+def create_run(pg_conn, name: str, cell_size: int, cell_ids: Optional[List[int]], params: dict) -> int:
     with pg_conn.cursor() as cursor:
         os_run_id = sql_command(
             cursor,
@@ -82,7 +82,8 @@ def create_run(pg_conn, name: str, cell_size: int, params: dict) -> int:
             cursor,
             "open_solar/create.run.sql",
             bindings={"name": name,
-                      "params": Json(params)},
+                      "params": Json(params),
+                      "cell_ids": cell_ids},
             cell_size=Literal(cell_size),
             result_extractor=lambda res: [(os_run_id, row[0]) for row in res]
         )
@@ -156,11 +157,19 @@ def extract_run_data(pg_conn, pg_uri: str, os_run_id: int, gpkg: str):
         """,
         os_run_id=os_run_id)
 
+    # TODO: add the following:
+    # b.is_residential,
+    # b.has_rooftop_pv,
+    # b.pv_roof_area_pct,
+    # b.pv_peak_power,
+    # b.listed_building_grade,
+    # b.geom_4326
+    # EPC data, postcode and address fields, la/ward/lsoa etc
     command_to_gpkg(
         pg_conn, pg_uri, gpkg, "buildings",
         src_srs=4326, dst_srs=4326,
         command="""
-        SELECT pv.*
+        SELECT b.toid, b.geom_4326, ber.exclusion_reason
         FROM
             models.job_queue q
             LEFT JOIN models.open_solar_jobs osj ON osj.job_id = q.job_id
@@ -187,33 +196,43 @@ def parse_cli_args():
     parser = argparse.ArgumentParser(description=desc)
     subparsers = parser.add_subparsers(dest="op", required=True, title="op")
 
+    pg_uri_arg = {
+        "metavar": "URI",
+        "required": True,
+        "help": "Postgres connection URI. See "
+                "https://www.postgresql.org/docs/current/libpq-connect.html#id-1.7.3.8.3.6 "
+                "for formatting details"
+    }
+
     create_parser = subparsers.add_parser('create', help="Create an Open Solar run")
+    create_parser.add_argument("--pg_uri", **pg_uri_arg)
     create_parser.add_argument('-n', '--name', required=True,
                                help="Name of the Open Solar run to create")
-    create_parser.add_argument('-c', '--cell-size', default=30000,
+    create_parser.add_argument('-c', '--cell_size', default=30000,
                                help="Edge length of individual job bound squares in metres")
+    create_parser.add_argument('--cell_ids',
+                               help="Comma-separated list of cell ids (numbers). "
+                                    "Only create these cells, With 0 being SW-most cell"
+                                    "and counting in rows East and then North")
+
     for param, data in model_params.items():
         create_parser.add_argument(f"--{param}", **data)
 
-    list_parser = subparsers.add_parser('list',
-                                        help="List existing Open Solar runs and their progress")
+    list_parser = subparsers.add_parser('list', help="List existing Open Solar runs and their progress")
+    list_parser.add_argument("--pg_uri", **pg_uri_arg)
 
     cancel_parser = subparsers.add_parser('cancel', help="Cancel an Open Solar run")
     cancel_parser.add_argument('id', help="Open Solar run ID")
+    cancel_parser.add_argument("--pg_uri", **pg_uri_arg)
 
-    progress_parser = subparsers.add_parser('progress',
-                                            help="Output Open Solar job progress as geoJSON")
+    progress_parser = subparsers.add_parser('progress', help="Output Open Solar job progress as geoJSON")
     progress_parser.add_argument('id', help="Open Solar run ID")
+    progress_parser.add_argument("--pg_uri", **pg_uri_arg)
 
-    extract_parser = subparsers.add_parser('extract',
-                                           help="Extract Open Solar job outputs to CSV")
+    extract_parser = subparsers.add_parser('extract',  help="Extract Open Solar job outputs to CSV")
     extract_parser.add_argument('id', help="Open Solar run ID")
     extract_parser.add_argument('--gpkg', help="Geopackage output file location")
-
-    parser.add_argument("--pg_uri", metavar="URI", required=True,
-                        help="Postgres connection URI. See "
-                             "https://www.postgresql.org/docs/current/libpq-connect.html#id-1.7.3.8.3.6 "
-                             "for formatting details")
+    extract_parser.add_argument("--pg_uri", **pg_uri_arg)
 
     return parser.parse_args()
 
@@ -227,12 +246,14 @@ def open_solar_cli():
 
     try:
         if args.op == "create":
-            params = vars(args)
+            params = vars(args).copy()
             del params['name']
             del params['cell_size']
+            del params['cell_ids']
             del params['pg_uri']
             del params['op']
-            create_run(pg_conn, args.name, args.cell_size, params)
+            cell_ids = [int(c.strip()) for c in args.cell_ids.split(",")]
+            create_run(pg_conn, args.name, args.cell_size, cell_ids, params)
         elif args.op == "list":
             _print_table(list_runs(pg_conn))
         elif args.op == "cancel":
