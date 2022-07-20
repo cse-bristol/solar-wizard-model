@@ -1,7 +1,7 @@
 
 WITH bbox AS (
     SELECT
-        bounds,
+        ST_Buffer(bounds, coalesce((params->>'horizon_search_radius')::int, 0)) AS bounds,
         0 as xmin,
         0 as ymin,
         700000 as xmax,

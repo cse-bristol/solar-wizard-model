@@ -64,6 +64,7 @@ def model_solar_pv(pg_uri: str,
         job_id=job_id,
         solar_dir=solar_dir,
         lidar_vrt_file=lidar_vrt_file,
+        horizon_search_radius=horizon_search_radius,
         debug_mode=debug_mode)
 
     logging.info("Checking for outdated LiDAR and missing LiDAR coverage...")

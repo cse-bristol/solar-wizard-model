@@ -15,6 +15,7 @@ def generate_rasters(pg_uri: str,
                      job_id: int,
                      solar_dir: str,
                      lidar_vrt_file: str,
+                     horizon_search_radius: int,
                      override_mask_sql: str = None,
                      override_res: float = None,
                      debug_mode: bool = False) -> Tuple[str, str, str, str]:
@@ -43,10 +44,12 @@ def generate_rasters(pg_uri: str,
 
     unit_dims, unit = gdal_helpers.get_srs_units(lidar_vrt_file)
     if unit_dims != 1.0 or unit != 'metre':
-        # If this ever needs changing - the `resolution_metres` param of `aggregate_horizons()`
+        # If this ever needs changing - the `resolution_metres` param of `create_roof_polygons()`
         # needs a resolution per metre rather than per whatever the unit of the SRS is -
         # otherwise the calculated areas/footprints of PV installations will be wrong.
         # See `create.roof-horizons.sql`
+        # Also, gdal_helpers.expand() assumes that the buffer arg is in the same unit as
+        # the SRS, and the buffer arg is currently assumed to be metres
         raise ValueError(f"Albion cannot currently handle LIDAR where the SRS unit is "
                          f"not 1m: was {unit} {unit_dims}")
 
@@ -56,7 +59,9 @@ def generate_rasters(pg_uri: str,
     else:
         mask_sql = mask.buildings_mask_sql(pg_uri, job_id, buffer=1)
 
-    mask.create_mask(mask_sql, mask_raster, pg_uri, res=res, srid=srid)
+    unbuffered_mask_raster = join(solar_dir, 'unbuffered_mask.tif')
+    mask.create_mask(mask_sql, unbuffered_mask_raster, pg_uri, res=res, srid=srid)
+    gdal_helpers.expand(unbuffered_mask_raster, mask_raster, buffer=horizon_search_radius)
 
     logging.info("Cropping lidar to mask dimensions...")
     gdal_helpers.crop_or_expand(lidar_vrt_file, mask_raster, cropped_lidar,

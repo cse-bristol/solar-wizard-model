@@ -356,11 +356,13 @@ def _asc_to_geotiff(lidar_dir: str, asc_filename: str, tiff_filename: str) -> No
 def _tile_intersects_bounds(pg_conn, job_id: int, tile_id: str) -> bool:
     with pg_conn.cursor() as cursor:
         cursor.execute("""
-            SELECT ST_Intersects(bounds, ST_GeomFromText(%(tile_wkt)s, 27700))
+            SELECT ST_Intersects(
+                ST_Buffer(bounds, coalesce((params->>'horizon_search_radius')::int, 0)),
+                ST_GeomFromText(%(tile_wkt)s, 27700))
             FROM models.job_queue WHERE job_id = %(job_id)s
         """, {
             'tile_wkt': os_grid_ref_to_wkt(tile_id),
-            'job_id': job_id
+            'job_id': job_id,
         })
         pg_conn.commit()
         return cursor.fetchone()[0]

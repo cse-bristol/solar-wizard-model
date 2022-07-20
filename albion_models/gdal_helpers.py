@@ -121,6 +121,24 @@ def crop_or_expand(file_to_crop: str,
         gdal.Warp(out_tiff, to_crop, outputBounds=(ulx, lry, lrx, uly))
 
 
+def expand(raster_in: str, raster_out: str, buffer: int):
+    """Assumes buffer is in same unit as SRS"""
+    gdal.UseExceptions()
+
+    ref = gdal.Open(raster_in)
+    ulx, xres, xskew, uly, yskew, yres = ref.GetGeoTransform()
+
+    # negative xres or yres indicates that values increase going W or N respectively
+    # e.g. for 27700, xres is +ve and yres is -ve
+    x_buffer = buffer if xres >= 0 else -buffer
+    y_buffer = buffer if yres >= 0 else -buffer
+
+    lrx = ulx + (ref.RasterXSize * xres) + x_buffer
+    lry = uly + (ref.RasterYSize * yres) + y_buffer
+    gdal.Warp(raster_out, raster_in,
+              outputBounds=(ulx - x_buffer, lry, lrx, uly - y_buffer))
+
+
 def reproject(raster_in: str, raster_out: str, src_srs: str, dst_srs: str):
     """
     Reproject a raster. Will keep the same number of pixels as before.
