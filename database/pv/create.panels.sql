@@ -2,6 +2,8 @@
 --
 -- PV panelling:
 --
+DROP TABLE IF EXISTS {panel_polygons};
+
 CREATE TABLE {panel_polygons} AS
 SELECT
     models.pv_grid(

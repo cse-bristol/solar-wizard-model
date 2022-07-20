@@ -121,6 +121,15 @@ def crop_or_expand(file_to_crop: str,
         gdal.Warp(out_tiff, to_crop, outputBounds=(ulx, lry, lrx, uly))
 
 
+def reproject(raster_in: str, raster_out: str, src_srs: str, dst_srs: str):
+    """
+    Reproject a raster. Will keep the same number of pixels as before.
+    """
+    ref = gdal.Open(raster_in)
+    gdal.Warp(raster_out, raster_in, dstSRS=dst_srs, srcSRS=src_srs,
+              width=ref.RasterXSize, height=ref.RasterYSize)
+
+
 def set_resolution(in_tiff: str,
                    out_tiff: str,
                    res: float):
@@ -258,5 +267,7 @@ def raster_to_csv(raster_file: str, csv_out: str,  mask_raster: str = None,
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG,
                         format='[%(asctime)s] %(levelname)s: %(message)s')
-    raster_to_csv("/home/neil/data/albion-models/lidar/sp0104_DSM_1M.tiff",
-                  "/home/neil/data/albion-models/lidar/sp0104_DSM_1M.csv")
+    raster_to_csv("/home/neil/data/albion-models/solar/job_73/aspect_4326.tif",
+                  "/home/neil/data/albion-models/solar/job_73/aspect_4326.csv")
+    raster_to_csv("/home/neil/data/albion-models/solar/job_73/aspect.tif",
+                  "/home/neil/data/albion-models/solar/job_73/aspect.csv")

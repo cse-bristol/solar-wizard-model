@@ -136,6 +136,8 @@ def run_progress_geojson(pg_conn, os_run_id: int):
 
 def extract_run_data(pg_conn, pg_uri: str, os_run_id: int, gpkg: str):
     # TODO talk to Mark about output formats
+    # TODO will doing this in a single query work with such large amount of data?
+    #  could always convert it into a loop, one query per model job
     try:
         os.remove(gpkg)
     except OSError:

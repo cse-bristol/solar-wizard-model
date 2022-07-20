@@ -1,9 +1,9 @@
 from os.path import join
-from typing import Tuple
 
 import logging
 import os
 from psycopg2.sql import Identifier, Literal
+from typing import Tuple
 
 import albion_models.solar_pv.tables as tables
 from albion_models import gdal_helpers
@@ -21,6 +21,10 @@ def generate_rasters(pg_uri: str,
     """
     Generate a single geoTIFF for the entire job area, as well as rasters for
     aspect, slope and a building mask.
+
+    Generates all 4 rasters in both EPSG:4326 (long/lat) and in whatever SRS the
+    input LIDAR was in (probably 27700 E/N), but the filenames returned reference
+    the 4326 rasters.
     """
     srid = gdal_helpers.get_srid(lidar_vrt_file, fallback=27700)
     if override_res is None:
@@ -64,11 +68,45 @@ def generate_rasters(pg_uri: str,
     logging.info("Creating slope raster...")
     gdal_helpers.slope(cropped_lidar, slope_raster)
 
+    logging.info("Converting to 4326...")
+    cropped_lidar_4326, aspect_raster_4326, slope_raster_4326, mask_raster_4326 =  \
+        _generate_4326_rasters(solar_dir, srid, cropped_lidar, aspect_raster, slope_raster,
+                               mask_raster)
+
     logging.info("Loading raster data...")
     _load_rasters_to_db(pg_uri, job_id, srid, solar_dir, cropped_lidar,
                         aspect_raster, slope_raster, mask_raster, debug_mode)
 
-    return cropped_lidar, aspect_raster, slope_raster, mask_raster
+    return cropped_lidar_4326, aspect_raster_4326, slope_raster_4326, mask_raster_4326
+
+
+def _generate_4326_rasters(solar_dir: str,
+                           srid: int,
+                           elevation_raster: str,
+                           aspect_raster: str,
+                           slope_raster: str,
+                           mask_raster: str):
+    elevation_raster_4326 = join(solar_dir, 'elevation_4326.tif')
+    aspect_raster_4326 = join(solar_dir, 'aspect_4326.tif')
+    slope_raster_4326 = join(solar_dir, 'slope_4326.tif')
+    mask_raster_4326 = join(solar_dir, 'mask_4326.tif')
+
+    if srid == 27700:
+        # Use the 7-parameter shift rather than GDAL's default 3-parameter shift
+        # for EN->long/lat transformation as it's much more accurate:
+        # https://digimap.edina.ac.uk/webhelp/digimapgis/projections_and_transformations/transformations_in_gdalogr.htm
+        src_srs = "+proj=tmerc +lat_0=49 +lon_0=-2 " \
+                  "+k=0.999601 +x_0=400000 +y_0=-100000 +ellps=airy +units=m +no_defs " \
+                  "+towgs84=446.448,-125.157,542.060,0.1502,0.2470,0.8421,-20.4894"
+    else:
+        src_srs = f"EPSG:{srid}"
+
+    gdal_helpers.reproject(elevation_raster, elevation_raster_4326, src_srs=src_srs, dst_srs="EPSG:4326")
+    gdal_helpers.reproject(aspect_raster, aspect_raster_4326, src_srs=src_srs, dst_srs="EPSG:4326")
+    gdal_helpers.reproject(slope_raster, slope_raster_4326, src_srs=src_srs, dst_srs="EPSG:4326")
+    gdal_helpers.reproject(mask_raster, mask_raster_4326, src_srs=src_srs, dst_srs="EPSG:4326")
+
+    return elevation_raster_4326, aspect_raster_4326, slope_raster_4326, mask_raster_4326
 
 
 def _load_rasters_to_db(pg_uri: str,
