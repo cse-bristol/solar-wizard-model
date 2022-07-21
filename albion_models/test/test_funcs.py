@@ -43,5 +43,6 @@ class ParameterisedTestCase(unittest.TestCase):
         for tup in mapping:
             with self.subTest():
                 expected = tup[-1]
-                actual = fn(*tup[:-1])
-                assert expected == actual, f"\nExpected: {expected}\nActual  : {actual}"
+                inputs = tup[:-1]
+                actual = fn(*inputs)
+                assert expected == actual, f"\nExpected: {expected}\nActual  : {actual}\nInputs : {inputs}"

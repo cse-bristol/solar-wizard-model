@@ -1,3 +1,5 @@
 #!/usr/bin/env bash
 
-PYTHONPATH=. python3 bin/open_solar.py "$@"
+cd "$(dirname "$0")" || exit 1
+
+PYTHONPATH=. python3 open_solar.py "$@"

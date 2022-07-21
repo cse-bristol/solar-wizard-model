@@ -43,6 +43,7 @@ class Resolution(Enum):
 
     @classmethod
     def from_string(cls, string: str) -> Optional['Resolution']:
+        string = string.upper()
         if string == '50CM':
             return Resolution.R_50CM
         elif string == '1M':
@@ -240,6 +241,11 @@ class LidarJobTiles:
 
         tile_coverage = []
         for tile_id, tiles in by_id.items():
+            # TODO - doesn't handle the Welsh 50cm lidar as it's at a smaller
+            #  tile-size than the 1m or 2m lidar...
+            #  all 4 quadrants would need combining and checking at once
+            if tile_id.lower()[-2:] in ('sw', 'se', 'nw', 'ne'):
+                continue
             tile_50cm = self._get_tile(tile_id, Resolution.R_50CM)
             tile_1m = self._get_tile(tile_id, Resolution.R_1M)
             if not tile_50cm:
@@ -279,8 +285,9 @@ def lidar_per_res_coverage(resolutions: List[LidarTile], outfile: str, nodata: i
 def _zipfile_id(filename: str):
     """
     Matches the zip file ID in a filename like '2017-LIDAR-DSM-1M-SD72se.zip'
+    or 50cm_res_SM70_dsm.zip (Wales)
     """
-    match = re.search("[a-z]{2}[0-9]{2}(?:se|sw|ne|nw)", filename, re.IGNORECASE)
+    match = re.search("[a-z]{2}[0-9]{2}(?:se|sw|ne|nw)?", filename, re.IGNORECASE)
     return match.group() if match is not None else None
 
 
@@ -288,7 +295,7 @@ def _zip_year(filename: str) -> Optional[int]:
     """
     Matches the year in a filename like '2017-LIDAR-DSM-1M-SD72se.zip'.
     This is added to the names after they are downloaded so will not work
-    on the filenames in the URLs in the JSON API responses.
+    on the filenames in the URLs in the JSON API responses or the bulk lidar.
     """
     match = re.search(r"^[0-9]{4}", filename, re.IGNORECASE)
     return int(match.group()) if match is not None else None
@@ -297,17 +304,18 @@ def _zip_year(filename: str) -> Optional[int]:
 def _file_res(filename: str) -> Optional[Resolution]:
     """
     Matches the resolution in a filename like '2017-LIDAR-DSM-1M-SD72se.zip'
-    or 'so8707_DSM_1M.tiff'
+    or 'so8707_DSM_1M.tiff' or 50cm_res_SM70_dsm.zip (Wales)
     """
-    match = re.search(r"[\-_](1M|2M|50CM)[\-_.]", filename, re.IGNORECASE)
+    match = re.search(r"(?:-|_|^)(1M|2M|50CM)[\-_.]", filename, re.IGNORECASE)
     return Resolution.from_string(match.group(1)) if match is not None else None
 
 
 def _tile_id(filename: str):
     """
-    Matches the tile ID in a filename like 'so8707_DSM_1M.tiff'
+    Matches the tile ID in a filename like 'so8707_DSM_1M.tiff' or
+    (for Welsh 50cm only: sm7924se_dsm_50cm.tiff
     """
-    match = re.search("[a-z]{2}[0-9]{4}", filename, re.IGNORECASE)
+    match = re.search("[a-z]{2}[0-9]{4}(?:se|sw|ne|nw)?", filename, re.IGNORECASE)
     return match.group() if match is not None else None
 
 
@@ -327,6 +335,7 @@ def zip_to_geotiffs(pg_conn, job_id: int, zt: ZippedTiles, lidar_dir: str) -> Li
                     _try_remove(join(lidar_dir, zipinfo.filename))
             else:
                 logging.info(f"Skipping extraction of {tiff_filename}, already exists")
+                tiff_paths.append(LidarTile.from_filename(join(lidar_dir, tiff_filename), zt.year))
 
     return tiff_paths
 

@@ -12,14 +12,16 @@ WITH bbox AS (
 cells AS (
     SELECT
         ST_SetSRID(ST_Translate(
-            ST_GeomFromText('POLYGON((0 0, 0 5000, 5000 5000, 5000 0,0 0))', 27700),
-            j * 5000 + xmin,
-            i * 5000 + ymin
+            ST_GeomFromText('POLYGON((0 0, 0 ' || %(cell_size)s || ', ' ||
+                            %(cell_size)s || ' ' || %(cell_size)s || ', ' ||
+                            %(cell_size)s || ' 0,0 0))', 27700),
+            j * %(cell_size)s + xmin,
+            i * %(cell_size)s + ymin
         ), 27700)::geometry(polygon, 27700) AS cell,
-        j * 5000 + xmin AS easting,
-        i * 5000 + ymin AS northing
+        j * %(cell_size)s + xmin AS easting,
+        i * %(cell_size)s + ymin AS northing
     FROM bbox,
-        generate_series(0, CEIL((xmax - xmin) / 5000)::int) AS j,
-        generate_series(0, CEIL((ymax - ymin) / 5000)::int) AS i
+        generate_series(0, CEIL((xmax - xmin) / %(cell_size)s)::int) AS j,
+        generate_series(0, CEIL((ymax - ymin) / %(cell_size)s)::int) AS i
 )
 SELECT easting, northing FROM cells, bbox WHERE ST_Intersects(cell, bounds);

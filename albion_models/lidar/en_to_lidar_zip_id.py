@@ -62,3 +62,16 @@ def en_to_lidar_zip_id(easting: Easting, northing: Northing) -> str:
         str(_round_down_to(northing % _100KM, _10KM) // _10KM)
     corner = _get_quadrant(easting, northing)
     return letter_1 + letter_2 + numbers + corner
+
+
+def en_to_welsh_lidar_zip_id(easting: Easting, northing: Northing) -> str:
+    """
+    Convert an easting/northing pair to a string like SM72, which is the format
+    used to identify Welsh LiDAR zip files.
+    """
+    letter_1 = _get_1st_letter(easting, northing)
+    letter_2 = _get_2nd_letter(easting, northing)
+    # How many 10kms above the nearest multiple of 100km the easting/northing are:
+    numbers = str(_round_down_to(easting % _100KM, _10KM) // _10KM) + \
+        str(_round_down_to(northing % _100KM, _10KM) // _10KM)
+    return letter_1 + letter_2 + numbers
