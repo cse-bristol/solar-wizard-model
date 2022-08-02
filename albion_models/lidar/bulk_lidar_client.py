@@ -5,6 +5,7 @@ import os
 from typing import List
 
 from albion_models.db_funcs import sql_script
+from albion_models.gdal_helpers import rasters_to_postgis, postgis_to_gtiff
 from albion_models.lidar.defra_lidar_api_client import get_all_lidar
 from albion_models.lidar.en_to_lidar_zip_id import en_to_lidar_zip_id, \
     en_to_welsh_lidar_zip_id
@@ -27,9 +28,9 @@ def load_from_bulk(pg_conn, job_id: int, lidar_dir: str, bulk_lidar_dir: str) ->
         return job_lidar_vrt
 
     job_tiles = LidarJobTiles()
-    for tiles in add_country_lidar(pg_conn, job_id, bulk_lidar_dir, job_lidar_dir, 'ENGLAND'):
+    for tiles in lidar_tiles(pg_conn, job_id, bulk_lidar_dir, job_lidar_dir, 'ENGLAND'):
         job_tiles.add_tiles(tiles)
-    for tiles in add_country_lidar(pg_conn, job_id, bulk_lidar_dir, job_lidar_dir, 'WALES'):
+    for tiles in lidar_tiles(pg_conn, job_id, bulk_lidar_dir, job_lidar_dir, 'WALES'):
         job_tiles.add_tiles(tiles)
 
     if len(job_tiles.all_filenames()) == 0:
@@ -38,13 +39,27 @@ def load_from_bulk(pg_conn, job_id: int, lidar_dir: str, bulk_lidar_dir: str) ->
                      "falling back to DEFRA API")
         return get_all_lidar(pg_conn, job_id, lidar_dir)
 
+    # TODO: remove LidarJobTiles
+    # TODO: exclude any tiles that are already in the database
+    r = [t.filename for t in job_tiles._get_tile_list(Resolution.R_50CM)]
+    rasters_to_postgis(pg_conn, r, "test50cm", job_lidar_dir, tile_size=500)
+    #
+    r = [t.filename for t in job_tiles._get_tile_list(Resolution.R_1M)]
+    rasters_to_postgis(pg_conn, r, "test1m", job_lidar_dir, tile_size=1000)
+    #
+    r = [t.filename for t in job_tiles._get_tile_list(Resolution.R_2M)]
+    rasters_to_postgis(pg_conn, r, "test2m", job_lidar_dir, tile_size=1000)
+
+    # TODO extract merged tiles individually (heat demand) or as a whole (pv)
+    postgis_to_gtiff(pg_conn, job_id, "/home/neil/data/albion-models")
+
     job_tiles.create_merged_vrt(job_lidar_dir, job_lidar_vrt, coverage_vrt)
     job_tiles.delete_unmerged_tiles()
     logging.info(f"Created LiDAR vrt {job_lidar_vrt}")
     return job_lidar_vrt
 
 
-def add_country_lidar(pg_conn, job_id: int, bulk_lidar_dir: str, job_lidar_dir: str, country: str):
+def lidar_tiles(pg_conn, job_id: int, bulk_lidar_dir: str, job_lidar_dir: str, country: str):
     zip_ids = _get_zip_ids(pg_conn, job_id, country)
     for zip_id in zip_ids:
         for res in Resolution:
@@ -98,4 +113,5 @@ def _get_zip_path(bulk_lidar_dir: str, zip_id: str, res: Resolution, country: st
             bulk_lidar_dir,
             f"wales",
             f"{res_str.lower()}_res_{zip_id}_dsm.zip")
-
+    else:
+        raise ValueError(f"Unsupported country {country}")

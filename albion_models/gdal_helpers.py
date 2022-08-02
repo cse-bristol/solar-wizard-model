@@ -1,14 +1,17 @@
-import json
-import logging
-import os
 import shlex
-import subprocess
-import textwrap
-from typing import List, Tuple
+from os.path import join
 
 import gdal
+import json
+import logging
 import numpy as np
+import os
+import subprocess
+import textwrap
 from osgeo import ogr
+from typing import List, Tuple
+
+from albion_models.db_funcs import sql_script, sql_command
 
 
 def create_vrt(tiles: List[str], vrt_file: str):
@@ -241,6 +244,61 @@ def polygonize(in_tiff: str, out_gpkg: str, out_layer: str, out_field: str, conn
 
     gdal.FPolygonize(band, band.GetMaskBand(), dst_layer, 0, options, callback=None)
     return out_gpkg
+
+
+def rasters_to_postgis(pg_conn, rasters: List[str], table: str, temp_dir: str, tile_size: int):
+    if len(rasters) == 0:
+        return
+
+    sql_file = join(temp_dir, "raster.sql")
+    rasters_str = ' '.join(rasters)
+    # TODO remove -d/-I as we want to append - will need to create table manually
+    cmd = f"raster2pgsql -n filename -C -x -I -d -t {tile_size}x{tile_size} -R {rasters_str} {table} > {sql_file}"
+    print(cmd)
+    run(cmd)
+    sql_script(pg_conn, sql_file)
+
+
+def postgis_to_gtiff(pg_conn, job_id: int, output_dir: str,
+                     merge_res: bool = True,
+                     merge_tiles: bool = True):
+    # TODO create resolution tables
+    # TODO get 50cm resolution coverage - separate method?
+    # TODO - what to do about the need to resample? should all 50cm be loaded in
+    #  at same size? Or should welsh 50cm be in a different table?
+    # TODO what about this thing? ALTER DATABASE albion SET postgis.gdal_enabled_drivers TO 'GTiff'
+    #  ALTER DATABASE albion SET postgis.enable_outdb_rasters='on'; - can go in create.db.sql
+    # TODO if we're using external raster files will need to store them somewhere properly
+    rows = sql_command(
+        pg_conn,
+        """
+        WITH all_res AS (
+                SELECT filename, ST_Resample(rast, (select rast from test50cm limit 1)) AS rast FROM test2m
+                LEFT JOIN models.job_queue q ON st_intersects(rast, q.bounds)
+                WHERE q.job_id = %(job_id)s
+            UNION ALL
+                SELECT filename, ST_Resample(rast, (select rast from test50cm limit 1)) AS rast FROM test1m
+                LEFT JOIN models.job_queue q ON st_intersects(rast, q.bounds)
+                WHERE q.job_id = %(job_id)s
+            UNION ALL
+                SELECT filename, rast FROM test50cm
+                LEFT JOIN models.job_queue q ON st_intersects(rast, q.bounds)
+                WHERE q.job_id = %(job_id)s
+        ) 
+        SELECT 
+            'test.tiff' AS filename, 
+            ST_AsGDALRaster(ST_Union(rast), 'GTiff') AS rast 
+        FROM all_res
+        """,
+        {"job_id": job_id},
+        result_extractor=lambda res: res)
+
+    for row in rows:
+        raster = row['rast']
+        filename = row['filename']
+        with open(join(output_dir, filename), 'wb') as f:
+            f.write(raster)
+
 
 
 def run(command: str):

@@ -1,10 +1,12 @@
 let
   pkgs = import <nixpkgs> {};
-  saga_albion = import ./320-albion-saga-gis { inherit pkgs; };
 in with pkgs;
-
+# let
+#   pg = postgresql_12;
+#   pgis = postgis.override { postgresql = pg; };
+# in
 stdenv.mkDerivation rec {
-  name = "albion-solar-pv";
+  name = "albion-models";
   version = "0.1";
 
   buildInputs = [
@@ -16,7 +18,7 @@ stdenv.mkDerivation rec {
       scikitlearn
       scikitimage
     ]))
-    saga_albion
+    postgis
   ];
 
   env = buildEnv {
