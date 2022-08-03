@@ -9,8 +9,6 @@ import zipfile
 from osgeo import gdal, osr
 from typing import Optional, List
 
-from albion_models import gdal_helpers
-
 LIDAR_NODATA = -9999
 """
 NODATA value used in LiDAR tiffs
@@ -23,9 +21,6 @@ start using it. Otherwise only 1m and 2m will be used, as having to work
 at 50cm resolution slows lots of things down (RANSAC, horizon detection,
 mapping roof planes -> pv installations).
 """
-
-LIDAR_VRT = "tiles.vrt"
-LIDAR_COV_VRT = "per_res_coverage.vrt"
 
 
 class Resolution(Enum):

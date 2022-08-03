@@ -32,7 +32,7 @@ class HeatDemandModelTestCase(unittest.TestCase):
     def test_model_integration(self):
         bounds = gen_multipolygon()
         insert_job(self.pg_conn, 999, bounds, 'test')
-        model_heat_demand(self.pg_conn, 999, bounds, [], join(PROJECT_ROOT, 'heat_demand'), 2033.313)
+        model_heat_demand(self.pg_conn, 999, bounds, join(PROJECT_ROOT, 'heat_demand'), 2033.313)
 
     def tearDown(self):
         if not self.pg_conn:
