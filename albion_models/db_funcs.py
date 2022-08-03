@@ -5,7 +5,7 @@ import subprocess
 
 import logging
 
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from os.path import join
 from typing import Union, Optional
 
@@ -174,6 +174,15 @@ def process_pg_uri(pg_uri: str) -> str:
 
 def connect(pg_uri: str, **kwargs):
     return psycopg2.connect(process_pg_uri(pg_uri), **kwargs)
+
+
+@contextmanager
+def connection(pg_uri: str, **kwargs):
+    pg_conn = connect(pg_uri, **kwargs)
+    try:
+        yield pg_conn
+    finally:
+        pg_conn.close()
 
 
 def count(pg_uri: str, schema: str, table: str) -> int:

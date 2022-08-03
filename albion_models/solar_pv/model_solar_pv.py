@@ -1,27 +1,25 @@
-import logging
-import os
-import shutil
 from os.path import join
 
+import logging
+import os
 import psycopg2.extras
+import shutil
 from psycopg2.sql import Identifier
 
-import albion_models.solar_pv.pv_gis.pv_gis_client as pv_gis_client
 import albion_models.solar_pv.tables as tables
 from albion_models.db_funcs import connect, sql_script_with_bindings, process_pg_uri
 from albion_models.gdal_helpers import get_res
-from albion_models.solar_pv.pvgis import pvgis
-from albion_models.solar_pv.rasters import generate_rasters
-from albion_models.solar_pv.roof_polygons import create_roof_polygons
 from albion_models.solar_pv.lidar_check import check_lidar
 from albion_models.solar_pv.panels import add_panels
+from albion_models.solar_pv.pvgis import pvgis
 from albion_models.solar_pv.ransac.run_ransac import run_ransac
+from albion_models.solar_pv.rasters import generate_rasters
+from albion_models.solar_pv.roof_polygons import create_roof_polygons
 
 
 def model_solar_pv(pg_uri: str,
                    root_solar_dir: str,
                    job_id: int,
-                   lidar_vrt_file: str,
                    horizon_search_radius: int,
                    horizon_slices: int,
                    max_roof_slope_degrees: int,
@@ -40,7 +38,6 @@ def model_solar_pv(pg_uri: str,
 
     pg_uri = process_pg_uri(pg_uri)
     _validate_params(
-        lidar_vrt_file=lidar_vrt_file,
         horizon_search_radius=horizon_search_radius,
         horizon_slices=horizon_slices,
         max_roof_slope_degrees=max_roof_slope_degrees,
@@ -58,14 +55,13 @@ def model_solar_pv(pg_uri: str,
     _init_schema(pg_uri, job_id)
 
     logging.info("Generating and loading rasters...")
-    res = get_res(lidar_vrt_file)
     elevation_raster, aspect_raster, slope_raster, mask_raster = generate_rasters(
         pg_uri=pg_uri,
         job_id=job_id,
         solar_dir=solar_dir,
-        lidar_vrt_file=lidar_vrt_file,
         horizon_search_radius=horizon_search_radius,
         debug_mode=debug_mode)
+    res = get_res(elevation_raster)
 
     logging.info("Checking for outdated LiDAR and missing LiDAR coverage...")
     check_lidar(pg_uri, job_id)
@@ -144,8 +140,7 @@ def _drop_schema(pg_uri: str, job_id: int):
         pg_conn.close()
 
 
-def _validate_params(lidar_vrt_file: str,
-                     horizon_search_radius: int,
+def _validate_params(horizon_search_radius: int,
                      horizon_slices: int,
                      max_roof_slope_degrees: int,
                      min_roof_area_m: int,
@@ -154,8 +149,6 @@ def _validate_params(lidar_vrt_file: str,
                      peak_power_per_m2: float,
                      panel_width_m: float,
                      panel_height_m: float):
-    if not lidar_vrt_file or not os.path.exists(lidar_vrt_file):
-        raise ValueError("No LIDAR tiles available, cannot run solar PV modelling.")
     if horizon_search_radius < 0 or horizon_search_radius > 10000:
         raise ValueError(f"horizon search radius must be between 0 and 10000, was {horizon_search_radius}")
     if horizon_slices > 64 or horizon_slices < 8:

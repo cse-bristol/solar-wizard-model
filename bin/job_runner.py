@@ -112,21 +112,19 @@ def _handle_job(pg_conn, job: dict) -> bool:
         bulk_lidar_dir = os.environ.get("BULK_LIDAR_DIR", None)
         if not bulk_lidar_dir:
             logging.info("BULK_LIDAR_DIR not set, falling back to getting LiDAR from DEFRA API")
-            lidar_vrt_file = get_all_lidar(pg_conn, job_id, lidar_dir)
+            get_all_lidar(pg_conn, job_id, lidar_dir)
         else:
-            lidar_vrt_file = load_from_bulk(pg_conn, job_id, lidar_dir, bulk_lidar_dir)
+            load_from_bulk(pg_conn, job_id, lidar_dir, bulk_lidar_dir)
 
         if job['lidar']:
-            calculate_lidar_coverage(job_id, lidar_dir, pg_uri)
+            calculate_lidar_coverage(job_id, pg_uri)
 
         if job['heat_demand']:
             heat_degree_days = params['heat_degree_days']
-            lidar_tiff_paths = gdal_helpers.files_in_vrt(lidar_vrt_file)
             model_heat_demand(
                 pg_conn,
                 job_id,
                 bounds,
-                lidar_tiff_paths,
                 os.environ.get("HEAT_DEMAND_DIR"),
                 heat_degree_days)
 
@@ -223,7 +221,6 @@ def _handle_job(pg_conn, job: dict) -> bool:
                 pg_uri=pg_uri,
                 root_solar_dir=os.environ.get("SOLAR_DIR"),
                 job_id=job_id,
-                lidar_vrt_file=lidar_vrt_file,
                 horizon_search_radius=horizon_search_radius,
                 horizon_slices=horizon_slices,
                 max_roof_slope_degrees=max_roof_slope_degrees,

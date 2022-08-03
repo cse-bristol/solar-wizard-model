@@ -6,18 +6,17 @@ from psycopg2.sql import Identifier, Literal
 from typing import Tuple
 
 import albion_models.solar_pv.tables as tables
+import psycopg2.extras
 from albion_models import gdal_helpers
-from albion_models.db_funcs import sql_script, copy_csv, connect, count
+from albion_models.db_funcs import sql_script, copy_csv, count, connection
+from albion_models.postgis import get_merged_lidar
 from albion_models.solar_pv import mask
 
 
 def generate_rasters(pg_uri: str,
                      job_id: int,
                      solar_dir: str,
-                     lidar_vrt_file: str,
                      horizon_search_radius: int,
-                     override_mask_sql: str = None,
-                     override_res: float = None,
                      debug_mode: bool = False) -> Tuple[str, str, str, str]:
     """
     Generate a single geoTIFF for the entire job area, as well as rasters for
@@ -27,22 +26,25 @@ def generate_rasters(pg_uri: str,
     input LIDAR was in (probably 27700 E/N), but the filenames returned reference
     the 4326 rasters.
     """
-    srid = gdal_helpers.get_srid(lidar_vrt_file, fallback=27700)
-    if override_res is None:
-        res = gdal_helpers.get_res(lidar_vrt_file)
-    else:
-        res = override_res
+    if count(pg_uri, tables.schema(job_id), tables.LIDAR_PIXEL_TABLE) > 0:
+        logging.info("Not creating rasters, raster data already loaded.")
+        return (join(solar_dir, 'elevation_4326.tif'),
+                join(solar_dir, 'aspect_4326.tif'),
+                join(solar_dir, 'slope_4326.tif'),
+                join(solar_dir, 'mask_4326.tif'))
 
-    cropped_lidar = join(solar_dir, 'cropped_lidar.tif')
+    elevation_raster = join(solar_dir, 'elevation.tif')
     aspect_raster = join(solar_dir, 'aspect.tif')
     slope_raster = join(solar_dir, 'slope.tif')
     mask_raster = join(solar_dir, 'mask.tif')
 
-    if count(pg_uri, tables.schema(job_id), tables.LIDAR_PIXEL_TABLE) > 0:
-        logging.info("Not creating rasters, raster data already loaded.")
-        return cropped_lidar, aspect_raster, slope_raster, mask_raster
+    with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
+        get_merged_lidar(pg_conn, job_id, elevation_raster)
 
-    unit_dims, unit = gdal_helpers.get_srs_units(lidar_vrt_file)
+    srid = gdal_helpers.get_srid(elevation_raster, fallback=27700)
+    res = gdal_helpers.get_res(elevation_raster)
+
+    unit_dims, unit = gdal_helpers.get_srs_units(elevation_raster)
     if unit_dims != 1.0 or unit != 'metre':
         # If this ever needs changing - the `resolution_metres` param of `create_roof_polygons()`
         # needs a resolution per metre rather than per whatever the unit of the SRS is -
@@ -54,32 +56,29 @@ def generate_rasters(pg_uri: str,
                          f"not 1m: was {unit} {unit_dims}")
 
     logging.info("Creating raster mask...")
-    if override_mask_sql:
-        mask_sql = override_mask_sql
-    else:
-        mask_sql = mask.buildings_mask_sql(pg_uri, job_id, buffer=1)
+    mask_sql = mask.buildings_mask_sql(pg_uri, job_id, buffer=1)
 
     unbuffered_mask_raster = join(solar_dir, 'unbuffered_mask.tif')
     mask.create_mask(mask_sql, unbuffered_mask_raster, pg_uri, res=res, srid=srid)
     gdal_helpers.expand(unbuffered_mask_raster, mask_raster, buffer=horizon_search_radius)
 
     logging.info("Cropping lidar to mask dimensions...")
-    gdal_helpers.crop_or_expand(lidar_vrt_file, mask_raster, cropped_lidar,
+    gdal_helpers.crop_or_expand(elevation_raster, mask_raster, elevation_raster,
                                 adjust_resolution=True)
 
     logging.info("Creating aspect raster...")
-    gdal_helpers.aspect(cropped_lidar, aspect_raster)
+    gdal_helpers.aspect(elevation_raster, aspect_raster)
 
     logging.info("Creating slope raster...")
-    gdal_helpers.slope(cropped_lidar, slope_raster)
+    gdal_helpers.slope(elevation_raster, slope_raster)
 
     logging.info("Converting to 4326...")
-    cropped_lidar_4326, aspect_raster_4326, slope_raster_4326, mask_raster_4326 =  \
-        _generate_4326_rasters(solar_dir, srid, cropped_lidar, aspect_raster, slope_raster,
+    cropped_lidar_4326, aspect_raster_4326, slope_raster_4326, mask_raster_4326 = \
+        _generate_4326_rasters(solar_dir, srid, elevation_raster, aspect_raster, slope_raster,
                                mask_raster)
 
     logging.info("Loading raster data...")
-    _load_rasters_to_db(pg_uri, job_id, srid, solar_dir, cropped_lidar,
+    _load_rasters_to_db(pg_uri, job_id, srid, solar_dir, elevation_raster,
                         aspect_raster, slope_raster, mask_raster, debug_mode)
 
     return cropped_lidar_4326, aspect_raster_4326, slope_raster_4326, mask_raster_4326
@@ -123,10 +122,11 @@ def _load_rasters_to_db(pg_uri: str,
                         slope_raster: str,
                         mask_raster: str,
                         debug_mode: bool):
-    pg_conn = connect(pg_uri)
-    schema = tables.schema(job_id)
-    lidar_pixels_table = tables.LIDAR_PIXEL_TABLE
-    try:
+    # TODO this could be made a db-only operation, going from db-rasters to per-pixel info
+    with connection(pg_uri) as pg_conn:
+        schema = tables.schema(job_id)
+        lidar_pixels_table = tables.LIDAR_PIXEL_TABLE
+
         sql_script(
             pg_conn, 'pv/create.lidar-pixels.sql',
             lidar_pixels=Identifier(schema, lidar_pixels_table),
@@ -147,8 +147,6 @@ def _load_rasters_to_db(pg_uri: str,
             buildings=Identifier(schema, tables.BUILDINGS_TABLE),
             srid=Literal(srid)
         )
-    finally:
-        pg_conn.close()
 
 
 def copy_raster(pg_conn, solar_dir: str, raster: str, table: str, mask_raster: str = None, debug_mode: bool = False):
