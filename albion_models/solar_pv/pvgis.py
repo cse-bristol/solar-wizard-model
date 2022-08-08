@@ -13,8 +13,6 @@ def pvgis(pg_uri: str,
           horizon_slices: int,
           peak_power_per_m2: float,
           elevation_raster: str,
-          aspect_raster: str,
-          slope_raster: str,
           mask_raster: str,
           debug_mode: bool):
     """

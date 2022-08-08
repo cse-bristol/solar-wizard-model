@@ -55,7 +55,7 @@ def model_solar_pv(pg_uri: str,
     _init_schema(pg_uri, job_id)
 
     logging.info("Generating and loading rasters...")
-    elevation_raster, aspect_raster, slope_raster, mask_raster = generate_rasters(
+    elevation_raster, mask_raster = generate_rasters(
         pg_uri=pg_uri,
         job_id=job_id,
         solar_dir=solar_dir,
@@ -100,8 +100,6 @@ def model_solar_pv(pg_uri: str,
           horizon_slices=horizon_slices,
           peak_power_per_m2=peak_power_per_m2,
           elevation_raster=elevation_raster,
-          aspect_raster=aspect_raster,
-          slope_raster=slope_raster,
           mask_raster=mask_raster,
           debug_mode=debug_mode)
 

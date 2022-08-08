@@ -17,20 +17,18 @@ def generate_rasters(pg_uri: str,
                      job_id: int,
                      solar_dir: str,
                      horizon_search_radius: int,
-                     debug_mode: bool = False) -> Tuple[str, str, str, str]:
+                     debug_mode: bool = False) -> Tuple[str, str]:
     """
     Generate a single geoTIFF for the entire job area, as well as rasters for
     aspect, slope and a building mask.
 
-    Generates all 4 rasters in both EPSG:4326 (long/lat) and in whatever SRS the
+    Generates all rasters in both EPSG:4326 (long/lat) and in whatever SRS the
     input LIDAR was in (probably 27700 E/N), but the filenames returned reference
     the 4326 rasters.
     """
     if count(pg_uri, tables.schema(job_id), tables.LIDAR_PIXEL_TABLE) > 0:
         logging.info("Not creating rasters, raster data already loaded.")
         return (join(solar_dir, 'elevation_4326.tif'),
-                join(solar_dir, 'aspect_4326.tif'),
-                join(solar_dir, 'slope_4326.tif'),
                 join(solar_dir, 'mask_4326.tif'))
 
     elevation_raster = join(solar_dir, 'elevation.tif')
@@ -73,26 +71,21 @@ def generate_rasters(pg_uri: str,
     gdal_helpers.slope(elevation_raster, slope_raster)
 
     logging.info("Converting to 4326...")
-    cropped_lidar_4326, aspect_raster_4326, slope_raster_4326, mask_raster_4326 = \
-        _generate_4326_rasters(solar_dir, srid, elevation_raster, aspect_raster, slope_raster,
-                               mask_raster)
+    cropped_lidar_4326, mask_raster_4326 = _generate_4326_rasters(
+        solar_dir, srid, elevation_raster, mask_raster)
 
     logging.info("Loading raster data...")
     _load_rasters_to_db(pg_uri, job_id, srid, solar_dir, elevation_raster,
                         aspect_raster, slope_raster, mask_raster, debug_mode)
 
-    return cropped_lidar_4326, aspect_raster_4326, slope_raster_4326, mask_raster_4326
+    return cropped_lidar_4326, mask_raster_4326
 
 
 def _generate_4326_rasters(solar_dir: str,
                            srid: int,
                            elevation_raster: str,
-                           aspect_raster: str,
-                           slope_raster: str,
                            mask_raster: str):
     elevation_raster_4326 = join(solar_dir, 'elevation_4326.tif')
-    aspect_raster_4326 = join(solar_dir, 'aspect_4326.tif')
-    slope_raster_4326 = join(solar_dir, 'slope_4326.tif')
     mask_raster_4326 = join(solar_dir, 'mask_4326.tif')
 
     if srid == 27700:
@@ -106,11 +99,9 @@ def _generate_4326_rasters(solar_dir: str,
         src_srs = f"EPSG:{srid}"
 
     gdal_helpers.reproject(elevation_raster, elevation_raster_4326, src_srs=src_srs, dst_srs="EPSG:4326")
-    gdal_helpers.reproject(aspect_raster, aspect_raster_4326, src_srs=src_srs, dst_srs="EPSG:4326")
-    gdal_helpers.reproject(slope_raster, slope_raster_4326, src_srs=src_srs, dst_srs="EPSG:4326")
     gdal_helpers.reproject(mask_raster, mask_raster_4326, src_srs=src_srs, dst_srs="EPSG:4326")
 
-    return elevation_raster_4326, aspect_raster_4326, slope_raster_4326, mask_raster_4326
+    return elevation_raster_4326, mask_raster_4326
 
 
 def _load_rasters_to_db(pg_uri: str,
