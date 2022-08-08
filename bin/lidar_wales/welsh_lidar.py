@@ -49,5 +49,5 @@ def create_urls_for_wget(txtfile: str, tiles: List[str], resolutions: List[str])
 
 
 if __name__ == "__main__":
-    file = join(paths.BIN_DIR, "welsh_lidar.txt")
+    file = join(paths.BIN_DIR, "lidar_wales/welsh_lidar.txt")
     create_urls_for_wget(file, LIDAR_TILES, RESOLUTIONS)
