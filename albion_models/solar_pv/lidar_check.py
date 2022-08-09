@@ -8,6 +8,7 @@ import psycopg2.extras
 from psycopg2.sql import SQL, Identifier
 
 from albion_models.db_funcs import connect, count
+from albion_models.lidar.lidar import LIDAR_NODATA
 from albion_models.solar_pv import tables
 
 
@@ -145,7 +146,7 @@ def _load_building_pixels(pg_conn, job_id: int, page: int, page_size: int = 1000
             FROM building_page b
             LEFT JOIN mastermap.height hh ON b.toid = hh.toid
             LEFT JOIN {lidar_pixels} h ON ST_Contains(ST_Buffer(b.geom_27700, 1), h.en)
-            WHERE h.elevation != -9999
+            WHERE h.elevation != %(lidar_nodata)s
             ORDER BY b.toid;
             """).format(
             lidar_pixels=Identifier(tables.schema(job_id), tables.LIDAR_PIXEL_TABLE),
@@ -153,6 +154,7 @@ def _load_building_pixels(pg_conn, job_id: int, page: int, page_size: int = 1000
         ), {
             "offset": page * page_size,
             "limit": page_size,
+            "lidar_nodata": LIDAR_NODATA,
         })
         pg_conn.commit()
         return cursor.fetchall()

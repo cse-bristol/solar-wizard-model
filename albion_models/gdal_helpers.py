@@ -55,6 +55,18 @@ def get_res(filename: str) -> float:
                          f"File {filename} had xres {abs(xres)}, yres {abs(yres)}")
 
 
+def get_res_unchecked(filename: str) -> float:
+    """
+    Get the resolution of the raster, and do not raise an error
+    if the x and y resolutions differ - return the x res.
+    """
+    gdal.UseExceptions()
+
+    f = gdal.Open(filename)
+    _, xres, _, _, _, yres = f.GetGeoTransform()
+    return abs(xres)
+
+
 def get_srs_units(filename: str) -> Tuple[float, str]:
     gdal.UseExceptions()
 
@@ -242,7 +254,6 @@ def raster_to_csv(raster_file: str, csv_out: str,  mask_raster: str = None,
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG,
                         format='[%(asctime)s] %(levelname)s: %(message)s')
-    raster_to_csv("/home/neil/data/albion-models/solar/job_73/aspect_4326.tif",
-                  "/home/neil/data/albion-models/solar/job_73/aspect_4326.csv")
-    raster_to_csv("/home/neil/data/albion-models/solar/job_73/aspect.tif",
-                  "/home/neil/data/albion-models/solar/job_73/aspect.csv")
+    fix_lidar("/home/neil/data/albion-models/lidar/scotland/NN70_1M_DSM_PHASE1.tif",
+              "/home/neil/data/albion-models/lidar/scotland/NN70_1M_DSM_PHASE1_a.tif",
+              1.0)

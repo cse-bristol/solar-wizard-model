@@ -153,10 +153,11 @@ def _file_res(filename: str) -> Optional[Resolution]:
 
 def _tile_id(filename: str):
     """
-    Matches the tile ID in a filename like 'so8707_DSM_1M.tiff' or
-    (for Welsh 50cm only: sm7924se_dsm_50cm.tiff
+    Matches the tile ID in a filename like 'so8707_DSM_1M.tiff'
+    or (for Welsh 50cm only): sm7924se_dsm_50cm.tiff
+    or (for Scotland): NS76_1M_DSM_PHASE1.tif or NY06NE_50CM_DSM_PHASE3.tif
     """
-    match = re.search("[a-z]{2}[0-9]{4}(?:se|sw|ne|nw)?", filename, re.IGNORECASE)
+    match = re.search("[a-z]{2}[0-9]{2,4}(?:se|sw|ne|nw)?", filename, re.IGNORECASE)
     return match.group() if match is not None else None
 
 

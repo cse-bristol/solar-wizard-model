@@ -8,6 +8,7 @@ from typing import List
 import multiprocessing as mp
 
 from albion_models.db_funcs import connect, count
+from albion_models.lidar.lidar import LIDAR_NODATA
 from albion_models.solar_pv import tables
 
 import psycopg2.extras
@@ -142,7 +143,7 @@ def _load(pg_uri: str, job_id: int, page: int, page_size: int):
                 SELECT h.pixel_id, h.easting, h.northing, h.elevation, h.aspect, b.toid
                 FROM building_page b
                 LEFT JOIN {lidar_pixels} h ON h.toid = b.toid
-                WHERE h.elevation != -9999
+                WHERE h.elevation != %(lidar_nodata)s
                 ORDER BY b.toid;
                 """).format(
                 lidar_pixels=Identifier(tables.schema(job_id), tables.LIDAR_PIXEL_TABLE),
@@ -151,6 +152,7 @@ def _load(pg_uri: str, job_id: int, page: int, page_size: int):
             ), {
                 "offset": page * page_size,
                 "limit": page_size,
+                "lidar_nodata": LIDAR_NODATA,
             })
             pg_conn.commit()
             return cursor.fetchall()

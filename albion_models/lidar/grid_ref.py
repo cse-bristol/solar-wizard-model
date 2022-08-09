@@ -1,6 +1,8 @@
 import re
 from typing import Tuple, Dict
 
+from shapely import wkt
+
 Easting = int
 Northing = int
 SquareSize = int
@@ -102,3 +104,9 @@ def os_grid_ref_to_wkt(grid_ref: str) -> str:
            f'{easting + sq_size} {northing + sq_size}, ' \
            f'{easting + sq_size} {northing}, ' \
            f'{easting} {northing}))'
+
+
+def os_grid_ref_to_polygon(grid_ref: str):
+    poly = wkt.loads(os_grid_ref_to_wkt(grid_ref))
+    poly.grid_ref = grid_ref
+    return poly

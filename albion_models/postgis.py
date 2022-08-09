@@ -136,12 +136,12 @@ def _50cm_coverage(pg_conn, job_id: int) -> float:
             -- Divide by 4 as this is the count of 0.5m2 pixels 
             (SUM(st_count(st_clip(l.rast, jq.bounds))) / 4) 
                 / MAX(st_area(jq.bounds)) 
-        FROM models.lidar_1m l
+        FROM models.lidar_50cm l
         LEFT JOIN models.job_queue jq ON st_intersects(l.rast, jq.bounds) 
         WHERE jq.job_id = %(job_id)s
         """,
         bindings={"job_id": job_id},
-        result_extractor=lambda rows: rows[0][0]
+        result_extractor=lambda rows: rows[0][0] or 0.0
     )
 
 
@@ -204,7 +204,6 @@ def get_merged_lidar(pg_conn, job_id: int, output_file: str):
 
 
 def get_merged_lidar_tiles(pg_conn, job_id, output_dir: str) -> List[str]:
-    # TODO not sure if needs resampling
     _50cm_cov = _50cm_coverage(pg_conn, job_id)
     logging.info(f"50cm LiDAR coverage is {_50cm_cov}, threshold is {USE_50CM_THRESHOLD}")
 
