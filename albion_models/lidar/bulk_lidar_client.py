@@ -2,6 +2,7 @@ import enum
 import logging
 import os
 from os.path import join
+from typing import List
 
 import gdal
 
@@ -17,17 +18,26 @@ class LidarSource(enum.Enum):
 
     ENGLAND = ("ENGLAND", 5000, 2017)
     WALES = ("WALES", 10000, 2015)
-    SCOTLAND_1 = ("SCOTLAND_1", 10000, 2009, False)
-    SCOTLAND_2 = ("SCOTLAND_2", 10000, 2009, False)
-    SCOTLAND_3 = ("SCOTLAND_3", 5000, 2016, False)
-    SCOTLAND_4 = ("SCOTLAND_4", 5000, 2019, False)
-    SCOTLAND_5 = ("SCOTLAND_5", 5000, 2021, False)
+    # Scottish LiDAR is in 5 separate phases, sometimes overlapping in tiles
+    # covered (but with different portions of the tile containing data, so we
+    # do still need the earlier phases):
+    SCOTLAND_1 = ("SCOTLAND_1", 10000, 2012, False, [Resolution.R_1M])
+    SCOTLAND_2 = ("SCOTLAND_2", 10000, 2014, False, [Resolution.R_1M])
+    SCOTLAND_3 = ("SCOTLAND_3", 5000, 2016, False, [Resolution.R_50CM])
+    SCOTLAND_4 = ("SCOTLAND_4", 5000, 2019, False, [Resolution.R_50CM])
+    SCOTLAND_5 = ("SCOTLAND_5", 5000, 2021, False, [Resolution.R_50CM])
 
-    def __init__(self, country: str, cell_size: int, year: int, zipped: bool = True):
+    def __init__(self, country: str, cell_size: int, year: int,
+                 zipped: bool = True,
+                 resolutions: List[Resolution] = None):
+        if resolutions is None:
+            resolutions = [Resolution.R_50CM, Resolution.R_1M, Resolution.R_2M]
+
         self.country = country
         self.cell_size = cell_size
         self.year = year
         self.zipped = zipped
+        self.resolutions = resolutions
 
     def filepath(self, bulk_lidar_dir: str, grid_ref: str, res: Resolution):
         res_str = res.name[2:]
@@ -76,7 +86,7 @@ def lidar_tiles(pg_conn, job_id: int, bulk_lidar_dir: str, lidar_dir: str, sourc
     grid_refs = get_grid_refs(bounds_poly, source.cell_size)
 
     for grid_ref in grid_refs:
-        for res in Resolution:
+        for res in source.resolutions:
             filepath = source.filepath(bulk_lidar_dir, grid_ref, res)
             if os.path.exists(filepath):
                 logging.info(f"Using LiDAR zip {grid_ref} at res {res.value}m "
