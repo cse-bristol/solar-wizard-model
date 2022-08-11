@@ -193,13 +193,11 @@ def _asc_to_geotiff(lidar_dir: str, asc_filename: str, tiff_filename: str) -> No
 
     drv = gdal.GetDriverByName('GTiff')
     gdal_asc_file = gdal.Open(join(lidar_dir, asc_filename))
-    gdal_tiff_file = drv.CreateCopy(join(lidar_dir, tiff_filename), gdal_asc_file)
+    gdal_tiff_file = drv.CreateCopy(
+        join(lidar_dir, tiff_filename), gdal_asc_file, 1, ['TILED=YES', 'COMPRESS=PACKBITS'])
     srs = osr.SpatialReference()
     srs.ImportFromEPSG(27700)
     gdal_tiff_file.SetProjection(srs.ExportToWkt())
-    # https://gdal.org/api/python_gotchas.html
-    gdal_asc_file = None
-    gdal_tiff_file = None
     _try_remove(join(lidar_dir, asc_filename))
 
 

@@ -4,6 +4,8 @@ DEFRA LiDAR API client
 import json
 import logging
 import os
+import shutil
+
 import time
 from datetime import datetime
 from os.path import join
@@ -24,7 +26,8 @@ def get_all_lidar(pg_conn, job_id: int, lidar_dir: str) -> None:
     Download LIDAR tiles unless already present, or if newer/better resolution
     than those already downloaded.
     """
-    job_tmp_dir = join(lidar_dir, f"job_{job_id}")
+    job_tmp_dir = join(lidar_dir, f"tmp_{job_id}")
+    os.makedirs(job_tmp_dir, exist_ok=True)
 
     gridded_bounds = _get_gridded_bounds(pg_conn, job_id)
     job_tiles = []
@@ -35,6 +38,11 @@ def get_all_lidar(pg_conn, job_id: int, lidar_dir: str) -> None:
     load_lidar(pg_conn, job_tiles, job_tmp_dir)
 
     logging.info("Downloaded LiDAR")
+
+    try:
+        shutil.rmtree(job_tmp_dir)
+    except FileNotFoundError:
+        pass
 
 
 def _get_gridded_bounds(pg_conn, job_id: int) -> List[List[List[float]]]:

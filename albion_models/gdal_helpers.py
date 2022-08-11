@@ -128,9 +128,11 @@ def crop_or_expand(file_to_crop: str,
     lrx = ulx + (ref.RasterXSize * xres)
     lry = uly + (ref.RasterYSize * yres)
     if adjust_resolution:
-        gdal.Warp(out_tiff, to_crop, outputBounds=(ulx, lry, lrx, uly), xRes=xres, yRes=yres)
+        gdal.Warp(out_tiff, to_crop, outputBounds=(ulx, lry, lrx, uly), xRes=xres, yRes=yres,
+                  creationOptions=['TILED=YES', 'COMPRESS=PACKBITS'])
     else:
-        gdal.Warp(out_tiff, to_crop, outputBounds=(ulx, lry, lrx, uly))
+        gdal.Warp(out_tiff, to_crop, outputBounds=(ulx, lry, lrx, uly),
+                  creationOptions=['TILED=YES', 'COMPRESS=PACKBITS'])
 
 
 def expand(raster_in: str, raster_out: str, buffer: int):
@@ -148,7 +150,8 @@ def expand(raster_in: str, raster_out: str, buffer: int):
     lrx = ulx + (ref.RasterXSize * xres) + x_buffer
     lry = uly + (ref.RasterYSize * yres) + y_buffer
     gdal.Warp(raster_out, raster_in,
-              outputBounds=(ulx - x_buffer, lry, lrx, uly - y_buffer))
+              outputBounds=(ulx - x_buffer, lry, lrx, uly - y_buffer),
+              creationOptions=['TILED=YES', 'COMPRESS=PACKBITS'])
 
 
 def reproject(raster_in: str, raster_out: str, src_srs: str, dst_srs: str):
@@ -157,7 +160,8 @@ def reproject(raster_in: str, raster_out: str, src_srs: str, dst_srs: str):
     """
     ref = gdal.Open(raster_in)
     gdal.Warp(raster_out, raster_in, dstSRS=dst_srs, srcSRS=src_srs,
-              width=ref.RasterXSize, height=ref.RasterYSize)
+              width=ref.RasterXSize, height=ref.RasterYSize,
+              creationOptions=['TILED=YES', 'COMPRESS=PACKBITS'])
 
 
 def set_resolution(in_tiff: str,
@@ -169,16 +173,17 @@ def set_resolution(in_tiff: str,
     gdal.UseExceptions()
     in_f = gdal.Open(in_tiff)
     _, xres, _, _, _, yres = in_f.GetGeoTransform()
-    gdal.Warp(out_tiff, in_f, xRes=res, yRes=res)
+    gdal.Warp(out_tiff, in_f, xRes=res, yRes=res,
+              creationOptions=['TILED=YES', 'COMPRESS=PACKBITS'])
     return out_tiff
 
 
 def aspect(cropped_lidar: str, aspect_file: str):
-    run(f"gdaldem aspect {cropped_lidar} {aspect_file} -of GTiff -b 1 -zero_for_flat")
+    run(f"gdaldem aspect {cropped_lidar} {aspect_file} -of GTiff -b 1 -zero_for_flat -co \"COMPRESS=PACKBITS\" -co \"TILED=YES\"")
 
 
 def slope(cropped_lidar: str, slope_file: str):
-    run(f"gdaldem slope {cropped_lidar} {slope_file} -of GTiff -b 1")
+    run(f"gdaldem slope {cropped_lidar} {slope_file} -of GTiff -b 1  -co \"COMPRESS=PACKBITS\" -co \"TILED=YES\"")
 
 
 def merge(files: List[str], output_file: str, res: float, nodata: int):
@@ -254,6 +259,6 @@ def raster_to_csv(raster_file: str, csv_out: str,  mask_raster: str = None,
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG,
                         format='[%(asctime)s] %(levelname)s: %(message)s')
-    fix_lidar("/home/neil/data/albion-models/lidar/scotland/NN70_1M_DSM_PHASE1.tif",
-              "/home/neil/data/albion-models/lidar/scotland/NN70_1M_DSM_PHASE1_a.tif",
-              1.0)
+    # fix_lidar("/home/neil/data/albion-models/lidar/scotland/NN70_1M_DSM_PHASE1.tif",
+    #           "/home/neil/data/albion-models/lidar/scotland/NN70_1M_DSM_PHASE1_a.tif",
+    #           1.0)

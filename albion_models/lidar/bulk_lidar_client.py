@@ -1,6 +1,7 @@
 import enum
 import logging
 import os
+import shutil
 from os.path import join
 from typing import List
 
@@ -63,7 +64,7 @@ def load_from_bulk(pg_conn, job_id: int, lidar_dir: str, bulk_lidar_dir: str) ->
     """
     Load LiDAR from the bulk LiDAR we have from DEFRA on bolt at `/srv/lidar`.
     """
-    job_tmp_dir = join(lidar_dir, f"job_{job_id}")
+    job_tmp_dir = join(lidar_dir, f"tmp_{job_id}")
 
     job_tiles = []
     for source in LidarSource:
@@ -79,6 +80,11 @@ def load_from_bulk(pg_conn, job_id: int, lidar_dir: str, bulk_lidar_dir: str) ->
     load_lidar(pg_conn, job_tiles, job_tmp_dir)
 
     logging.info(f"Prepared LiDAR")
+
+    try:
+        shutil.rmtree(job_tmp_dir)
+    except FileNotFoundError:
+        pass
 
 
 def lidar_tiles(pg_conn, job_id: int, bulk_lidar_dir: str, lidar_dir: str, source: LidarSource):
@@ -103,7 +109,6 @@ def _fix_lidar_res(filepath: str):
     """
     Scottish phase 1 LiDAR resolution is something like 1.000002, not 1. postGIS
     doesn't like that.
-    TODO write out as compressed tiffs
     """
     curr_res = gdal_helpers.get_res_unchecked(filepath)
     filename = os.path.basename(filepath)
@@ -126,4 +131,4 @@ def _fix_lidar_res(filepath: str):
         gdal.Warp(filepath, filepath,
                   outputBounds=(ulx, lry, lrx, uly),
                   xRes=filename_res, yRes=filename_res,
-                  creationOptions=["COMPRESS=PACKBITS"])
+                  creationOptions=['TILED=YES', 'COMPRESS=PACKBITS'])
