@@ -1,7 +1,8 @@
+import json
 from typing import List
 
 from shapely.strtree import STRtree
-from shapely.geometry import Polygon
+from shapely.geometry import Polygon, shape
 from shapely import wkt
 
 from albion_models.db_funcs import sql_command
@@ -21,6 +22,17 @@ def rect(x: int, y: int, w: int, h: int):
 
 def square(x: int, y: int, edge: int):
     return rect(x, y, edge, edge)
+
+
+def from_geojson(geojson):
+    if isinstance(geojson, str):
+        geojson = json.loads(geojson)
+    return shape(geojson)
+
+
+def from_geojson_file(geojson_file: str):
+    with open(geojson_file) as f:
+        return from_geojson(f.read())
 
 
 def bounds_polygon(pg_conn, job_id: int):
@@ -56,7 +68,7 @@ def get_grid_cells(poly, cell_w, cell_h, spacing_w=0, spacing_h=0, grid_start: s
         ymin = round_down_to(ymin, cell_h + spacing_h)
         xmax = round_up_to(xmax, cell_w + spacing_w)
         ymax = round_up_to(ymax, cell_h + spacing_h)
-    if grid_start == 'bounds-buffered':
+    elif grid_start == 'bounds-buffered':
         # add a 1-cell buffer:
         xmin -= cell_w + spacing_w
         ymin -= cell_h + spacing_h
@@ -70,7 +82,7 @@ def get_grid_cells(poly, cell_w, cell_h, spacing_w=0, spacing_h=0, grid_start: s
         for y in frange(ymin, ymax, cell_h + spacing_h):
             cells.append(rect(x, y, cell_w, cell_h))
     rtree = STRtree(cells)
-    return rtree.query(poly)
+    return [p for p in rtree.query(poly) if p.intersects(poly)]
 
 
 def get_grid_refs(poly, cell_size: int) -> List[str]:

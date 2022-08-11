@@ -2,4 +2,4 @@
 
 cd "$(dirname "$0")" || exit 1
 
-PYTHONPATH=. python3 open_solar.py "$@"
+PYTHONPATH=.. python3 open_solar.py "$@"

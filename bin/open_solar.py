@@ -2,13 +2,16 @@ import argparse
 import json
 import logging
 import os
-import psycopg2.extras
+from os.path import join
+
 import sys
-from psycopg2.extras import Json
+from psycopg2.extras import Json, execute_values, DictCursor
 from psycopg2.sql import Literal
 from typing import List, Optional
 
+from albion_models import paths
 from albion_models.db_funcs import sql_command, sql_script, connect, command_to_gpkg
+from albion_models.geos import get_grid_cells, from_geojson_file
 
 model_params = {
     "horizon_search_radius": {
@@ -78,20 +81,37 @@ def create_run(pg_conn, name: str, cell_size: int, cell_ids: Optional[List[int]]
             name=Literal(name),
             result_extractor=lambda res: res[0][0])
 
-        job_ids = sql_script(
+        cells = get_grid_cells(from_geojson_file(join(paths.RESOURCES_DIR, "gb.geojson")), cell_size, cell_size)
+        if cell_ids is not None:
+            cells = [cells[cid] for cid in cell_ids]
+
+        job_ids = execute_values(
             cursor,
-            "open_solar/create.run.sql",
-            bindings={"name": name,
-                      "params": Json(params),
-                      "cell_ids": cell_ids},
-            cell_size=Literal(cell_size),
-            result_extractor=lambda res: [(os_run_id, row[0]) for row in res]
+            """
+            INSERT INTO models.job_queue (
+                project,
+                bounds,
+                solar_pv,
+                params,
+                open_solar)
+            VALUES %s
+            RETURNING job_id
+            """,
+            template="""(
+                'open_solar:' || %s || ':' || %s || ',' || %s,
+                ST_Multi(ST_GeomFromText( %s )),
+                true,
+                %s,
+                true)
+            """,
+            argslist=[(name, cell.bounds[0], cell.bounds[1], cell.wkt, Json(params)) for cell in cells],
+            fetch=True,
         )
 
-        psycopg2.extras.execute_values(
+        execute_values(
             cursor,
             "INSERT INTO models.open_solar_jobs (os_run_id, job_id) VALUES %s",
-            argslist=job_ids)
+            argslist=[(os_run_id, job[0]) for job in job_ids])
 
         pg_conn.commit()
 
@@ -107,9 +127,16 @@ def list_runs(pg_conn):
 
 
 def cancel_run(pg_conn, os_run_id: int):
-    sql_script(
+    sql_command(
         pg_conn,
-        "open_solar/cancel.run.sql",
+        """
+        UPDATE models.job_queue q SET status = 'CANCELLED'
+        FROM models.open_solar_jobs osj
+        WHERE
+            status = 'NOT_STARTED'
+            AND osj.job_id = q.job_id
+            AND osj.os_run_id = {os_run_id}
+        """,
         os_run_id=Literal(os_run_id)
     )
 
@@ -260,7 +287,7 @@ def parse_cli_args():
 
 def open_solar_cli():
     args = parse_cli_args()
-    pg_conn = connect(args.pg_uri, cursor_factory=psycopg2.extras.DictCursor)
+    pg_conn = connect(args.pg_uri, cursor_factory=DictCursor)
     logging.basicConfig(level=logging.INFO,
                         format='[%(asctime)s] %(levelname)s: %(message)s',
                         stream=sys.stdout)
