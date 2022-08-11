@@ -108,6 +108,8 @@ def _place_panel_page(pg_uri: str,
                 st_astext(roof_geom_27700) AS roof, 
                 aspect, slope, is_flat 
             FROM {roof_polygons}
+            -- not really needed as none of them should be null, but oh well:
+            WHERE roof_geom_27700 IS NOT NULL
             ORDER BY roof_plane_id
             OFFSET %(offset)s
             LIMIT %(limit)s
@@ -208,8 +210,8 @@ def _roof_panels(roof,
     rotated_roof = affinity.rotate(roof, aspect, origin=centroid)
 
     # Define grids of portrait and landscape panels:
-    portrait_grid = get_grid_cells(rotated_roof, portrait_panel_w, portrait_panel_h, spacing_x, spacing_y, grid_start='bounds')
-    landscape_grid = get_grid_cells(rotated_roof, landscape_panel_w, landscape_panel_h, spacing_x, spacing_y, grid_start='bounds')
+    portrait_grid = get_grid_cells(rotated_roof, portrait_panel_w, portrait_panel_h, spacing_x, spacing_y, grid_start='bounds-buffered')
+    landscape_grid = get_grid_cells(rotated_roof, landscape_panel_w, landscape_panel_h, spacing_x, spacing_y, grid_start='bounds-buffered')
 
     # Define some variations on panel row positioning to try and fit
     # more panels on each roof:
