@@ -10,7 +10,7 @@ import albion_models.solar_pv.tables as tables
 from albion_models.db_funcs import connect, sql_script_with_bindings, process_pg_uri
 from albion_models.gdal_helpers import get_res
 from albion_models.solar_pv.lidar_check import check_lidar
-from albion_models.solar_pv.panels import add_panels
+from albion_models.solar_pv.panels import place_panels
 from albion_models.solar_pv.pvgis import pvgis
 from albion_models.solar_pv.ransac.run_ransac import run_ransac
 from albion_models.solar_pv.rasters import generate_rasters
@@ -55,13 +55,12 @@ def model_solar_pv(pg_uri: str,
     _init_schema(pg_uri, job_id)
 
     logging.info("Generating and loading rasters...")
-    elevation_raster, mask_raster = generate_rasters(
+    elevation_raster, mask_raster, res = generate_rasters(
         pg_uri=pg_uri,
         job_id=job_id,
         solar_dir=solar_dir,
         horizon_search_radius=horizon_search_radius,
         debug_mode=debug_mode)
-    res = get_res(elevation_raster)
 
     logging.info("Checking for outdated LiDAR and missing LiDAR coverage...")
     check_lidar(pg_uri, job_id)
@@ -83,7 +82,7 @@ def model_solar_pv(pg_uri: str,
         resolution_metres=res)
 
     logging.info("Adding individual PV panels...")
-    add_panels(
+    place_panels(
         pg_uri=pg_uri,
         job_id=job_id,
         min_roof_area_m=min_roof_area_m,

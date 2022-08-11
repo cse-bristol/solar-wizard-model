@@ -1,5 +1,4 @@
 import logging
-import os
 import time
 from collections import defaultdict
 
@@ -7,7 +6,7 @@ import math
 from typing import List
 import multiprocessing as mp
 
-from albion_models.db_funcs import connect, count
+from albion_models.db_funcs import connect, count, connection, sql_command
 from albion_models.lidar.lidar import LIDAR_NODATA
 from albion_models.solar_pv import tables
 
@@ -16,17 +15,18 @@ from psycopg2.sql import SQL, Identifier
 import numpy as np
 
 from albion_models.solar_pv.ransac.ransac import RANSACRegressorForLIDAR, _aspect, _slope
+from albion_models.util import get_cpu_count
 
 
-def _get_cpu_count():
+def _ransac_cpu_count():
     """Use 3/4s of available CPUs for RANSAC plane detection"""
-    return int(len(os.sched_getaffinity(0)) * 0.75)
+    return int(get_cpu_count() * 0.75)
 
 
 def run_ransac(pg_uri: str,
                job_id: int,
                resolution_metres: float,
-               workers: int = _get_cpu_count(),
+               workers: int = _ransac_cpu_count(),
                building_page_size: int = 10) -> None:
 
     if count(pg_uri, tables.schema(job_id), tables.ROOF_PLANE_TABLE) > 0:
@@ -161,16 +161,12 @@ def _load(pg_uri: str, job_id: int, page: int, page_size: int):
 
 
 def _building_count(pg_uri: str, job_id: int):
-    pg_conn = connect(pg_uri, cursor_factory=psycopg2.extras.DictCursor)
-    try:
-        with pg_conn.cursor() as cursor:
-            cursor.execute(SQL("SELECT COUNT(*) FROM {buildings};").format(
-                buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
-            ))
-            pg_conn.commit()
-            return cursor.fetchone()[0]
-    finally:
-        pg_conn.close()
+    with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
+        return sql_command(
+            pg_conn,
+            "SELECT COUNT(*) FROM {buildings};",
+            buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
+            result_extractor=lambda rows: rows[0][0])
 
 
 def _save_planes(pg_uri: str, job_id: int, planes: List[dict]):

@@ -103,6 +103,7 @@ def _fix_lidar_res(filepath: str):
     """
     Scottish phase 1 LiDAR resolution is something like 1.000002, not 1. postGIS
     doesn't like that.
+    TODO write out as compressed tiffs
     """
     curr_res = gdal_helpers.get_res_unchecked(filepath)
     filename = os.path.basename(filepath)
@@ -124,4 +125,5 @@ def _fix_lidar_res(filepath: str):
 
         gdal.Warp(filepath, filepath,
                   outputBounds=(ulx, lry, lrx, uly),
-                  xRes=filename_res, yRes=filename_res)
+                  xRes=filename_res, yRes=filename_res,
+                  creationOptions=["COMPRESS=PACKBITS"])

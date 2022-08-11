@@ -17,7 +17,7 @@ def generate_rasters(pg_uri: str,
                      job_id: int,
                      solar_dir: str,
                      horizon_search_radius: int,
-                     debug_mode: bool = False) -> Tuple[str, str]:
+                     debug_mode: bool = False) -> Tuple[str, str, float]:
     """
     Generate a single geoTIFF for the entire job area, as well as rasters for
     aspect, slope and a building mask.
@@ -26,15 +26,17 @@ def generate_rasters(pg_uri: str,
     input LIDAR was in (probably 27700 E/N), but the filenames returned reference
     the 4326 rasters.
     """
-    if count(pg_uri, tables.schema(job_id), tables.LIDAR_PIXEL_TABLE) > 0:
-        logging.info("Not creating rasters, raster data already loaded.")
-        return (join(solar_dir, 'elevation_4326.tif'),
-                join(solar_dir, 'mask_4326.tif'))
 
     elevation_raster = join(solar_dir, 'elevation.tif')
     aspect_raster = join(solar_dir, 'aspect.tif')
     slope_raster = join(solar_dir, 'slope.tif')
     mask_raster = join(solar_dir, 'mask.tif')
+
+    if count(pg_uri, tables.schema(job_id), tables.LIDAR_PIXEL_TABLE) > 0:
+        logging.info("Not creating rasters, raster data already loaded.")
+        res = gdal_helpers.get_res(elevation_raster)
+        return (join(solar_dir, 'elevation_4326.tif'),
+                join(solar_dir, 'mask_4326.tif'), res)
 
     with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
         get_merged_lidar(pg_conn, job_id, elevation_raster)
@@ -78,7 +80,7 @@ def generate_rasters(pg_uri: str,
     _load_rasters_to_db(pg_uri, job_id, srid, solar_dir, elevation_raster,
                         aspect_raster, slope_raster, mask_raster, debug_mode)
 
-    return cropped_lidar_4326, mask_raster_4326
+    return cropped_lidar_4326, mask_raster_4326, res
 
 
 def _generate_4326_rasters(solar_dir: str,

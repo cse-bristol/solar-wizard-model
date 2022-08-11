@@ -3,13 +3,15 @@ import math
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Dict, Any, Tuple, List, Optional
+import multiprocessing as mp
 
 import psycopg2.extras
 from psycopg2.sql import SQL, Identifier
 
-from albion_models.db_funcs import connect, count
+from albion_models.db_funcs import count, sql_command, connection
 from albion_models.lidar.lidar import LIDAR_NODATA
 from albion_models.solar_pv import tables
+from albion_models.util import get_cpu_count
 
 
 @dataclass
@@ -68,47 +70,58 @@ class HeightAggregator:
         return None
 
 
-def check_lidar(pg_uri: str, job_id: int):
+def _lidar_check_cpu_count():
+    """Use 3/4s of available CPUs for lidar checking"""
+    return int(get_cpu_count() * 0.75)
+
+
+def check_lidar(pg_uri: str,
+                job_id: int,
+                workers: int = _lidar_check_cpu_count(),
+                page_size: int = 1000):
     """
     Check for discrepancies between OS MasterMap building polygon data and
     LiDAR data.
 
-    Currently LiDAR data is mostly from 2017 so is starting to be
+    Currently English LiDAR data is mostly from 2017 so is starting to be
     out-of-date for newly built things. In these cases, if unhandled, the LiDAR
     detects all buildings as flat (or like the ground that they were built on was) -
     or occasionally with a now-nonexistent building intersecting the polygon weirdly.
     """
-    pg_conn = connect(pg_uri, cursor_factory=psycopg2.extras.DictCursor)
-    try:
+    with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
         if _already_checked(pg_conn, job_id):
             logging.info("Already checked LiDAR coverage, skipping...")
             return
 
-        page_size = 1000
-        pages = math.ceil(count(pg_uri, tables.schema(job_id), tables.BUILDINGS_TABLE) / page_size)
-        logging.info(f"{pages} pages of size {page_size} buildings to check LiDAR coverage for")
+    pages = math.ceil(count(pg_uri, tables.schema(job_id), tables.BUILDINGS_TABLE) / page_size)
+    logging.info(f"{pages} pages of size {page_size} buildings to check LiDAR coverage for")
+    logging.info(f"Using {workers} processes for LiDAR coverage check")
 
-        for page in range(0, pages):
-            _check_lidar_page(pg_conn, job_id, page, page_size)
-    finally:
-        pg_conn.close()
+    with mp.get_context("spawn").Pool(workers) as pool:
+        wrapped_iterable = ((pg_uri, job_id, page, page_size)
+                            for page in range(0, pages))
+        for res in pool.starmap(_check_lidar_page, wrapped_iterable):
+            pass
+
+    logging.info(f"LiDAR coverage check complete")
 
 
-def _check_lidar_page(pg_conn, job_id: int, page: int, page_size: int = 1000):
-    rows = _load_building_pixels(pg_conn, job_id, page, page_size)
-    by_toid = defaultdict(HeightAggregator)
-    for row in rows:
-        by_toid[row['toid']].aggregate_row(row)
-    rows = None
+def _check_lidar_page(pg_uri: str, job_id: int, page: int, page_size: int = 1000):
+    with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
+        rows = _load_building_pixels(pg_conn, job_id, page, page_size)
+        by_toid = defaultdict(HeightAggregator)
+        for row in rows:
+            by_toid[row['toid']].aggregate_row(row)
+        rows = None
 
-    to_exclude = []
-    for toid, building in by_toid.items():
-        reason = building.exclusion_reason()
-        if reason:
-            to_exclude.append((toid, reason))
+        to_exclude = []
+        for toid, building in by_toid.items():
+            reason = building.exclusion_reason()
+            if reason:
+                to_exclude.append((toid, reason))
 
-    _write_exclusions(pg_conn, job_id, to_exclude)
-    logging.info(f"Checked page {page} of LiDAR")
+        _write_exclusions(pg_conn, job_id, to_exclude)
+        print(f"Checked page {page} of LiDAR")
 
 
 def _write_exclusions(pg_conn, job_id: int, to_exclude: List[Tuple[str, str]]):
@@ -128,50 +141,50 @@ def _write_exclusions(pg_conn, job_id: int, to_exclude: List[Tuple[str, str]]):
 
 
 def _load_building_pixels(pg_conn, job_id: int, page: int, page_size: int = 1000):
-    with pg_conn.cursor() as cursor:
-        cursor.execute(SQL("""
-            WITH building_page AS (
-                SELECT b.toid, b.geom_27700
-                FROM {buildings} b
-                ORDER BY b.toid
-                OFFSET %(offset)s LIMIT %(limit)s
-            )
-            SELECT
-                h.pixel_id,
-                h.elevation,
-                b.toid,
-                ST_Contains(b.geom_27700, h.en) AS within_building,
-                h.toid IS NULL AS without_building,
-                hh.height
-            FROM building_page b
-            LEFT JOIN mastermap.height hh ON b.toid = hh.toid
-            LEFT JOIN {lidar_pixels} h ON ST_Contains(ST_Buffer(b.geom_27700, 1), h.en)
-            WHERE h.elevation != %(lidar_nodata)s
-            ORDER BY b.toid;
-            """).format(
-            lidar_pixels=Identifier(tables.schema(job_id), tables.LIDAR_PIXEL_TABLE),
-            buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
-        ), {
+    return sql_command(
+        pg_conn,
+        """
+        WITH building_page AS (
+            SELECT b.toid, b.geom_27700
+            FROM {buildings} b
+            ORDER BY b.toid
+            OFFSET %(offset)s LIMIT %(limit)s
+        )
+        SELECT
+            h.pixel_id,
+            h.elevation,
+            b.toid,
+            ST_Contains(b.geom_27700, h.en) AS within_building,
+            h.toid IS NULL AS without_building,
+            hh.height
+        FROM building_page b
+        LEFT JOIN mastermap.height hh ON b.toid = hh.toid
+        LEFT JOIN {lidar_pixels} h ON ST_Contains(ST_Buffer(b.geom_27700, 1), h.en)
+        WHERE h.elevation != %(lidar_nodata)s
+        ORDER BY b.toid;
+        """,
+        {
             "offset": page * page_size,
             "limit": page_size,
             "lidar_nodata": LIDAR_NODATA,
-        })
-        pg_conn.commit()
-        return cursor.fetchall()
+        },
+        lidar_pixels=Identifier(tables.schema(job_id), tables.LIDAR_PIXEL_TABLE),
+        buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
+        result_extractor=lambda rows: rows)
 
 
 def _already_checked(pg_conn, job_id: int) -> bool:
-    with pg_conn.cursor() as cursor:
-        cursor.execute(
-            SQL("""
-                SELECT COUNT(*) != 0 FROM {building_exclusion_reasons}
-                WHERE exclusion_reason IS NOT NULL
-            """).format(
-                building_exclusion_reasons=Identifier(tables.schema(job_id),
-                                                      tables.BUILDING_EXCLUSION_REASONS_TABLE),
-            ))
-        pg_conn.commit()
-        return cursor.fetchone()[0]
+    return sql_command(
+        pg_conn,
+        """
+        SELECT COUNT(*) != 0 
+        FROM {building_exclusion_reasons}
+        WHERE exclusion_reason IS NOT NULL
+        """,
+        building_exclusion_reasons=Identifier(tables.schema(job_id),
+                                              tables.BUILDING_EXCLUSION_REASONS_TABLE),
+        result_extractor=lambda rows: rows[0][0]
+    )
 
 
 if __name__ == '__main__':
