@@ -37,7 +37,7 @@ def _write_results_to_db(pg_conn,
     #  See albion_models.solar_pv.rasters._load_rasters_to_db() and the post-load SQL it calls
     #  for the basic approach to loading/combining rasters
     #  On the various fields that we currently get as output from PVGIS:
-    #  * we don't need the monthly kWh values, just the yearly (total_avg_energy_prod_kwh_per_year)
+    #  * we also need the monthly kWh values
     #  * we don't use the various loss values (aoi_loss, spectral_loss, temp_irr_loss, total_loss)
     #    but it would be good to know they're still being applied to the total - see section 4 of pvmaps pdf
     #    The HTTP API takes a loss parameter too which we set to the recommended value of 14, this probably needs applying manually

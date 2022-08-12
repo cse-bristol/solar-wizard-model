@@ -49,10 +49,7 @@ def run_ransac(pg_uri: str,
 
 
 def _handle_building_page(pg_uri: str, job_id: int, page: int, page_size: int, resolution_metres: float):
-    rows = _load(pg_uri, job_id, page, page_size)
-    by_toid = defaultdict(list)
-    for row in rows:
-        by_toid[row['toid']].append(row)
+    by_toid = _load(pg_uri, job_id, page, page_size)
 
     planes = []
     for toid, building in by_toid.items():
@@ -127,37 +124,39 @@ def _load(pg_uri: str, job_id: int, page: int, page_size: int):
     buildings rather than pixels to prevent splitting a building's pixels across
     pages.
     """
-    pg_conn = connect(pg_uri, cursor_factory=psycopg2.extras.DictCursor)
-    try:
-        with pg_conn.cursor() as cursor:
-            cursor.execute(SQL("""
-                WITH building_page AS (
-                    SELECT b.toid, b.geom_27700
-                    FROM
-                        {buildings} b
-                        LEFT JOIN {building_exclusion_reasons} ber ON b.toid = ber.toid
-                    WHERE ber.exclusion_reason IS NULL
-                    ORDER BY b.toid
-                    OFFSET %(offset)s LIMIT %(limit)s
-                )
-                SELECT h.pixel_id, h.easting, h.northing, h.elevation, h.aspect, b.toid
-                FROM building_page b
-                LEFT JOIN {lidar_pixels} h ON h.toid = b.toid
-                WHERE h.elevation != %(lidar_nodata)s
-                ORDER BY b.toid;
-                """).format(
-                lidar_pixels=Identifier(tables.schema(job_id), tables.LIDAR_PIXEL_TABLE),
-                buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
-                building_exclusion_reasons=Identifier(tables.schema(job_id), tables.BUILDING_EXCLUSION_REASONS_TABLE)
-            ), {
+    with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
+        rows = sql_command(
+            pg_conn,
+            """
+            WITH building_page AS (
+                SELECT b.toid, b.geom_27700
+                FROM
+                    {buildings} b
+                    LEFT JOIN {building_exclusion_reasons} ber ON b.toid = ber.toid
+                WHERE ber.exclusion_reason IS NULL
+                ORDER BY b.toid
+                OFFSET %(offset)s LIMIT %(limit)s
+            )
+            SELECT h.pixel_id, h.easting, h.northing, h.elevation, h.aspect, b.toid
+            FROM building_page b
+            LEFT JOIN {lidar_pixels} h ON h.toid = b.toid
+            WHERE h.elevation != %(lidar_nodata)s
+            ORDER BY b.toid;
+            """,
+            {
                 "offset": page * page_size,
                 "limit": page_size,
                 "lidar_nodata": LIDAR_NODATA,
-            })
-            pg_conn.commit()
-            return cursor.fetchall()
-    finally:
-        pg_conn.close()
+            },
+            lidar_pixels=Identifier(tables.schema(job_id), tables.LIDAR_PIXEL_TABLE),
+            buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
+            building_exclusion_reasons=Identifier(tables.schema(job_id), tables.BUILDING_EXCLUSION_REASONS_TABLE),
+            result_extractor=lambda res: res)
+
+        by_toid = defaultdict(list)
+        for row in rows:
+            by_toid[row['toid']].append(row)
+        return by_toid
 
 
 def _building_count(pg_uri: str, job_id: int):
@@ -173,65 +172,56 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[dict]):
     if len(planes) == 0:
         return
 
-    pg_conn = connect(pg_uri)
     plane_inliers = []
     for plane in planes:
         plane_inliers.append(plane['inliers'])
         del plane['inliers']
 
-    try:
-        with pg_conn.cursor() as cursor:
-            plane_ids = psycopg2.extras.execute_values(cursor, SQL("""
-                INSERT INTO {roof_planes} (toid, x_coef, y_coef, intercept, slope, aspect, sd)
-                VALUES %s
-                RETURNING roof_plane_id;
-            """).format(
-                roof_planes=Identifier(tables.schema(job_id), tables.ROOF_PLANE_TABLE),
-            ), argslist=planes, fetch=True,
-                template="(%(toid)s, %(x_coef)s, %(y_coef)s, %(intercept)s, %(slope)s, %(aspect)s, %(sd)s)")
+    with connection(pg_uri) as pg_conn, pg_conn.cursor() as cursor:
+        plane_ids = psycopg2.extras.execute_values(cursor, SQL("""
+            INSERT INTO {roof_planes} (toid, x_coef, y_coef, intercept, slope, aspect, sd)
+            VALUES %s
+            RETURNING roof_plane_id;
+        """).format(
+            roof_planes=Identifier(tables.schema(job_id), tables.ROOF_PLANE_TABLE),
+        ), argslist=planes, fetch=True,
+            template="(%(toid)s, %(x_coef)s, %(y_coef)s, %(intercept)s, %(slope)s, %(aspect)s, %(sd)s)")
 
-            pixel_plane_data = []
-            for i in range(0, len(plane_ids)):
-                plane_id = plane_ids[i][0]
-                for pixel_id in plane_inliers[i]:
-                    pixel_plane_data.append((int(pixel_id), plane_id))
+        pixel_plane_data = []
+        for i in range(0, len(plane_ids)):
+            plane_id = plane_ids[i][0]
+            for pixel_id in plane_inliers[i]:
+                pixel_plane_data.append((int(pixel_id), plane_id))
 
-            psycopg2.extras.execute_values(cursor, SQL("""
-                UPDATE {pixel_horizons}
-                SET roof_plane_id = data.roof_plane_id
-                FROM (VALUES %s) AS data (pixel_id, roof_plane_id)
-                WHERE {pixel_horizons}.pixel_id = data.pixel_id;
-            """).format(
-                pixel_horizons=Identifier(tables.schema(job_id), tables.LIDAR_PIXEL_TABLE),
-            ), argslist=pixel_plane_data)
-            pg_conn.commit()
-    finally:
-        pg_conn.close()
+        psycopg2.extras.execute_values(cursor, SQL("""
+            UPDATE {pixel_horizons}
+            SET roof_plane_id = data.roof_plane_id
+            FROM (VALUES %s) AS data (pixel_id, roof_plane_id)
+            WHERE {pixel_horizons}.pixel_id = data.pixel_id;
+        """).format(
+            pixel_horizons=Identifier(tables.schema(job_id), tables.LIDAR_PIXEL_TABLE),
+        ), argslist=pixel_plane_data)
+        pg_conn.commit()
 
 
 def _mark_buildings_with_no_planes(pg_uri: str, job_id: int):
-    pg_conn = connect(pg_uri)
-    try:
-        with pg_conn.cursor() as cursor:
-            # TODO this is also picking up things with no LiDAR coverage - need
-            #  to change it so that it checks for at least one pixel whose value is not -9999.
-            #  Update:
-            #  I think this is resolved now (as previously nodata pixels were not being loaded
-            #  in to the db - now they are), due to not using SAGA any more. Need to test!
-            cursor.execute(SQL("""
-                UPDATE {building_exclusion_reasons} ber
-                SET exclusion_reason = 'NO_ROOF_PLANES_DETECTED'
-                WHERE
-                    NOT EXISTS (SELECT FROM {roof_planes} rp WHERE rp.toid = ber.toid)
-                    AND ber.exclusion_reason IS NULL
-            """).format(
-                roof_planes=Identifier(tables.schema(job_id), tables.ROOF_PLANE_TABLE),
-                building_exclusion_reasons=Identifier(tables.schema(job_id),
-                                                      tables.BUILDING_EXCLUSION_REASONS_TABLE),
-            ))
-            pg_conn.commit()
-    finally:
-        pg_conn.close()
+    with connection(pg_uri) as pg_conn:
+        # TODO this is also picking up things with no LiDAR coverage
+        #  Update:
+        #  I think this is resolved now (as previously nodata pixels were not being loaded
+        #  in to the db - now they are), due to not using SAGA any more. Need to test!
+        sql_command(
+            pg_conn,
+            """
+            UPDATE {building_exclusion_reasons} ber
+            SET exclusion_reason = 'NO_ROOF_PLANES_DETECTED'
+            WHERE
+                NOT EXISTS (SELECT FROM {roof_planes} rp WHERE rp.toid = ber.toid)
+                AND ber.exclusion_reason IS NULL
+            """,
+            roof_planes=Identifier(tables.schema(job_id), tables.ROOF_PLANE_TABLE),
+            building_exclusion_reasons=Identifier(tables.schema(job_id),
+                                                  tables.BUILDING_EXCLUSION_REASONS_TABLE))
 
 # if __name__ == '__main__':
 #     _handle_building_page(

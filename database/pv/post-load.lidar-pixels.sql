@@ -11,6 +11,8 @@ UPDATE {lidar_pixels} lp SET slope = s.slope
 FROM {slope_pixels} s
 WHERE lp.easting = s.easting AND lp.northing = s.northing;
 
+UPDATE {lidar_pixels} lp SET aspect = -9999 WHERE elevation = -9999;
+
 DROP TABLE {aspect_pixels};
 DROP TABLE {slope_pixels};
 DROP INDEX {schema}.lidar_pixels_temp_idx;
