@@ -77,7 +77,7 @@ def generate_rasters(pg_uri: str,
         solar_dir, srid, elevation_raster, mask_raster)
 
     logging.info("Loading raster data...")
-    _load_rasters_to_db(pg_uri, job_id, srid, solar_dir, elevation_raster,
+    _load_rasters_to_db(pg_uri, job_id, srid, res, solar_dir, elevation_raster,
                         aspect_raster, slope_raster, mask_raster, debug_mode)
 
     return cropped_lidar_4326, mask_raster_4326, res
@@ -109,6 +109,7 @@ def _generate_4326_rasters(solar_dir: str,
 def _load_rasters_to_db(pg_uri: str,
                         job_id: int,
                         srid: int,
+                        res: float,
                         solar_dir: str,
                         cropped_lidar: str,
                         aspect_raster: str,
@@ -138,7 +139,8 @@ def _load_rasters_to_db(pg_uri: str,
             aspect_pixels=Identifier(schema, "aspect_pixels"),
             slope_pixels=Identifier(schema, "slope_pixels"),
             buildings=Identifier(schema, tables.BUILDINGS_TABLE),
-            srid=Literal(srid)
+            srid=Literal(srid),
+            res=Literal(res),
         )
 
 

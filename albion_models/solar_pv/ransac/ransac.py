@@ -16,6 +16,16 @@ from sklearn.exceptions import ConvergenceWarning
 from albion_models.solar_pv.ransac.perimeter import perimeter_crofton
 
 
+class RANSACValueError(ValueError):
+    """
+    So we can treat when the RANSAC regressor has failed intentionally differently
+    from unintentionally thrown ValueErrors due to bugs.
+
+    Not sure I like this use of exceptions but it's inherited from sklearn.
+    """
+    pass
+
+
 class RANSACRegressorForLIDAR(RANSACRegressor):
 
     def __init__(self, base_estimator=None, *,
@@ -40,7 +50,10 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
                  min_thinness_ratio=0.55,
                  max_area_for_thinness_test=25,
                  max_num_groups=20,
-                 max_group_area_ratio_to_largest=0.02):
+                 max_group_area_ratio_to_largest=0.02,
+                 flat_roof_threshold_degrees=5,
+                 max_aspect_circular_mean_degrees=90,
+                 max_aspect_circular_sd=1.5):
         """
         :param min_points_per_plane_perc: min points per plane as a percentage of total
         points that fall within the building bounds. Default 0.8% (0.008). This will
@@ -77,7 +90,12 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
         self.max_area_for_thinness_test = max_area_for_thinness_test
         self.max_num_groups = max_num_groups
         self.max_group_area_ratio_to_largest = max_group_area_ratio_to_largest
+        self.flat_roof_threshold_degrees = flat_roof_threshold_degrees
+        self.max_aspect_circular_mean_degrees = max_aspect_circular_mean_degrees
+        self.max_aspect_circular_sd = max_aspect_circular_sd
+
         self.sd = None
+        self.plane_properties = {}
         self.resolution_metres = resolution_metres
 
     def fit(self, X, y,
@@ -128,6 +146,8 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
         This only extracts one plane at a time so should be re-run until it can't find
         any more, with the points in the found plane removed from the next round's input.
 
+        TODO debug logging of plane rejection reasons - e.g. why did it only find 2 planes for osgb1000002494282290 once?
+        TODO random seed saving / logging for reproducibility
         """
         # Need to validate separately here.
         # We can't pass multi_ouput=True because that would allow y to be csr.
@@ -149,18 +169,18 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
             min_samples = np.ceil(self.min_samples * X.shape[0])
         elif self.min_samples >= 1:
             if self.min_samples % 1 != 0:
-                raise ValueError("Absolute number of samples must be an "
+                raise RANSACValueError("Absolute number of samples must be an "
                                  "integer value.")
             min_samples = self.min_samples
         else:
-            raise ValueError("Value for `min_samples` must be scalar and "
+            raise RANSACValueError("Value for `min_samples` must be scalar and "
                              "positive.")
         if min_samples > X.shape[0]:
-            raise ValueError("`min_samples` may not be larger than number "
+            raise RANSACValueError("`min_samples` may not be larger than number "
                              "of samples: n_samples = %d." % (X.shape[0]))
 
         if self.stop_probability < 0 or self.stop_probability > 1:
-            raise ValueError("`stop_probability` must be in range [0, 1].")
+            raise RANSACValueError("`stop_probability` must be in range [0, 1].")
 
         if self.residual_threshold is None:
             # MAD (median absolute deviation)
@@ -186,7 +206,7 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
             loss_function = self.loss
 
         else:
-            raise ValueError(
+            raise RANSACValueError(
                 "loss should be 'absolute_loss', 'squared_loss' or a callable."
                 "Got %s. " % self.loss)
 
@@ -202,9 +222,9 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
         estimator_name = type(base_estimator).__name__
         if (sample_weight is not None and not
                 estimator_fit_has_sample_weight):
-            raise ValueError("%s does not support sample_weight. Samples"
-                             " weights are only used for the calibration"
-                             " itself." % estimator_name)
+            raise RANSACValueError("%s does not support sample_weight. Samples"
+                                   " weights are only used for the calibration"
+                                   " itself." % estimator_name)
         if sample_weight is not None:
             sample_weight = _check_sample_weight(sample_weight, X)
 
@@ -307,6 +327,27 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
             # for score
             sd = np.std(residuals_subset[inlier_mask_subset])
 
+            # RANSAC for LIDAR addition:
+            # if difference between circular mean of pixel aspects and slope aspect is too high:
+            # if circular deviation of pixel aspects too high:
+            if slope > self.flat_roof_threshold_degrees:
+                aspect_inliers = np.radians(aspect[inlier_mask_subset])
+                plane_aspect = _aspect_rad(base_estimator.coef_[0], base_estimator.coef_[1])
+                aspect_circ_mean = _circular_mean(aspect_inliers)
+                aspect_diff = _rad_diff(plane_aspect, aspect_circ_mean)
+                if aspect_diff > math.radians(self.max_aspect_circular_mean_degrees):
+                    bad_samples.add(tuple(subset_idxs))
+                    continue
+
+                aspect_circ_sd = _circular_sd(aspect_inliers)
+                if aspect_circ_sd > self.max_aspect_circular_sd:
+                    bad_samples.add(tuple(subset_idxs))
+                    continue
+                # sd = aspect_circ_sd
+            else:
+                aspect_circ_sd = None
+                aspect_circ_mean = None
+
             # same number of inliers but worse score -> skip current random
             # sample
             # if (n_inliers_subset == n_inliers_best
@@ -341,6 +382,10 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
             # save current random sample as best sample
             n_inliers_best = n_inliers_subset
             sd_best = sd
+            plane_properties_best = {
+                "aspect_circ_mean": math.degrees(aspect_circ_mean) if aspect_circ_mean else None,
+                "aspect_circ_sd": aspect_circ_sd,
+            }
             inlier_mask_best = inlier_mask_subset
             X_inlier_best = X_inlier_subset
             y_inlier_best = y_inlier_subset
@@ -359,14 +404,14 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
         if inlier_mask_best is None:
             if ((self.n_skips_no_inliers_ + self.n_skips_invalid_data_ +
                     self.n_skips_invalid_model_) > self.max_skips):
-                raise ValueError(
+                raise RANSACValueError(
                     "RANSAC skipped more iterations than `max_skips` without"
                     " finding a valid consensus set. Iterations were skipped"
                     " because each randomly chosen sub-sample failed the"
                     " passing criteria. See estimator attributes for"
                     " diagnostics (n_skips*).")
             else:
-                raise ValueError(
+                raise RANSACValueError(
                     "RANSAC could not find a valid consensus set. All"
                     " `max_trials` iterations were skipped because each"
                     " randomly chosen sub-sample failed the passing criteria."
@@ -399,6 +444,7 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
         self.estimator_ = base_estimator
         self.inlier_mask_ = mask_without_excluded
         self.sd = sd_best
+        self.plane_properties = plane_properties_best
         return self
 
 
@@ -416,6 +462,58 @@ def _aspect(a: float, b: float) -> float:
     in degrees from North.
     """
     return _to_positive_angle(math.degrees(math.atan2(b, -a) + (math.pi / 2)))
+
+
+def _aspect_rad(a: float, b: float) -> float:
+    """
+    Return the aspect of a plane defined by the X coefficient a  and the Y coefficient b,
+    in radians between 0 and 2pi
+    """
+    a = math.atan2(b, -a) + (math.pi / 2)
+    return a if a >= 0 else a + (2 * math.pi)
+
+
+def _circular_mean(pop):
+    """
+    Circular mean of a population of radians.
+    Assumes radians between 0 and 2pi (might work with other ranges, not tested)
+    Returns a value between 0 and 2pi.
+    """
+    cm = math.atan2(np.mean(np.sin(pop)), np.mean(np.cos(pop)))
+    return cm if cm >= 0 else cm + (2 * math.pi)
+
+
+def _circular_sd(pop):
+    """
+    Circular standard deviation of a population of radians.
+    Assumes radians between 0 and 2pi (might work with other ranges, not tested).
+
+    See https://en.wikipedia.org/wiki/Directional_statistics#Measures_of_location_and_spread
+    """
+    return math.sqrt(-2 * math.log(
+        math.sqrt(sum(np.sin(pop)) ** 2 +
+                  sum(np.cos(pop)) ** 2) /
+        len(pop)))
+
+
+def _circular_variance(pop):
+    """
+    Circular variance of a population of radians.
+    Assumes radians between 0 and 2pi (might work with other ranges, not tested).
+
+    See https://en.wikipedia.org/wiki/Directional_statistics#Measures_of_location_and_spread
+    """
+    return 1 - (math.sqrt(sum(np.sin(pop)) ** 2 +
+                          sum(np.cos(pop)) ** 2) /
+                len(pop))
+
+
+def _rad_diff(r1, r2):
+    """
+    Smallest difference between radians.
+    Assumes radians between 0 and 2pi. Will return a positive number.
+    """
+    return min(abs(r1 - r2), (2 * math.pi) - abs(r1 - r2))
 
 
 def _to_positive_angle(angle):
@@ -523,7 +621,7 @@ def _sample(n_samples, min_samples, random_state, aspect):
         chosen = np.random.choice(choose_from, min_samples - 1)
         return np.append([initial_sample], chosen)
 
-    raise ValueError("Cannot find initial sample with aspect similarity")
+    raise RANSACValueError("Cannot find initial sample with aspect similarity")
 
 
 def _group_areas(groups) -> dict:

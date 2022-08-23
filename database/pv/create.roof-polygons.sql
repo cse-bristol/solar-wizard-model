@@ -19,11 +19,6 @@ SELECT
     p.intercept,
     p.slope,
     p.aspect,
---    atan2d(avg(sind(aspect)), avg(cosd(aspect))) AS circular_mean,
---    sqrt(-2 * log(sqrt(
---        sum(sind(h.aspect))^2 +
---        sum(cosd(h.aspect))^2)
---    / count(h.aspect))) AS circular_sd,
     p.sd,
     (count(*) * %(resolution)s * %(resolution)s) / cos(radians(p.slope)) AS raw_area,
     (count(*) * %(resolution)s * %(resolution)s) AS raw_footprint,

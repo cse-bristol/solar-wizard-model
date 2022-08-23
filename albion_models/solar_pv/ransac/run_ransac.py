@@ -14,7 +14,8 @@ import psycopg2.extras
 from psycopg2.sql import SQL, Identifier
 import numpy as np
 
-from albion_models.solar_pv.ransac.ransac import RANSACRegressorForLIDAR, _aspect, _slope
+from albion_models.solar_pv.ransac.ransac import RANSACRegressorForLIDAR, _aspect, \
+    _slope, RANSACValueError
 from albion_models.util import get_cpu_count
 
 
@@ -107,12 +108,14 @@ def _ransac_building(pixels_in_building: List[dict],
                 "aspect": _aspect(a, b),
                 "inliers": pixel_ids[inlier_mask],
                 "sd": ransac.sd,
+                "aspect_circ_mean": ransac.plane_properties["aspect_circ_mean"],
+                "aspect_circ_sd": ransac.plane_properties["aspect_circ_sd"],
             })
 
             xyz = xyz[outlier_mask]
             aspect = aspect[outlier_mask]
             pixel_ids = pixel_ids[outlier_mask]
-        except ValueError:
+        except RANSACValueError:
             break
 
     return planes

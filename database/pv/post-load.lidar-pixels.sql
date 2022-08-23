@@ -38,5 +38,19 @@ SET toid = (
     WHERE ST_Distance(nearest.geom_27700, en) <= 0
 );
 
+-- Add some more pixels that almost fully intersect the buildings:
+UPDATE {lidar_pixels}
+SET toid = (
+    SELECT toid
+    FROM (
+        SELECT b.geom_27700, b.toid
+        FROM {buildings} b
+        ORDER BY b.geom_27700 <-> en
+        LIMIT 1
+    ) nearest
+    WHERE ST_Distance(nearest.geom_27700, en) <= {res} / 4
+)
+WHERE toid IS NULL;
+
 CREATE INDEX ON {lidar_pixels} (roof_plane_id);
 CREATE INDEX ON {lidar_pixels} (toid);
