@@ -58,9 +58,8 @@ def _handle_building_page(pg_uri: str, job_id: int, page: int, page_size: int, r
         if len(found) > 0:
             planes.extend(found)
         elif len(building) > 1000:
-            # Retry with relaxed constraints around group checks and with a higher
-            # `max_trials` for larger buildings where we care more:
-            found = _ransac_building(building, toid, resolution_metres, max_trials=3000, include_group_checks=False)
+            # Retry with relaxed constraints around group checks:
+            found = _ransac_building(building, toid, resolution_metres, include_group_checks=False)
             planes.extend(found)
 
     _save_planes(pg_uri, job_id, planes)
@@ -70,11 +69,16 @@ def _handle_building_page(pg_uri: str, job_id: int, page: int, page_size: int, r
 def _ransac_building(pixels_in_building: List[dict],
                      toid: str,
                      resolution_metres: float,
-                     max_trials: int = 1000,
-                     include_group_checks: bool = True) -> List[dict]:
+                     include_group_checks: bool = True,
+                     debug: bool = False) -> List[dict]:
     xyz = np.array([[pixel["easting"], pixel["northing"], pixel["elevation"]] for pixel in pixels_in_building])
     aspect = np.array([pixel["aspect"] for pixel in pixels_in_building])
     pixel_ids = np.array([pixel["pixel_id"] for pixel in pixels_in_building])
+
+    if len(pixels_in_building) > 1000:
+        max_trials = len(pixels_in_building) + 500
+    else:
+        max_trials = 1000
 
     planes = []
     min_points_per_plane = 8
@@ -93,7 +97,8 @@ def _ransac_building(pixels_in_building: List[dict],
             ransac.fit(XY, Z,
                        aspect=aspect,
                        total_points_in_building=total_points_in_building,
-                       include_group_checks=include_group_checks)
+                       include_group_checks=include_group_checks,
+                       debug=debug)
             inlier_mask = ransac.inlier_mask_
             outlier_mask = np.logical_not(inlier_mask)
             a, b = ransac.estimator_.coef_
@@ -115,7 +120,11 @@ def _ransac_building(pixels_in_building: List[dict],
             xyz = xyz[outlier_mask]
             aspect = aspect[outlier_mask]
             pixel_ids = pixel_ids[outlier_mask]
-        except RANSACValueError:
+        except RANSACValueError as e:
+            if debug:
+                print("No plane found - received RANSACValueError:")
+                print(e)
+                print("")
             break
 
     return planes

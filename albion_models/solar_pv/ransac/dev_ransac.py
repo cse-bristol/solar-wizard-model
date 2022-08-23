@@ -23,17 +23,18 @@ def ransac_toid(pg_uri: str, job_id: int, toid: str, resolution_metres: float, o
     os.makedirs(out_dir, exist_ok=True)
 
     toid, building = _load_toid(pg_uri, job_id, toid)
-    planes = _ransac_building(building, toid, resolution_metres)
+    planes = _ransac_building(building, toid, resolution_metres, debug=True)
     if len(planes) == 0 and len(building) > 1000:
-        # Retry with relaxed constraints around group checks and with a higher
-        # `max_trials` for larger buildings where we care more:
-        planes = _ransac_building(building, toid, resolution_metres, max_trials=3000,
-                                  include_group_checks=False)
-
-    for plane in planes:
-        print(f'toid {plane["toid"]} slope {plane["slope"]} aspect {plane["aspect"]} sd {plane["sd"]} inliers {len(plane["inliers"])}')
+        # Retry with relaxed constraints around group checks:
+        print("retrying with relaxed plane morphology checks:")
+        planes = _ransac_building(building, toid, resolution_metres,
+                                  include_group_checks=False,
+                                  debug=True)
 
     if len(planes) > 0:
+        print("RANSAC: all planes:")
+        for plane in planes:
+            print(f'toid {plane["toid"]} slope {plane["slope"]} aspect {plane["aspect"]} sd {plane["sd"]} inliers {len(plane["inliers"])}')
         _write_planes(toid, resolution_metres, out_dir, building, planes)
     else:
         print("No planes to write, not creating geoJSON")
@@ -182,6 +183,6 @@ if __name__ == "__main__":
     ransac_toid(
         "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion?application_name=blah",
         1194,
-        "osgb1000020074938",
+        "osgb1000002494282290",
         1.0,
         "/home/neil/data/albion-models/ransac")

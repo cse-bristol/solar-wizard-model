@@ -1,3 +1,5 @@
+from collections import defaultdict
+
 import numpy as np
 import warnings
 import math
@@ -102,7 +104,8 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
             sample_weight=None,
             aspect=None,
             total_points_in_building: int = None,
-            include_group_checks: bool = True):
+            include_group_checks: bool = True,
+            debug: bool = False):
         """
         Extended implementation of RANSAC with additions for usage with LIDAR
         to detect roof planes.
@@ -145,9 +148,6 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
 
         This only extracts one plane at a time so should be re-run until it can't find
         any more, with the points in the found plane removed from the next round's input.
-
-        TODO debug logging of plane rejection reasons - e.g. why did it only find 2 planes for osgb1000002494282290 once?
-        TODO random seed saving / logging for reproducibility
         """
         # Need to validate separately here.
         # We can't pass multi_ouput=True because that would allow y to be csr.
@@ -211,6 +211,9 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
                 "Got %s. " % self.loss)
 
         random_state = check_random_state(self.random_state)
+        # commented out, seed is enormous:
+        # if debug:
+        #     print(f"random state: {random_state.get_state()}")
 
         try:  # Not all estimator accept a random_state
             base_estimator.set_params(random_state=random_state)
@@ -232,6 +235,8 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
         min_X = [np.amin(X[:, 0]), np.amin(X[:, 1])]
         sd_best = np.inf
         bad_samples = set()
+        if debug:
+            bad_sample_reasons = defaultdict(int)
 
         n_inliers_best = 1
         score_best = -np.inf
@@ -261,6 +266,8 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
 
             # RANSAC for LIDAR addition:
             if tuple(subset_idxs) in bad_samples:
+                if debug:
+                    bad_sample_reasons["ALREADY_SAMPLED"] += 1
                 continue
 
             X_subset = X[subset_idxs]
@@ -270,6 +277,8 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
             if (self.is_data_valid is not None
                     and not self.is_data_valid(X_subset, y_subset)):
                 self.n_skips_invalid_data_ += 1
+                if debug:
+                    bad_sample_reasons["INVALID"] += 1
                 continue
 
             # fit model for current random sample set
@@ -283,16 +292,22 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
             slope = _slope(base_estimator.coef_[0], base_estimator.coef_[1])
             if self.max_slope and slope > self.max_slope:
                 bad_samples.add(tuple(subset_idxs))
+                if debug:
+                    bad_sample_reasons["MAX_SLOPE"] += 1
                 continue
             # RANSAC for LIDAR addition: if slope too shallow ...
             if self.min_slope and slope < self.min_slope:
                 bad_samples.add(tuple(subset_idxs))
+                if debug:
+                    bad_sample_reasons["MIN_SLOPE"] += 1
                 continue
 
             # check if estimated model is valid
             if (self.is_model_valid is not None and not
                     self.is_model_valid(base_estimator, X_subset, y_subset)):
                 self.n_skips_invalid_model_ += 1
+                if debug:
+                    bad_sample_reasons["MODEL_INVALID"] += 1
                 continue
 
             # residuals of all data for current random sample model
@@ -313,6 +328,8 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
             if n_inliers_subset < self.min_points_per_plane:
                 bad_samples.add(tuple(subset_idxs))
                 self.n_skips_no_inliers_ += 1
+                if debug:
+                    bad_sample_reasons["MIN_POINTS_PER_PLANE"] += 1
                 continue
 
             # extract inlier data set
@@ -337,11 +354,15 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
                 aspect_diff = _rad_diff(plane_aspect, aspect_circ_mean)
                 if aspect_diff > math.radians(self.max_aspect_circular_mean_degrees):
                     bad_samples.add(tuple(subset_idxs))
+                    if debug:
+                        bad_sample_reasons["CIRCULAR_MEAN"] += 1
                     continue
 
                 aspect_circ_sd = _circular_sd(aspect_inliers)
                 if aspect_circ_sd > self.max_aspect_circular_sd:
                     bad_samples.add(tuple(subset_idxs))
+                    if debug:
+                        bad_sample_reasons["CIRCULAR_SD"] += 1
                     continue
                 # sd = aspect_circ_sd
             else:
@@ -358,6 +379,8 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
             # See Tarsha-Kurdi, 2007
             if sd > sd_best or (sd == sd_best and n_inliers_subset <= n_inliers_best):
                 bad_samples.add(tuple(subset_idxs))
+                if debug:
+                    bad_sample_reasons["WORSE_SD"] += 1
                 continue
 
             # RANSAC for LIDAR addition: if inliers form multiple groups, reject
@@ -377,6 +400,8 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
                                         include_group_checks=include_group_checks,
                                         res=self.resolution_metres):
                 bad_samples.add(tuple(subset_idxs))
+                if debug:
+                    bad_sample_reasons["PLANE_MORPHOLOGY"] += 1
                 continue
 
             # save current random sample as best sample
@@ -391,14 +416,32 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
             y_inlier_best = y_inlier_subset
             inlier_best_idxs_subset = inlier_idxs_subset
 
-            max_trials = min(
-                max_trials,
-                _dynamic_max_trials(n_inliers_best, n_samples,
-                                    min_samples, self.stop_probability))
+            # RANSAC for LiDAR addition:
+            # I've disabled the dynamic max_trials thing as it's based on proportion of
+            # inliers to outliers, which isn't the metric we care about. We could potentially
+            # have another version that uses SD to predict how close we are to having a good
+            # plane - or just have a min threshold SD where we say we're automatically happy.
+            #
+            # max_trials = min(
+            #     max_trials,
+            #     _dynamic_max_trials(n_inliers_best, n_samples,
+            #                         min_samples, self.stop_probability))
+            if debug:
+                print(f"new best SD plane found. SD {sd_best}. Current trial: {self.n_trials_}")
 
             # break if sufficient number of inliers
             if n_inliers_best >= self.stop_n_inliers:
                 break
+
+        if debug:
+            print("RANSAC finished.")
+
+            print("Planes were rejected for the following reasons:")
+            total = 0
+            for rejection_reason, count in bad_sample_reasons.items():
+                print(f"{rejection_reason}: {count}")
+                total += count
+            print(f"total rejected: {total}. max trials: {max_trials}")
 
         # if none of the iterations met the required criteria
         if inlier_mask_best is None:
@@ -445,6 +488,11 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
         self.inlier_mask_ = mask_without_excluded
         self.sd = sd_best
         self.plane_properties = plane_properties_best
+
+        if debug:
+            a, b = self.estimator_.coef_
+            print(f"plane found: slope {_slope(a, b)} aspect {_aspect(a, b)} sd {self.sd}")
+            print("")
         return self
 
 
