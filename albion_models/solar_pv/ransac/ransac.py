@@ -344,6 +344,20 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
             # for score
             sd = np.std(residuals_subset[inlier_mask_subset])
 
+            # same number of inliers but worse score -> skip current random
+            # sample
+            # if (n_inliers_subset == n_inliers_best
+            #         and score_subset < score_best):
+            #     continue
+            # RANSAC for LIDAR addition: use stddev of inlier distance to plane
+            # as score instead
+            # See Tarsha-Kurdi, 2007
+            if sd > sd_best or (sd == sd_best and n_inliers_subset <= n_inliers_best):
+                bad_samples.add(tuple(subset_idxs))
+                if debug:
+                    bad_sample_reasons["WORSE_SD"] += 1
+                continue
+
             # RANSAC for LIDAR addition:
             # if difference between circular mean of pixel aspects and slope aspect is too high:
             # if circular deviation of pixel aspects too high:
@@ -364,24 +378,9 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
                     if debug:
                         bad_sample_reasons["CIRCULAR_SD"] += 1
                     continue
-                # sd = aspect_circ_sd
             else:
                 aspect_circ_sd = None
                 aspect_circ_mean = None
-
-            # same number of inliers but worse score -> skip current random
-            # sample
-            # if (n_inliers_subset == n_inliers_best
-            #         and score_subset < score_best):
-            #     continue
-            # RANSAC for LIDAR addition: use stddev of inlier distance to plane
-            # as score instead
-            # See Tarsha-Kurdi, 2007
-            if sd > sd_best or (sd == sd_best and n_inliers_subset <= n_inliers_best):
-                bad_samples.add(tuple(subset_idxs))
-                if debug:
-                    bad_sample_reasons["WORSE_SD"] += 1
-                continue
 
             # RANSAC for LIDAR addition: if inliers form multiple groups, reject
             # See Tarsha-Kurdi, 2007
@@ -658,7 +657,7 @@ def _sample(n_samples, min_samples, random_state, aspect):
         initial_sample = sample_without_replacement(n_samples, 1, random_state=random_state)[0]
         initial_aspect = aspect[initial_sample]
 
-        aspect_diff = np.minimum((aspect - initial_aspect) % 180, (initial_aspect - aspect) % 180)
+        aspect_diff = np.abs((aspect - initial_aspect + 180) % 360 - 180)
 
         choose_from = np.asarray(aspect_diff < max_aspect_range).nonzero()[0]
         choose_from = choose_from[choose_from != initial_sample]
@@ -667,14 +666,13 @@ def _sample(n_samples, min_samples, random_state, aspect):
         if (sample_attempts + 1) % 100 == 0:
             max_aspect_range += 5
         chosen = np.random.choice(choose_from, min_samples - 1)
-        return np.append([initial_sample], chosen)
+        return np.concatenate(([initial_sample], chosen))
 
     raise RANSACValueError("Cannot find initial sample with aspect similarity")
 
 
 def _group_areas(groups) -> dict:
-    u, c = np.unique(groups, return_counts=True)
-    group_areas = dict(zip(u, c))
+    group_areas = dict(enumerate(np.bincount(np.ravel(groups))))
     if 0 in group_areas:
         del group_areas[0]
     return group_areas

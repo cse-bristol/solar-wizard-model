@@ -16,6 +16,7 @@ stdenv.mkDerivation rec {
       shapely
     ]))
     postgis
+    py-spy  # for profiling
   ];
 
   env = buildEnv {

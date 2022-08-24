@@ -234,11 +234,3 @@ def _mark_buildings_with_no_planes(pg_uri: str, job_id: int):
             roof_planes=Identifier(tables.schema(job_id), tables.ROOF_PLANE_TABLE),
             building_exclusion_reasons=Identifier(tables.schema(job_id),
                                                   tables.BUILDING_EXCLUSION_REASONS_TABLE))
-
-# if __name__ == '__main__':
-#     _handle_building_page(
-#         "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion",
-#         31,
-#         page_size=10,
-#         page=10,
-#         resolution_metres=0.5)
