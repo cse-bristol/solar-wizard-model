@@ -1,8 +1,8 @@
 -- measure costs model, ported from R
 -- https://github.com/cse-bristol/794-enfield/blob/master/src/enfield-thermos-buildings.R
-DELETE FROM models.measure_costs WHERE job_id = {job_id}
+DELETE FROM models.measure_costs WHERE job_id = {job_id};
 
--- assumes pcts as values between 0 and 1
+INSERT INTO models.measure_costs
 WITH costs AS (
     SELECT
         hd.toid,
@@ -36,27 +36,27 @@ WITH costs AS (
         ELSE 0.0 END AS glazing_cost,
 
         CASE WHEN {include_cwi} AND b.cwi_recommended THEN
-            -{cwi_pct_demand_reduction} * hd.annual_demand
-        ELSE 0.0 AS cwi_demand_reduction,
+            {cwi_pct_demand_reduction} * hd.annual_demand
+        ELSE 0.0 END AS cwi_demand_reduction,
         CASE WHEN {include_swi} AND b.swi_recommended THEN
-            -{swi_pct_demand_reduction} * hd.annual_demand
-        ELSE 0.0 AS swi_demand_reduction,
+            {swi_pct_demand_reduction} * hd.annual_demand
+        ELSE 0.0 END AS swi_demand_reduction,
         CASE WHEN {include_loft_ins} AND b.loft_ins_recommended THEN
-            -{loft_ins_pct_demand_reduction} * hd.annual_demand
-        ELSE 0.0 AS loft_ins_demand_reduction,
+            {loft_ins_pct_demand_reduction} * hd.annual_demand
+        ELSE 0.0 END AS loft_ins_demand_reduction,
         CASE WHEN {include_roof_ins} AND b.roof_ins_recommended THEN
-            -{roof_ins_pct_demand_reduction} * hd.annual_demand
-        ELSE 0.0 AS roof_ins_demand_reduction,
+            {roof_ins_pct_demand_reduction} * hd.annual_demand
+        ELSE 0.0 END AS roof_ins_demand_reduction,
         CASE WHEN {include_floor_ins} AND b.floor_ins_recommended THEN
-            -{floor_ins_pct_demand_reduction} * hd.annual_demand
-        ELSE 0.0 AS floor_ins_demand_reduction,
+            {floor_ins_pct_demand_reduction} * hd.annual_demand
+        ELSE 0.0 END AS floor_ins_demand_reduction,
         CASE WHEN {include_glazing} AND b.glazing_recommended THEN
-            -{glazing_pct_demand_reduction} * hd.annual_demand
-        ELSE 0.0 AS glazing_demand_reduction
+            {glazing_pct_demand_reduction} * hd.annual_demand
+        ELSE 0.0 END AS glazing_demand_reduction
     FROM models.heat_demand hd
     LEFT JOIN aggregates.building b ON hd.toid = b.toid
+    WHERE hd.job_id = {job_id}
 )
-INSERT INTO models.measure_costs
 SELECT
     costs.toid,
     costs.job_id,
