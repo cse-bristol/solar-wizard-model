@@ -18,13 +18,13 @@ INSERT INTO {temp_schema}.road SELECT
     r.toid,
     'road_link',
     ST_Force2D(r.geom_4326),
-    r.routehierarchy,
-    r.formofway,
+    r.route_hierarchy,
+    r.form_of_way,
     b.beis_cost_category
 FROM highways.road_link r
 LEFT JOIN models.hsd_beis_cost_category b
-    ON b.hierarchy = r.routehierarchy
-    AND b.form = r.formofway
+    ON b.hierarchy = r.route_hierarchy
+    AND b.form = r.form_of_way
 WHERE ST_Intersects(ST_GeomFromText(%(bounds)s, 4326), geom_4326);
 
 INSERT INTO {temp_schema}.road SELECT
