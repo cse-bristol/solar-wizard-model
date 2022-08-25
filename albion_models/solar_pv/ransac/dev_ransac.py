@@ -24,12 +24,6 @@ def ransac_toid(pg_uri: str, job_id: int, toid: str, resolution_metres: float, o
 
     toid, building = _load_toid(pg_uri, job_id, toid)
     planes = _ransac_building(building, toid, resolution_metres, debug=True)
-    if len(planes) == 0 and len(building) > 1000:
-        # Retry with relaxed constraints around group checks:
-        print("retrying with relaxed plane morphology checks:")
-        planes = _ransac_building(building, toid, resolution_metres,
-                                  include_group_checks=False,
-                                  debug=True)
 
     if len(planes) > 0:
         print("RANSAC: all planes:")

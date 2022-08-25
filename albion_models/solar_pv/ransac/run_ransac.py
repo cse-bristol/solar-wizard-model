@@ -57,10 +57,6 @@ def _handle_building_page(pg_uri: str, job_id: int, page: int, page_size: int, r
         found = _ransac_building(building, toid, resolution_metres)
         if len(found) > 0:
             planes.extend(found)
-        elif len(building) > 1000:
-            # Retry with relaxed constraints around group checks:
-            found = _ransac_building(building, toid, resolution_metres, include_group_checks=False)
-            planes.extend(found)
 
     _save_planes(pg_uri, job_id, planes)
     print(f"Page {page} of buildings complete")
@@ -69,16 +65,22 @@ def _handle_building_page(pg_uri: str, job_id: int, page: int, page_size: int, r
 def _ransac_building(pixels_in_building: List[dict],
                      toid: str,
                      resolution_metres: float,
-                     include_group_checks: bool = True,
                      debug: bool = False) -> List[dict]:
     xyz = np.array([[pixel["easting"], pixel["northing"], pixel["elevation"]] for pixel in pixels_in_building])
     aspect = np.array([pixel["aspect"] for pixel in pixels_in_building])
     pixel_ids = np.array([pixel["pixel_id"] for pixel in pixels_in_building])
 
     if len(pixels_in_building) > 1000:
-        max_trials = len(pixels_in_building) + 500
+        max_trials = len(pixels_in_building) + 1000
+        # Disables checks that forbid planes that cover multiple discontinuous groups
+        # of pixels, as large buildings often have separate roof areas that are on the
+        # same plane. Only the largest group will be used each time anyway, so this
+        # won't cause problems and all discontinuous groups should be picked up
+        # eventually.
+        include_group_checks = False
     else:
         max_trials = 1000
+        include_group_checks = True
 
     planes = []
     min_points_per_plane = 8

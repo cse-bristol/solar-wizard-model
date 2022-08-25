@@ -403,6 +403,9 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
                     bad_sample_reasons["PLANE_MORPHOLOGY"] += 1
                 continue
 
+            if debug:
+                print(f"new best SD plane found. SD {sd}. Old SD {sd_best}. Current trial: {self.n_trials_}")
+
             # save current random sample as best sample
             n_inliers_best = n_inliers_subset
             sd_best = sd
@@ -425,8 +428,6 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
             #     max_trials,
             #     _dynamic_max_trials(n_inliers_best, n_samples,
             #                         min_samples, self.stop_probability))
-            if debug:
-                print(f"new best SD plane found. SD {sd_best}. Current trial: {self.n_trials_}")
 
             # break if sufficient number of inliers
             if n_inliers_best >= self.stop_n_inliers:
