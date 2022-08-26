@@ -2,7 +2,7 @@ import json
 from typing import List
 
 from shapely.strtree import STRtree
-from shapely.geometry import Polygon, shape
+from shapely.geometry import Polygon, shape, MultiPolygon
 from shapely import wkt
 
 from albion_models.db_funcs import sql_command
@@ -12,7 +12,7 @@ from albion_models.lidar.en_to_grid_ref import en_to_grid_ref
 from albion_models.util import round_down_to, round_up_to, frange
 
 
-def rect(x: int, y: int, w: int, h: int):
+def rect(x: int, y: int, w: int, h: int) -> Polygon:
     return Polygon([(x, y),
                     (x, y + h),
                     (x + w, y + h),
@@ -20,7 +20,7 @@ def rect(x: int, y: int, w: int, h: int):
                     (x, y)])
 
 
-def square(x: int, y: int, edge: int):
+def square(x: int, y: int, edge: int) -> Polygon:
     return rect(x, y, edge, edge)
 
 
@@ -35,9 +35,9 @@ def from_geojson_file(geojson_file: str):
         return from_geojson(f.read())
 
 
-def bounds_polygon(pg_conn, job_id: int):
+def bounds_polygon(pg_conn, job_id: int) -> Polygon:
     """
-    Returns a shapely polygon ofthe job bounds, which will be buffered
+    Returns a shapely polygon of the job bounds, which will be buffered
     by the horizon_search_distance if it's a PV job.
     """
     text = sql_command(
@@ -54,7 +54,7 @@ def bounds_polygon(pg_conn, job_id: int):
     return wkt.loads(text)
 
 
-def get_grid_cells(poly, cell_w, cell_h, spacing_w=0, spacing_h=0, grid_start: str = 'origin'):
+def get_grid_cells(poly, cell_w, cell_h, spacing_w=0, spacing_h=0, grid_start: str = 'origin') -> List[Polygon]:
     """
     Get the cells of a grid that intersect with `poly` as polygons
 
@@ -96,3 +96,7 @@ def get_grid_refs(poly, cell_size: int) -> List[str]:
         x, y, _, _ = cell.bounds
         grid_refs.append(en_to_grid_ref(x, y, cell_size))
     return grid_refs
+
+
+def largest_polygon(multi: MultiPolygon):
+    return max(multi.geoms, key=lambda poly: poly.area)

@@ -6,6 +6,7 @@ import time
 
 from psycopg2.sql import Identifier
 
+from albion_models import paths
 from albion_models.db_funcs import connection, sql_command
 
 import psycopg2.extras
@@ -32,6 +33,8 @@ def ransac_toid(pg_uri: str, job_id: int, toid: str, resolution_metres: float, o
         _write_planes(toid, resolution_metres, out_dir, building, planes)
     else:
         print("No planes to write, not creating geoJSON")
+
+    _write_test_data(toid, building)
 
 
 def _write_planes(toid: str, resolution_metres: float, out_dir: str, building, planes):
@@ -116,7 +119,7 @@ def _write_geojson(in_tiff: str, out_geojson: str, connectedness_8: bool = True)
     options = ['8CONNECTED=8'] if connectedness_8 else []
 
     gdal.FPolygonize(band, band.GetMaskBand(), dst_layer, 0, options, callback=None)
-    print(f"wrote geojson {out_geojson}")
+    print(f"\nwrote geojson {out_geojson}")
 
 
 def _write_geojson_fields(geojson: str, planes):
@@ -147,6 +150,16 @@ def _write_geojson_fields(geojson: str, planes):
             layer.SetFeature(feature)
 
 
+def _write_test_data(toid, building):
+    ransac_test_data_dir = join(paths.TEST_DATA, "ransac")
+    csv = join(ransac_test_data_dir, f"{toid}.csv")
+    with open(csv, 'w') as f:
+        f.write("pixel_id,easting,northing,elevation,aspect\n")
+        for pixel in building:
+            f.write(f"{pixel['pixel_id']},{pixel['easting']},{pixel['northing']},{pixel['elevation']},{pixel['aspect']}\n")
+    print(f"Wrote test data to {csv}")
+
+
 def _load_toid(pg_uri: str, job_id: int, toid: str):
     """
     Load LIDAR pixel data for RANSAC processing for a specific TOID.
@@ -173,10 +186,46 @@ def _load_toid(pg_uri: str, job_id: int, toid: str):
         return toid, rows
 
 
+def thinness_ratio_experiments():
+    import numpy as np
+
+    def tr(width, height):
+        perimeter = width * 2 + height * 2
+        area = width * height
+        _tr = (4 * np.pi * area) / (perimeter * perimeter)
+        print(f"area: {area} ({width} x {height}) TR: {_tr}")
+        return _tr
+
+    def trs(area):
+        for width in range(1, area):
+            height = area / width
+            if height < width:
+                break
+            tr(width, height)
+
+    # Question: for each area, there will be a given threshold that makes sense - what is it?
+    # trs(10)  # 0.55
+    # trs(20)  # 0.55
+    # trs(30)  # 0.5
+    # trs(40)  # 0.45
+    # trs(50)  # 0.4
+    # trs(100)  # 0.25
+    # trs(200)  # 0.25
+    # trs(300)  # 0.25
+    # trs(400)  # 0.2
+    # trs(500)  # 0.2
+    # trs(750)  # 0.15
+    # trs(1000)  # 0.10
+    # trs(2000)  # 0.10
+    # trs(3000)  # 0.10
+    # trs(5000)  # 0.07
+
+
 if __name__ == "__main__":
+    # thinness_ratio_experiments()
     ransac_toid(
         "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion?application_name=blah",
         1194,
-        "osgb1000002494282290",
+        "osgb1000020005464",
         1.0,
         "/home/neil/data/albion-models/ransac")

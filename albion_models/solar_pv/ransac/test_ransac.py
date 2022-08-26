@@ -15,12 +15,28 @@ def _load_data(filename: str) -> List[dict]:
                 for row in csv.DictReader(f)]
 
 
+def _ransac(filename: str, res: float):
+    return len(_ransac_building(_load_data(join(_RANSAC_DATA, filename)), filename, res, debug=False))
+
+
 class RansacTestCase(unittest.TestCase):
 
-    def test_ransac_end_terrace(self):
-        planes = _ransac_building(_load_data(join(_RANSAC_DATA, 'end_terrace.csv')), 'toid', 1)
-        assert len(planes) == 4, f"\nExpected: {4}\nActual  : {len(planes)}"
+    def parameterised_test(self, mapping: List[tuple], fn):
+        for tup in mapping:
+            with self.subTest():
+                expected = tup[-1]
+                inputs = tup[:-1]
+                actual = fn(*inputs)
+                if isinstance(expected, int):
+                    assert expected == actual, f"\nExpected: {expected}\nActual  : {actual}\nInputs : {inputs}"
+                else:
+                    assert actual in expected, f"\nExpected: {expected}\nActual  : {actual}\nInputs : {inputs}"
 
-    def test_ransac_all_one_plane(self):
-        planes = _ransac_building(_load_data(join(_RANSAC_DATA, 'all_one_plane.csv')), 'toid', 1)
-        assert len(planes) == 1, f"\nExpected: {1}\nActual  : {len(planes)}"
+    def test_ransac(self):
+        self.parameterised_test([
+            ('end_terrace.csv', 1.0, (3, 4)),
+            ('all_one_plane.csv', 1.0, 1),
+            ('osgb1000020002724.csv', 1.0, 3),
+            ('osgb5000005156974578.csv', 1.0, (3, 4)),
+            ('osgb1000020002610.csv', 1.0, 2),
+        ], _ransac)

@@ -6,11 +6,12 @@ import math
 import psycopg2.extras
 from psycopg2.sql import Identifier, SQL
 from shapely import affinity, wkt
-from shapely.geometry import MultiPolygon
+from shapely.errors import ShapelyError
+from shapely.geometry import MultiPolygon, Polygon
 
 import albion_models.solar_pv.tables as tables
 from albion_models.db_funcs import sql_command, connection, count
-from albion_models.geos import get_grid_cells
+from albion_models.geos import get_grid_cells, largest_polygon
 from albion_models.util import get_cpu_count
 
 
@@ -29,7 +30,8 @@ def place_panels(pg_uri: str,
                  page_size: int = 1000):
     schema = tables.schema(job_id)
 
-    if count(pg_uri, schema, tables.PANEL_POLYGON_TABLE) > 0:
+    roof_polygon_count = count(pg_uri, schema, tables.PANEL_POLYGON_TABLE)
+    if roof_polygon_count > 0:
         logging.info("Not adding PV panels, panels already added")
         return
 
@@ -53,7 +55,6 @@ def place_panels(pg_uri: str,
             roof_polygons=Identifier(schema, tables.ROOF_POLYGON_TABLE),
             panel_polygons=Identifier(schema, tables.PANEL_POLYGON_TABLE))
 
-    roof_polygon_count = _roof_polygon_count(pg_uri, job_id)
     pages = math.ceil(roof_polygon_count / page_size)
     logging.info(f"{roof_polygon_count} roof polygons, in {pages} batches to process")
 
@@ -121,14 +122,20 @@ def _place_panel_page(pg_uri: str,
 
         roof_panels = []
         for roof in roofs:
-            panels = _roof_panels(
-                roof=wkt.loads(roof['roof']),
-                panel_w=panel_width_m,
-                panel_h=panel_height_m,
-                aspect=roof['aspect'],
-                slope=roof['slope'],
-                panel_spacing_m=panel_spacing_m,
-                is_flat=roof['is_flat'])
+            try:
+                panels = _roof_panels(
+                    roof=wkt.loads(roof['roof']),
+                    panel_w=panel_width_m,
+                    panel_h=panel_height_m,
+                    aspect=roof['aspect'],
+                    slope=roof['slope'],
+                    panel_spacing_m=panel_spacing_m,
+                    is_flat=roof['is_flat'])
+            except ShapelyError as e:
+                print(f"Error on panel placement for roof plane: {roof['roof_plane_id']}")
+                print(roof['roof'])
+                raise e
+
             if panels:
                 roof_plane_id = roof['roof_plane_id']
                 area = panels.area
@@ -137,16 +144,6 @@ def _place_panel_page(pg_uri: str,
 
         _write_panels(pg_conn, job_id, roof_panels)
         print(f"Finished panels page {page}")
-
-
-def _roof_polygon_count(pg_uri: str, job_id: int):
-    schema = tables.schema(job_id)
-    with connection(pg_uri) as pg_conn:
-        return sql_command(
-            pg_conn,
-            "SELECT COUNT(*) FROM {roof_polygons};",
-            roof_polygons=Identifier(schema, tables.ROOF_POLYGON_TABLE),
-            result_extractor=lambda rows: rows[0][0])
 
 
 def _write_panels(pg_conn, job_id: int, roofs: List[Tuple[str, str, float, float]]):
@@ -168,7 +165,7 @@ def _write_panels(pg_conn, job_id: int, roofs: List[Tuple[str, str, float, float
         pg_conn.commit()
 
 
-def _panels_on_roof(rotated_roof, panel_grid, xoff: float, yoff: float):
+def _panels_on_roof(rotated_roof: Polygon, panel_grid: List[Polygon], xoff: float, yoff: float):
     panels = []
     for panel in panel_grid:
         panel_var = affinity.translate(panel, xoff, yoff)
@@ -177,14 +174,17 @@ def _panels_on_roof(rotated_roof, panel_grid, xoff: float, yoff: float):
     return panels
 
 
-def _roof_panels(roof,
+def _roof_panels(roof: MultiPolygon,
                  panel_w: float,
                  panel_h: float,
                  aspect: float,
                  slope: float,
                  is_flat: bool,
                  panel_spacing_m: float):
-
+    """
+    Core roof panel placement algorithm
+    """
+    roof: Polygon = largest_polygon(roof)
     slope_rads = math.radians(slope)
     sun_angle_for_spacing_calc = math.radians(15)
 
@@ -208,6 +208,9 @@ def _roof_panels(roof,
     # Rotate the roof area CCW by aspect, to be gridded easily:
     centroid = roof.centroid
     rotated_roof = affinity.rotate(roof, aspect, origin=centroid)
+    # TODO would be nice but requires new version of shapely (1.8) -
+    #  and might not be necessary - see if any more errors happen
+    # rotated_roof = make_valid(rotated_roof)
 
     # Define grids of portrait and landscape panels:
     portrait_grid = get_grid_cells(rotated_roof, portrait_panel_w, portrait_panel_h, spacing_x, spacing_y, grid_start='bounds-buffered')

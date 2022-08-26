@@ -8,7 +8,6 @@ from sklearn.linear_model import RANSACRegressor
 from skimage import measure, morphology
 from sklearn.base import clone
 from sklearn.linear_model import LinearRegression
-from sklearn.linear_model._ransac import _dynamic_max_trials
 from sklearn.utils import check_random_state, check_consistent_length
 from sklearn.utils.random import sample_without_replacement
 from sklearn.utils.validation import _check_sample_weight
@@ -49,8 +48,6 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
                  max_slope=None,
                  min_slope=None,
                  min_convex_hull_ratio=0.65,
-                 min_thinness_ratio=0.55,
-                 max_area_for_thinness_test=25,
                  max_num_groups=20,
                  max_group_area_ratio_to_largest=0.02,
                  flat_roof_threshold_degrees=5,
@@ -60,10 +57,6 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
         :param min_points_per_plane_perc: min points per plane as a percentage of total
         points that fall within the building bounds. Default 0.8% (0.008). This will
         only affect larger buildings and stops it finding lots of tiny little sections.
-
-        :param max_area_for_thinness_test: The thinness test will not be applied to
-        roofs larger than this - useful as above a certain size even well-formed
-        rectangles start to count as too thin.
 
         :param max_num_groups: Maximum number of contiguous groups the inliers are
         allowed to fall in to.
@@ -88,8 +81,6 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
         self.max_slope = max_slope
         self.min_slope = min_slope
         self.min_convex_hull_ratio = min_convex_hull_ratio
-        self.min_thinness_ratio = min_thinness_ratio
-        self.max_area_for_thinness_test = max_area_for_thinness_test
         self.max_num_groups = max_num_groups
         self.max_group_area_ratio_to_largest = max_group_area_ratio_to_largest
         self.flat_roof_threshold_degrees = flat_roof_threshold_degrees
@@ -170,14 +161,14 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
         elif self.min_samples >= 1:
             if self.min_samples % 1 != 0:
                 raise RANSACValueError("Absolute number of samples must be an "
-                                 "integer value.")
+                                       "integer value.")
             min_samples = self.min_samples
         else:
             raise RANSACValueError("Value for `min_samples` must be scalar and "
                              "positive.")
         if min_samples > X.shape[0]:
             raise RANSACValueError("`min_samples` may not be larger than number "
-                             "of samples: n_samples = %d." % (X.shape[0]))
+                                   "of samples: n_samples = %d." % (X.shape[0]))
 
         if self.stop_probability < 0 or self.stop_probability > 1:
             raise RANSACValueError("`stop_probability` must be in range [0, 1].")
@@ -382,25 +373,62 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
                 aspect_circ_sd = None
                 aspect_circ_mean = None
 
-            # RANSAC for LIDAR addition: if inliers form multiple groups, reject
-            # See Tarsha-Kurdi, 2007
-            # Also check ratio of points area to ratio of convex hull of points area.
-            # If the convex hull's area is significantly larger, it's likely to be a
-            # bad plane that cuts through the roof at an angle
-            if not _plane_morphology_ok(X_inlier_subset, min_X,
-                                        min_convex_hull_ratio=self.min_convex_hull_ratio,
-                                        min_thinness_ratio=self.min_thinness_ratio,
-                                        max_area_for_thinness_test=self.max_area_for_thinness_test,
-                                        min_points_per_plane=self.min_points_per_plane,
-                                        min_points_per_plane_perc=self.min_points_per_plane_perc,
-                                        total_points_in_building=total_points_in_building,
-                                        max_num_groups=self.max_num_groups,
-                                        max_group_area_ratio_to_largest=self.max_group_area_ratio_to_largest,
-                                        include_group_checks=include_group_checks,
-                                        res=self.resolution_metres):
+            # RANSAC for LIDAR addition: prep for following plane morphology checks
+            groups, num_groups = _pixel_groups(X_inlier_subset, min_X, self.resolution_metres)
+            group_areas = _group_areas(groups)
+
+            # RANSAC for LIDAR addition: check that size of the largest continuous
+            # group of pixels is also over the minimum number of points per plane:
+            largest = max(group_areas, key=group_areas.get)
+            roof_plane_area = group_areas[largest]
+            if roof_plane_area < self.min_points_per_plane or roof_plane_area < (
+                    total_points_in_building * self.min_points_per_plane_perc):
                 bad_samples.add(tuple(subset_idxs))
                 if debug:
-                    bad_sample_reasons["PLANE_MORPHOLOGY"] += 1
+                    bad_sample_reasons["MIN_POINTS_PER_LARGEST_GROUP"] += 1
+                continue
+
+            # RANSAC for LIDAR addition: if inliers form multiple groups, reject
+            # See Tarsha-Kurdi, 2007
+            # Adapted from Tarsha-Kurdi to allow a few discontinuous pixels as long as
+            # The `include_group_checks` flag allows disabling these 2 checks, as they
+            # were causing issues for buildings with many unconnected roof sections
+            # on the same plane:
+            if num_groups > 1 and include_group_checks:
+                # Allow a small amount of small outliers:
+                if len(group_areas) > self.max_num_groups:
+                    bad_samples.add(tuple(subset_idxs))
+                    if debug:
+                        bad_sample_reasons["TOO_MANY_GROUPS"] += 1
+                    continue
+                for groupid, area in group_areas.items():
+                    if groupid != largest and area / roof_plane_area > self.max_group_area_ratio_to_largest:
+                        bad_samples.add(tuple(subset_idxs))
+                        if debug:
+                            bad_sample_reasons["LARGEST_GROUP_TOO_SMALL"] += 1
+                        continue
+
+            # RANSAC for LiDAR addition: check ratio of points area to ratio of convex
+            # hull of points area.
+            # If the convex hull's area is significantly larger, it's likely to be a
+            # bad plane that cuts through the roof at an angle
+            only_largest = groups == largest
+            convex_hull = morphology.convex_hull_image(only_largest)
+            convex_hull_area = np.count_nonzero(convex_hull)
+            cv_hull_ratio = roof_plane_area / convex_hull_area
+            if cv_hull_ratio < self.min_convex_hull_ratio:
+                bad_samples.add(tuple(subset_idxs))
+                if debug:
+                    bad_sample_reasons["CONVEX_HULL_RATIO"] += 1
+                continue
+
+            # RANSAC for LiDAR addition: thinness ratio check
+            perimeter = perimeter_crofton(only_largest, directions=4)
+            thinness_ratio = (4 * np.pi * roof_plane_area) / (perimeter * perimeter)
+            if thinness_ratio < _min_thinness_ratio(roof_plane_area):
+                bad_samples.add(tuple(subset_idxs))
+                if debug:
+                    bad_sample_reasons["THINNESS_RATIO"] += 1
                 continue
 
             if debug:
@@ -569,59 +597,6 @@ def _to_positive_angle(angle):
     return angle + 360 if angle < 0 else angle
 
 
-def _plane_morphology_ok(X_inlier_subset, min_X,
-                         min_convex_hull_ratio: float,
-                         min_thinness_ratio: float,
-                         max_area_for_thinness_test: int,
-                         min_points_per_plane: int,
-                         min_points_per_plane_perc: float,
-                         total_points_in_building: int,
-                         max_num_groups: int,
-                         max_group_area_ratio_to_largest: float,
-                         include_group_checks: bool,
-                         res: float) -> int:
-    normed_inliers = ((X_inlier_subset - min_X) / res).astype(int)
-
-    image = np.zeros((int(np.amax(normed_inliers[:, 0])) + 1,
-                      int(np.amax(normed_inliers[:, 1])) + 1))
-    image[normed_inliers[:, 0], normed_inliers[:, 1]] = 1
-
-    groups, num_groups = measure.label(image, connectivity=1, return_num=True)
-    areas = _group_areas(groups)
-    largest = max(areas, key=areas.get)
-    roof_plane_area = areas[largest]
-    if roof_plane_area < min_points_per_plane or roof_plane_area < (total_points_in_building * min_points_per_plane_perc):
-        return False
-    only_largest = groups == largest
-
-    # The `include_group_checks` flag allows disabling these 2 checks, as they
-    # were causing issues for buildings with many unconnected roof sections
-    # on the same plane:
-    if num_groups > 1 and include_group_checks:
-        # Allow a small amount of small outliers:
-        group_areas = _group_areas(groups)
-        if len(group_areas) > max_num_groups:
-            return False
-        for groupid, area in group_areas.items():
-            if groupid != largest and area / roof_plane_area > max_group_area_ratio_to_largest:
-                return False
-
-    convex_hull = morphology.convex_hull_image(only_largest)
-    convex_hull_area = np.count_nonzero(convex_hull)
-    cv_hull_ratio = roof_plane_area / convex_hull_area
-    if cv_hull_ratio < min_convex_hull_ratio:
-        return False
-
-    if roof_plane_area <= max_area_for_thinness_test:
-        perimeter = perimeter_crofton(only_largest, directions=4)
-        thinness_ratio = (4 * np.pi * roof_plane_area) / (perimeter * perimeter)
-
-        if thinness_ratio < min_thinness_ratio:
-            return False
-
-    return True
-
-
 def _exclude_unconnected(X, min_X, inlier_mask_best, res: float):
     """
     Create a new inlier mask which only sets as True those LIDAR pixels that
@@ -672,8 +647,49 @@ def _sample(n_samples, min_samples, random_state, aspect):
     raise RANSACValueError("Cannot find initial sample with aspect similarity")
 
 
+def _pixel_groups(X_inlier_subset, min_X, res: float):
+    normed_inliers = ((X_inlier_subset - min_X) / res).astype(int)
+
+    image = np.zeros((int(np.amax(normed_inliers[:, 0])) + 1,
+                      int(np.amax(normed_inliers[:, 1])) + 1))
+    image[normed_inliers[:, 0], normed_inliers[:, 1]] = 1
+
+    return measure.label(image, connectivity=1, return_num=True)
+
+
 def _group_areas(groups) -> dict:
     group_areas = dict(enumerate(np.bincount(np.ravel(groups))))
     if 0 in group_areas:
         del group_areas[0]
     return group_areas
+
+
+def _min_thinness_ratio(area) -> float:
+    """
+    See dev_ransac.py thinness_ratio_experiments() for working out what numbers
+    work for which areas.
+    Could probably fit some kind of curve to these numbers but that sounds
+    like more effort than it's worth.
+    """
+    if area <= 20:
+        return 0.55
+    elif area <= 30:
+        return 0.5
+    elif area <= 40:
+        return 0.45
+    elif area <= 50:
+        return 0.4
+    elif area <= 300:
+        return 0.25
+    elif area <= 500:
+        return 0.2
+    elif area <= 750:
+        return 0.15
+    elif area <= 1000:
+        return 0.10
+    elif area <= 2000:
+        return 0.10
+    elif area <= 3000:
+        return 0.10
+    else:
+        return 0.07

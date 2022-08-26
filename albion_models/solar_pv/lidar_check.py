@@ -87,6 +87,8 @@ def check_lidar(pg_uri: str,
     out-of-date for newly built things. In these cases, if unhandled, the LiDAR
     detects all buildings as flat (or like the ground that they were built on was) -
     or occasionally with a now-nonexistent building intersecting the polygon weirdly.
+
+    TODO should detect osgb5000005134753286, osgb5000005135275129, osgb5000005134753282
     """
     with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
         if _already_checked(pg_conn, job_id):

@@ -6,11 +6,11 @@ import math
 from typing import List
 import multiprocessing as mp
 
-from albion_models.db_funcs import connect, count, connection, sql_command
+from albion_models.db_funcs import count, connection, sql_command
 from albion_models.lidar.lidar import LIDAR_NODATA
 from albion_models.solar_pv import tables
 
-import psycopg2.extras
+from psycopg2.extras import DictCursor, execute_values
 from psycopg2.sql import SQL, Identifier
 import numpy as np
 
@@ -28,7 +28,7 @@ def run_ransac(pg_uri: str,
                job_id: int,
                resolution_metres: float,
                workers: int = _ransac_cpu_count(),
-               building_page_size: int = 10) -> None:
+               building_page_size: int = 100) -> None:
 
     if count(pg_uri, tables.schema(job_id), tables.ROOF_PLANE_TABLE) > 0:
         logging.info("Not detecting roof planes, already detected.")
@@ -83,7 +83,7 @@ def _ransac_building(pixels_in_building: List[dict],
         include_group_checks = True
 
     planes = []
-    min_points_per_plane = 8
+    min_points_per_plane = min(8, int(8 / resolution_metres))  # 8 for 2m, 8 for 1m, 16 for 0.5m
     total_points_in_building = len(aspect)
 
     while np.count_nonzero(xyz) // 3 > min_points_per_plane:
@@ -138,7 +138,7 @@ def _load(pg_uri: str, job_id: int, page: int, page_size: int):
     buildings rather than pixels to prevent splitting a building's pixels across
     pages.
     """
-    with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
+    with connection(pg_uri, cursor_factory=DictCursor) as pg_conn:
         rows = sql_command(
             pg_conn,
             """
@@ -174,7 +174,7 @@ def _load(pg_uri: str, job_id: int, page: int, page_size: int):
 
 
 def _building_count(pg_uri: str, job_id: int):
-    with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
+    with connection(pg_uri, cursor_factory=DictCursor) as pg_conn:
         return sql_command(
             pg_conn,
             "SELECT COUNT(*) FROM {buildings};",
@@ -192,7 +192,7 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[dict]):
         del plane['inliers']
 
     with connection(pg_uri) as pg_conn, pg_conn.cursor() as cursor:
-        plane_ids = psycopg2.extras.execute_values(cursor, SQL("""
+        plane_ids = execute_values(cursor, SQL("""
             INSERT INTO {roof_planes} (toid, x_coef, y_coef, intercept, slope, aspect, sd)
             VALUES %s
             RETURNING roof_plane_id;
@@ -207,7 +207,7 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[dict]):
             for pixel_id in plane_inliers[i]:
                 pixel_plane_data.append((int(pixel_id), plane_id))
 
-        psycopg2.extras.execute_values(cursor, SQL("""
+        execute_values(cursor, SQL("""
             UPDATE {pixel_horizons}
             SET roof_plane_id = data.roof_plane_id
             FROM (VALUES %s) AS data (pixel_id, roof_plane_id)
