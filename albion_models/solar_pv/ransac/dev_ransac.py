@@ -18,7 +18,7 @@ from albion_models.solar_pv import tables
 from albion_models.solar_pv.ransac.run_ransac import _ransac_building
 
 
-def ransac_toid(pg_uri: str, job_id: int, toid: str, resolution_metres: float, out_dir: str):
+def ransac_toid(pg_uri: str, job_id: int, toid: str, resolution_metres: float, out_dir: str, write_test_data: bool = True):
     logging.basicConfig(level=logging.DEBUG,
                         format='[%(asctime)s] %(levelname)s: %(message)s')
     os.makedirs(out_dir, exist_ok=True)
@@ -34,7 +34,8 @@ def ransac_toid(pg_uri: str, job_id: int, toid: str, resolution_metres: float, o
     else:
         print("No planes to write, not creating geoJSON")
 
-    _write_test_data(toid, building)
+    if write_test_data:
+        _write_test_data(toid, building)
 
 
 def _write_planes(toid: str, resolution_metres: float, out_dir: str, building, planes):

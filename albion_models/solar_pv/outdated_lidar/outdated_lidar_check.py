@@ -21,9 +21,14 @@ class HeightAggregator:
     within_elevation_sum: float = 0.0
     without_elevation_sum: float = 0.0
     osmm_height: Optional[float] = 0.0
+    osmm_base_roof_height: Optional[float] = 0.0
+
+    def __init__(self, debug: bool = False) -> None:
+        self.debug = debug
 
     def aggregate_row(self, row: Dict[str, Any]):
         self.osmm_height = row['height']
+        self.osmm_base_roof_height = row['base_roof_height']
         if row['within_building']:
             self.pixels_within += 1
             self.within_elevation_sum += row['elevation']
@@ -38,6 +43,16 @@ class HeightAggregator:
     def lidar_height(self) -> float:
         avg_height_within, avg_height_without = self.average_heights()
         return avg_height_within - avg_height_without
+
+    def lidar_ground_height(self) -> float:
+        _, avg_height_without = self.average_heights()
+        return avg_height_without
+
+    def height_threshold(self) -> float:
+        if self.pixels_within < 1000:
+            return 1.1
+        else:
+            return 2
 
     def exclusion_reason(self) -> Optional[str]:
         """
@@ -61,11 +76,20 @@ class HeightAggregator:
             return None
 
         lidar_height = self.lidar_height()
-        if lidar_height <= 1.1:
+        height_threshold = self.height_threshold()
+
+        if self.debug:
+            print(f"OSMM heights: min {self.osmm_base_roof_height} avg {self.osmm_height}")
+            print(f"avg LiDAR height: {lidar_height} thresh1 {height_threshold} "
+                  f"thresh2 {self.osmm_base_roof_height / 2}")
+
+        if lidar_height <= height_threshold:
             if self.osmm_height and abs(self.osmm_height - lidar_height) > 1:
                 return 'OUTDATED_LIDAR_COVERAGE'
             elif not self.osmm_height:
                 return 'OUTDATED_LIDAR_COVERAGE'
+        elif self.osmm_base_roof_height and self.osmm_base_roof_height / 2 > lidar_height:
+            return 'OUTDATED_LIDAR_COVERAGE'
 
         return None
 
@@ -87,8 +111,6 @@ def check_lidar(pg_uri: str,
     out-of-date for newly built things. In these cases, if unhandled, the LiDAR
     detects all buildings as flat (or like the ground that they were built on was) -
     or occasionally with a now-nonexistent building intersecting the polygon weirdly.
-
-    TODO should detect osgb5000005134753286, osgb5000005135275129, osgb5000005134753282
     """
     with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
         if _already_checked(pg_conn, job_id):
@@ -158,10 +180,11 @@ def _load_building_pixels(pg_conn, job_id: int, page: int, page_size: int = 1000
             b.toid,
             ST_Contains(b.geom_27700, h.en) AS within_building,
             h.toid IS NULL AS without_building,
-            hh.height
+            hh.height,
+            hh.rel_h2 AS base_roof_height
         FROM building_page b
         LEFT JOIN mastermap.height hh ON b.toid = hh.toid
-        LEFT JOIN {lidar_pixels} h ON ST_Contains(ST_Buffer(b.geom_27700, 1), h.en)
+        LEFT JOIN {lidar_pixels} h ON ST_Contains(ST_Buffer(b.geom_27700, 5), h.en)
         WHERE h.elevation != %(lidar_nodata)s
         ORDER BY b.toid;
         """,
@@ -190,4 +213,6 @@ def _already_checked(pg_conn, job_id: int) -> bool:
 
 
 if __name__ == '__main__':
-    check_lidar("postgresql://albion_ddl:albion320@localhost:5432/albion", 61)
+    logging.basicConfig(level=logging.DEBUG,
+                        format='[%(asctime)s] %(levelname)s: %(message)s')
+    check_lidar("postgresql://albion_ddl:albion320@localhost:5432/albion", 1617)
