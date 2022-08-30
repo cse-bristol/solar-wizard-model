@@ -9,7 +9,7 @@ from psycopg2.sql import Identifier
 import albion_models.solar_pv.tables as tables
 from albion_models.db_funcs import connect, sql_script_with_bindings, process_pg_uri
 from albion_models.solar_pv.outdated_lidar.outdated_lidar_check import check_lidar
-from albion_models.solar_pv.panels import place_panels
+from albion_models.solar_pv.panels.panels import place_panels
 from albion_models.solar_pv.pvgis import pvgis
 from albion_models.solar_pv.ransac.run_ransac import run_ransac
 from albion_models.solar_pv.rasters import generate_rasters
