@@ -1,4 +1,7 @@
-#! /usr/bin/python3
+"""
+Developed in https://github.com/cse-bristol/710-pvmaps-nix, see there for more details
+"""
+from os.path import join
 
 import argparse
 import logging
@@ -15,10 +18,6 @@ from concurrent.futures import ThreadPoolExecutor, Future
 from datetime import date
 from subprocess import Popen
 from typing import List, Tuple, Optional
-
-# This is replaced when installed via nix script grass-8.2.0-pvmaps.nix
-# or update to correct locn for dev etc
-GRASS_INSTALL_DEFAULT = ""
 
 ##
 # Raster names used in grass db
@@ -48,6 +47,7 @@ PERMANENT_MAPSET = "PERMANENT"
 CSI = "cSi"  # Case matches spectraleffect_ rasters!
 CDTE = "CdTe"  # Case matches spectraleffect_ rasters!
 
+
 class PVMaps:
     """Class that sets up a grass db for PV Maps and runs the PV Maps steps"""
     def __init__(self,
@@ -56,7 +56,6 @@ class PVMaps:
                  output_dir: str,
                  pvgis_data_tar_file: str,
                  pv_model_coeff_file_dir: str,
-                 log_level: int,
                  keep_temp_mapset: bool,
                  num_processes: int,
                  output_direct_diffuse: bool,
@@ -65,7 +64,7 @@ class PVMaps:
                  flat_roof_degrees: float,
                  flat_roof_degrees_threshold: float,
                  panel_type: str,
-                 num_pv_calcs_per_year: Optional[int]):
+                 num_pv_calcs_per_year: Optional[int] = None):
         """
         Create pv maps object with settings shared by all elevation / mask raster runs
         :param grass_dbase_dir: Dir where grass database is to be created or has been created
@@ -73,7 +72,6 @@ class PVMaps:
         :param output_dir: Dir where output raster files will be written
         :param pvgis_data_tar_file: Path and filename of the pvgis data file (pvgis_data.tar)
         :param pv_model_coeff_file_dir: Dir where the model coefficient files are located (csi.coeffs & cdte.coeffs)
-        :param log_level: Log output level (logging.INFO etc)
         :param keep_temp_mapset: True to not cleanup temp mapset containing intermediate data
         :param num_processes: num processes to use for the multiprocess parts
         :param output_direct_diffuse: If True, output direct (beam) & diffuse irradiance/irradiation rasters
@@ -88,13 +86,6 @@ class PVMaps:
         self._executor: Optional[ThreadPoolExecutor] = None
         self._gisrc_filename: Optional[str] = None
         self._grass_env = None
-
-        ###
-        # Check input params and store
-        if not (logging.DEBUG <= log_level <= logging.CRITICAL):
-            raise Exception("Log level must be from logging.DEBUG to logging.CRITICAL")
-        self.conf_logging_to_console(log_level)
-
         self._keep_temp_mapset = keep_temp_mapset
 
         if os.path.exists(grass_dbase_dir):
@@ -144,7 +135,7 @@ class PVMaps:
 
         if panel_type not in (CSI, CDTE):
             raise Exception(f"Panel type must be {CSI} or {CDTE}")
-        self._pv_model_coeff_file: str = f"{pv_model_coeff_file_dir}{os.sep}{panel_type.lower()}.coeffs"
+        self._pv_model_coeff_file: str = join(pv_model_coeff_file_dir, f"{panel_type.lower()}.coeffs")
         if not os.path.isfile(self._pv_model_coeff_file):
             raise Exception(f"Model coefficient file ({self._pv_model_coeff_file}) not found")
         self._r_spectral: str = f"spectraleffect_{panel_type}_"
@@ -163,7 +154,7 @@ class PVMaps:
 
         self._g_temp_mapset: str = ""
 
-        self._gisrc_filename = f"{tempfile.gettempdir()}{os.sep}pvmaps.{os.getpid()}.rc"
+        self._gisrc_filename = join(tempfile.gettempdir(), f"pvmaps.{os.getpid()}.rc")
 
         self.solar_decl: List[float] = self._calc_solar_declinations()
 
@@ -184,7 +175,7 @@ class PVMaps:
     def create_pvmap(self, elevation_filename: str, mask_filename: str,
                      forced_slope_filename: Optional[str] = None,
                      forced_aspect_filename: Optional[str] = None,
-                     forced_horizon_basefilename: Optional[str] = None) -> None:
+                     forced_horizon_basefilename: Optional[str] = None) -> (str, List[str]):
         """
         Run PVMaps steps against the input elevation and mask. Raises exception if something goes wrong.
         Creates output rasters in the dir setup in the constructor.
@@ -213,8 +204,9 @@ class PVMaps:
         self._apply_wind_corrections_p()
         self._apply_spectral_corrections_p()
         self._get_annual_rasters_p()
-        self._export_rasters()
+        yearly_kwh_raster, monthly_kwh_rasters = self._export_rasters()
         self._remove_temp_mapset_if_reqd()
+        return yearly_kwh_raster, monthly_kwh_rasters
 
     def _calc_solar_declinations(self):
         return [self._calc_solar_declination(day) for _, day, _, _ in self._pv_time_steps]
@@ -287,39 +279,39 @@ class PVMaps:
         grass_env = os.environ.copy()
         grass_env["GISBASE"] = self._grass_install_dir
         grass_env["GISRC"] = self._gisrc_filename
-        grass_env["PATH"] = f"{self._grass_install_dir}{os.sep}bin{os.pathsep}" \
-                             f"{self._grass_install_dir}{os.sep}scripts{os.pathsep}" \
-                             f"{grass_env.get('PATH', '')}"
-        grass_env["LD_LIBRARY_PATH"] = f"{self._grass_install_dir}{os.sep}lib{os.pathsep}" \
-                                        f"{grass_env.get('LD_LIBRARY_PATH', '')}"
+
+        grass_bin = join(self._grass_install_dir, 'bin')
+        grass_scripts = join(self._grass_install_dir, 'scripts')
+        grass_env["PATH"] = f"{grass_bin}{os.pathsep}" \
+                            f"{grass_scripts}{os.pathsep}" \
+                            f"{grass_env.get('PATH', '')}"
+
+        grass_lib = join(self._grass_install_dir, 'lib')
+        grass_env["LD_LIBRARY_PATH"] = f"{grass_lib}{os.pathsep}" \
+                                       f"{grass_env.get('LD_LIBRARY_PATH', '')}"
 
         # Ref https://grasswiki.osgeo.org/wiki/Working_with_GRASS_without_starting_it_explicitly#Python:_GRASS_GIS_8_with_existing_location
-        python_path: str = f"{self._grass_install_dir}{os.sep}etc{os.sep}python"
+        python_path: str = join(self._grass_install_dir, "src", "python")
         grass_env["PYTHONPATH"] = f"{python_path}{os.pathsep}{grass_env.get('PYTHONPATH', '')}"  # for sub-processes
         self._grass_env = grass_env
 
     def _check_reqd_grass_paths(self):
+        grass_bin = join(self._grass_install_dir, 'bin')
+        grass_scripts = join(self._grass_install_dir, 'scripts')
+        grass_lib = join(self._grass_install_dir, 'lib')
+        grass_python = join(self._grass_install_dir, 'etc' 'python')
         if not os.path.exists(self._grass_install_dir):
             raise Exception(f"Path {self._grass_install_dir} not found")
         if not os.path.exists(self._gisrc_filename):
             raise Exception(f"Path {self._gisrc_filename} not found")
-        if not os.path.exists(f"{self._grass_install_dir}{os.sep}bin"):
-            raise Exception(f"Path {self._grass_install_dir}{os.sep}bin not found")
-        if not os.path.exists(f"{self._grass_install_dir}{os.sep}scripts"):
-            raise Exception(f"Path {self._grass_install_dir}{os.sep}scripts not found")
-        if not os.path.exists(f"{self._grass_install_dir}{os.sep}lib"):
-            raise Exception(f"Path {self._grass_install_dir}{os.sep}lib not found")
-        if not os.path.exists(f"{self._grass_install_dir}{os.sep}etc{os.sep}python"):
-            raise Exception(f"Path {self._grass_install_dir}{os.sep}etc{os.sep}python not found")
-
-    @staticmethod
-    def conf_logging_to_console(log_level: int):
-        # logging.INFO
-        # logging.CRITICAL
-        # logging.WARNING
-        # logging.INFO
-        logging.basicConfig(format='%(asctime)s: %(levelname)s: %(message)s',
-                            level=log_level, datefmt="%d/%m/%Y %H:%M:%S")
+        if not os.path.exists(grass_bin):
+            raise Exception(f"Path {grass_bin} not found")
+        if not os.path.exists(grass_scripts):
+            raise Exception(f"Path {grass_scripts} not found")
+        if not os.path.exists(grass_lib):
+            raise Exception(f"Path {grass_lib} not found")
+        if not os.path.exists(grass_python):
+            raise Exception(f"Path {grass_python} not found")
 
     def _update_mapset(self, mapset: str):
         with open(self._gisrc_filename, "w") as rcfile:
@@ -373,30 +365,33 @@ class PVMaps:
             raise Exception(f"Command {cmd_line} returned error code {rtn_code}")
 
     def _init_grass_db_pvmaps_data(self):
-        if not os.path.exists(f"{self._g_dbase}{os.sep}{self._g_location}"):
+        location = join(self._g_dbase, self._g_location)
+        permanent_mapset = join(self._g_dbase, self._g_location, PERMANENT_MAPSET)
+
+        if not os.path.exists(location):
             if not os.path.isfile(self._pvgis_data_tar):
                 raise Exception(f"File {self._pvgis_data_tar} not found")
 
             logging.info("_init_grass_db_pvmaps_data")
 
             # Create a new grass gis database
-            self._run_cmd(f"grass -c EPSG:4326 -e {self._g_dbase}{os.sep}{self._g_location}")
+            self._run_cmd(f"grass -c EPSG:4326 -e {location}")
             # Extract the pvgis data into it's permanent mapset
             with tarfile.open(self._pvgis_data_tar, "r") as tar:
-                tar.extractall(path=f"{self._g_dbase}{os.sep}{self._g_location}{os.sep}{PERMANENT_MAPSET}")
+                tar.extractall(path=permanent_mapset)
 
-        elif not os.path.exists(f"{self._g_dbase}{os.sep}{self._g_location}{os.sep}{PERMANENT_MAPSET}"):
-            raise Exception(f"Grass DB path ({self._g_dbase}{os.sep}{self._g_location}) exists but {PERMANENT_MAPSET} is missing!")
+        elif not os.path.exists(permanent_mapset):
+            raise Exception(f"Grass DB path ({location}) exists but {PERMANENT_MAPSET} is missing!")
 
     def _remove_temp_mapset_if_reqd(self):
         if not self._keep_temp_mapset:
             logging.info("_remove_temp_mapset_if_reqd")
             if self._g_temp_mapset and self._g_temp_mapset != PERMANENT_MAPSET:
-                shutil.rmtree(f"{self._g_dbase}{os.sep}{self._g_location}{os.sep}{self._g_temp_mapset}")
+                shutil.rmtree(join(self._g_dbase, self._g_location, self._g_temp_mapset))
 
     def _create_temp_mapset(self):
-        logging.info("_create_temp_mapset")
         """Set & create mapset - used for temp rasters etc"""
+        logging.info("_create_temp_mapset")
         # do equivalent of e.g "g.mapset -c mapset=nsd_4326"
         self._g_temp_mapset = f"pvmaps.{os.getpid()}"
 
@@ -415,7 +410,7 @@ class PVMaps:
         logging.info("_import_rasters")
 
         for filename, _ in rasters_to_import:
-            ip: str = f"{self._input_dir}{os.sep}{filename}"
+            ip: str = join(self._input_dir, filename)
             if not os.path.isfile(ip):
                 raise Exception(f"Input raster file ({ip}) not found")
 
@@ -558,34 +553,43 @@ class PVMaps:
     def _export_raster(self, in_raster: str, out_raster_file: str):
         self._run_cmd(f"r.out.gdal --overwrite input={in_raster} output='{out_raster_file}' format=GTiff type=Float64 -c")
 
-    def _export_rasters(self):
+    def _export_rasters(self) -> (str, List[str]):
         logging.info("_export_rasters")
         exports: List[(str, str)] = []
+        monthly_kwh_rasters = []
         for _, day, month, _ in self._pv_time_steps:
             if self._output_direct_diffuse:
-                exports.append((f"{OUT_DIRECT_RAD_BASENAME}{day}", f"{self._output_dir}{os.sep}{OUT_DIRECT_RAD_BASENAME}{day}_{month}.tif"))
-                exports.append((f"{OUT_DIFFUSE_RAD_BASENAME}{day}", f"{self._output_dir}{os.sep}{OUT_DIFFUSE_RAD_BASENAME}{day}_{month}.tif"))
-            exports.append((f"{OUT_PV_POWER_WIND_SPECTRAL_BASENAME}{day}", f"{self._output_dir}{os.sep}{OUT_PV_POWER_WIND_SPECTRAL_BASENAME}{day}_{month}.tif"))
+                exports.append((f"{OUT_DIRECT_RAD_BASENAME}{day}",
+                                join(self._output_dir, f"{OUT_DIRECT_RAD_BASENAME}{day}_{month}.tif")))
+                exports.append((f"{OUT_DIFFUSE_RAD_BASENAME}{day}",
+                                join(self._output_dir, f"{OUT_DIFFUSE_RAD_BASENAME}{day}_{month}.tif")))
+            monthly_kwh_raster = join(self._output_dir, f"{OUT_PV_POWER_WIND_SPECTRAL_BASENAME}{day}_{month}.tif")
+            exports.append((f"{OUT_PV_POWER_WIND_SPECTRAL_BASENAME}{day}", monthly_kwh_raster))
+            monthly_kwh_rasters.append(monthly_kwh_raster)
+
         if self._output_direct_diffuse:
-            exports.append((f"{OUT_DIRECT_RAD_BASENAME}year", f"{self._output_dir}{os.sep}{OUT_DIRECT_RAD_BASENAME}year.tif"))
-            exports.append((f"{OUT_DIFFUSE_RAD_BASENAME}year", f"{self._output_dir}{os.sep}{OUT_DIFFUSE_RAD_BASENAME}year.tif"))
-        exports.append((f"{OUT_PV_POWER_WIND_SPECTRAL_BASENAME}year", f"{self._output_dir}{os.sep}{OUT_PV_POWER_WIND_SPECTRAL_BASENAME}year.tif"))
+            exports.append((f"{OUT_DIRECT_RAD_BASENAME}year",
+                            join(self._output_dir, f"{OUT_DIRECT_RAD_BASENAME}year.tif")))
+            exports.append((f"{OUT_DIFFUSE_RAD_BASENAME}year",
+                            join(self._output_dir, f"{OUT_DIFFUSE_RAD_BASENAME}year.tif")))
+
+        yearly_kwh_raster = join(self._output_dir, f"{OUT_PV_POWER_WIND_SPECTRAL_BASENAME}year.tif")
+        exports.append((f"{OUT_PV_POWER_WIND_SPECTRAL_BASENAME}year", yearly_kwh_raster))
+
         self._run_cmd_via_method_p(self._export_raster, exports)
+        return yearly_kwh_raster, monthly_kwh_rasters
 
     def _find_grass_locn(self):
-        if os.path.exists(GRASS_INSTALL_DEFAULT):
-            self._grass_install_dir = GRASS_INSTALL_DEFAULT
-        else:
-            g_exe_locn: str = shutil.which("grass")
-            if not g_exe_locn.endswith("grass"):
-                raise Exception("Failed to find grass install dir")
-            g_root_dir: str = os.path.dirname(g_exe_locn)
-            if g_root_dir.endswith("bin"):
-                g_root_dir: str = os.path.dirname(g_root_dir)
-            for f in os.listdir(g_root_dir):
-                if f.startswith("grass"):
-                    self._grass_install_dir = f"{g_root_dir}{os.sep}{f}"
-                    break
+        g_exe_locn: str = shutil.which("grass")
+        if not g_exe_locn.endswith("grass"):
+            raise Exception("Failed to find grass install dir")
+        g_root_dir: str = os.path.dirname(g_exe_locn)
+        if g_root_dir.endswith("bin"):
+            g_root_dir: str = os.path.dirname(g_root_dir)
+        for f in os.listdir(g_root_dir):
+            if f.startswith("grass"):
+                self._grass_install_dir = join(g_root_dir, f)
+                break
         logging.info(f"Using grass from here: {self._grass_install_dir}")
 
 
@@ -621,6 +625,8 @@ if __name__ == '__main__':
         log_level = logging.DEBUG
     elif args.quiet:
         log_level = logging.ERROR
+    logging.basicConfig(format='%(asctime)s: %(levelname)s: %(message)s',
+                        level=log_level, datefmt="%d/%m/%Y %H:%M:%S")
 
     try:
         pvmaps: PVMaps = PVMaps(
@@ -629,7 +635,6 @@ if __name__ == '__main__':
             args.output_dir,
             args.pvgis_data_tar_file,
             args.pv_model_coeff_file_dir,
-            log_level,
             args.keep_temp_mapset,
             args.num_processes,
             args.output_direct_diffuse,

@@ -1,0 +1,70 @@
+diff -u r.sun/main.c build-grass/grass-8.2.0/raster/r.sun/main.c
+--- r.sun/main.c	2022-06-03 14:27:06.000000000 +0100
++++ build-grass/grass-8.2.0/raster/r.sun/main.c	2022-08-18 15:04:32.874606576 +0100
+@@ -1954,6 +1954,11 @@
+ 		    gridGeom.coslat * sin_u;
+ 		tan_lam_l = -cos_u * cos_v / q1;
+ 		sunSlopeGeom.longit_l = atan(tan_lam_l);
++
++                bool shouldBeBestAM = (0.0 < sunSlopeGeom.aspect && sunSlopeGeom.aspect <= M_PI);
++                bool isBestAM = (tan_lam_l > 0);
++                sunSlopeGeom.shift12hrs = (shouldBeBestAM != isBestAM);
++
+ 		sunSlopeGeom.lum_C31_l = cos(latid_l) * sunGeom.cosdecl;
+ 		sunSlopeGeom.lum_C33_l = sin_phi_l * sunGeom.sindecl;
+ 
+Only in build-grass/grass-8.2.0/raster/r.sun: OBJ.x86_64-pc-linux-gnu
+diff -u r.sun/rsunlib.c build-grass/grass-8.2.0/raster/r.sun/rsunlib.c
+--- r.sun/rsunlib.c	2022-06-03 14:27:06.000000000 +0100
++++ build-grass/grass-8.2.0/raster/r.sun/rsunlib.c	2022-08-18 15:04:32.878606538 +0100
+@@ -341,6 +341,10 @@
+     /* func = cube; */
+     sunVarGeom->isShadow = 0;
+ 
++    double timeOffset = 0;
++    if (sunSlopeGeom->shift12hrs)
++        timeOffset = M_PI;
++
+     if (useShadow()) {
+ 	length = 0;
+ 
+@@ -383,7 +387,7 @@
+ 		   }
+ 		 */
+ 		s = sunSlopeGeom->lum_C31_l
+-			* cos(-sungeom->timeAngle - sunSlopeGeom->longit_l)
++			* cos(-sungeom->timeAngle - sunSlopeGeom->longit_l + timeOffset)
+ 			+ sunSlopeGeom->lum_C33_l;	/* Jenco */
+ 	    }
+ 
+@@ -409,7 +413,7 @@
+ 		   }
+ 		 */
+ 		s = sunSlopeGeom->lum_C31_l
+-			* cos(-sungeom->timeAngle - sunSlopeGeom->longit_l)
++			* cos(-sungeom->timeAngle - sunSlopeGeom->longit_l + timeOffset)
+ 			+ sunSlopeGeom->lum_C33_l;	/* Jenco */
+ 	    }
+ 	}
+@@ -424,7 +428,7 @@
+ 	   }
+ 	 */
+ 	s = sunSlopeGeom->lum_C31_l
+-		* cos(-sungeom->timeAngle - sunSlopeGeom->longit_l)
++		* cos(-sungeom->timeAngle - sunSlopeGeom->longit_l + timeOffset)
+ 		+ sunSlopeGeom->lum_C33_l;	/* Jenco */
+     }
+ 
+diff -u r.sun/sunradstruct.h build-grass/grass-8.2.0/raster/r.sun/sunradstruct.h
+--- r.sun/sunradstruct.h	2022-06-03 14:27:06.000000000 +0100
++++ build-grass/grass-8.2.0/raster/r.sun/sunradstruct.h	2022-08-18 15:04:32.878606538 +0100
+@@ -73,7 +73,7 @@
+     double lum_C33_l;
+     double slope;
+     double aspect;
+-
++    bool shift12hrs;
+ };
+ 
+ 
+Common subdirectories: r.sun/testsuite and build-grass/grass-8.2.0/raster/r.sun/testsuite

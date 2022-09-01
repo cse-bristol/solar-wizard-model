@@ -1,0 +1,68 @@
+diff -u r.pv/main.c build-grass/grass-8.2.0/raster/r.pv/main.c
+--- r.pv/main.c	2016-05-24 07:29:22.000000000 +0100
++++ build-grass/grass-8.2.0/raster/r.pv/main.c	2022-08-18 15:02:20.843829428 +0100
+@@ -2196,6 +2196,11 @@
+                     gridGeom.coslat * sin_u;
+                 tan_lam_l = -cos_u * cos_v / q1;
+                 sunSlopeGeom.longit_l = atan(tan_lam_l);
++
++                bool shouldBeBestAM = (0.0 < sunSlopeGeom.aspect && sunSlopeGeom.aspect <= M_PI);
++                bool isBestAM = (tan_lam_l > 0);
++                sunSlopeGeom.shift12hrs = (shouldBeBestAM != isBestAM);		
++
+                 sunSlopeGeom.lum_C31_l = cos(latid_l) * sunGeom.cosdecl;
+                 sunSlopeGeom.lum_C33_l = sin_phi_l * sunGeom.sindecl;
+ 
+diff -u r.pv/rsunlib.c build-grass/grass-8.2.0/raster/r.pv/rsunlib.c
+--- r.pv/rsunlib.c	2016-02-07 15:19:42.000000000 +0000
++++ build-grass/grass-8.2.0/raster/r.pv/rsunlib.c	2022-08-18 15:02:20.843829428 +0100
+@@ -339,6 +339,10 @@
+     func = cube;
+     sunVarGeom->isShadow = 0;
+ 
++    double timeOffset = 0;
++    if (sunSlopeGeom->shift12hrs)
++        timeOffset = M_PI;
++
+     if (useShadow()) {
+ 	length = 0;
+ 
+@@ -385,7 +389,7 @@
+ 		   s = sunVarGeom->sinSolarAltitude;
+ 		   }
+ 		 */
+-		s = sunSlopeGeom->lum_C31_l * cos(-sungeom->timeAngle - sunSlopeGeom->longit_l) + sunSlopeGeom->lum_C33_l;	/* Jenco */
++		s = sunSlopeGeom->lum_C31_l * cos(-sungeom->timeAngle - sunSlopeGeom->longit_l + timeOffset) + sunSlopeGeom->lum_C33_l;	/* Jenco */
+ 	    }
+ 
+ 
+@@ -415,7 +419,7 @@
+ 		   s = sunVarGeom->sinSolarAltitude;
+ 		   }
+ 		 */
+-		s = sunSlopeGeom->lum_C31_l * cos(-sungeom->timeAngle - sunSlopeGeom->longit_l) + sunSlopeGeom->lum_C33_l;	/* Jenco */
++		s = sunSlopeGeom->lum_C31_l * cos(-sungeom->timeAngle - sunSlopeGeom->longit_l + timeOffset) + sunSlopeGeom->lum_C33_l;	/* Jenco */
+ 	    }
+ 	}
+     }
+@@ -430,7 +434,7 @@
+ 	   s = sunVarGeom->sinSolarAltitude;
+ 	   }
+ 	 */
+-	s = sunSlopeGeom->lum_C31_l * cos(-sungeom->timeAngle - sunSlopeGeom->longit_l) + sunSlopeGeom->lum_C33_l;	/* Jenco */
++	s = sunSlopeGeom->lum_C31_l * cos(-sungeom->timeAngle - sunSlopeGeom->longit_l + timeOffset) + sunSlopeGeom->lum_C33_l;	/* Jenco */
+ 
+ 
+     }
+diff -u r.pv/sunradstruct.h build-grass/grass-8.2.0/raster/r.pv/sunradstruct.h
+--- r.pv/sunradstruct.h	2016-02-07 15:20:05.000000000 +0000
++++ build-grass/grass-8.2.0/raster/r.pv/sunradstruct.h	2022-08-18 15:02:20.847829393 +0100
+@@ -72,7 +72,7 @@
+     double lum_C33_l;
+     double slope;
+     double aspect;
+-
++    bool shift12hrs;
+ };
+ 
+ 

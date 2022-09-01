@@ -1,0 +1,28 @@
+Ref 
+a) dokumen.tips_hofierka-jaroslav.pdf in same dir as this file (which is the first ref in the r.sun docs)
+b) r.sun source code (in raster/r.sun of grass source tree)
+
+Issue
+Direct beam radiation from the sun falling on the back of inclined surfaces is included in direct beam output raster values when the aspect of the surface is facing away from the sun.
+
+Solution
+(eqn numbers are from dokumen.tips_hofierka-jaroslav.pdf)
+Ref eqn (16) - 
+* This calculates the "position of the sun in respect to an inclined surface" ... but ignoring whether or not the earth is in the way.
+* "T" ranges from -pi to +pi as the hour of day goes from 0 to 23 (note the code uses "cos(-T - lamda_prime)")
+* The result, sin(delta_exp), is expected to be positive when the sun rays are on the front of the surface and negative on the reverse (- and negative values are filtered in the code).
+* However, for north facing surfaces above a certain angle this is reversed
+
+To find what this "certain angle" is...
+* In eqn (16) lamda_prime translates the cos curve based on (see 2nd of eqn(18)) slope, aspect and latitute
+* For north-east-south facing planes lamda_prime needs to be positive as the front surface is illuminated more in the morning (sun rises in the east), or for south-west-north facing surfaces lamda_prime needs to be negative as the surface is illuminated more in the afternoon.
+* From running with test values, the denominator of the 2nd of eqn(18) switches sign (goes from very small +ve to very small -ve value) at the "certain angle" for surfaces west - north - east (excluding west and east). 
+* This causes the tan(lamda_prime) value to switch sign so lamda_prime switches from pi/2 to -pi/2, which makes the delta_exp value move by 12 hours - the expected (by the code) atan() result is the next (correct) result, which is pi above the -pi/2 value returned.
+* This means that surfaces above the "certain angle" and facing west - north - east (excluding west and east) are out by 12 hours, i.e. pi, so the cos function gives -ve what's needed.
+
+
+To fix the issue, I've added code to:
+* get whether the surface is expected to be illuminated in the morning or not
+* get the sign of lamda_prime
+* if the two don't match, delta_exp is translated by adding pi to angle given to cos in eqn (16)
+* (by applying this to all aspect angles, the correction applies in the southern hemisphere too)

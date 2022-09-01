@@ -13,8 +13,7 @@ from sklearn.utils.random import sample_without_replacement
 from sklearn.utils.validation import _check_sample_weight
 from sklearn.utils.validation import has_fit_parameter
 from sklearn.exceptions import ConvergenceWarning
-
-from albion_models.solar_pv.ransac.perimeter import perimeter_crofton
+from skimage.measure import perimeter_crofton
 
 
 class RANSACValueError(ValueError):

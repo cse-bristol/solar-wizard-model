@@ -19,7 +19,7 @@ def assert_panel_count(roof, count):
         slope=roof['slope'],
         panel_spacing_m=0.01,
         is_flat=roof['is_flat'])
-    assert len(panels) == count, f"Had {len(panels)}, wanted {count}"
+    assert len(panels.geoms) == count, f"Had {len(panels)}, wanted {count}"
 
 
 class PanelTest(ParameterisedTestCase):

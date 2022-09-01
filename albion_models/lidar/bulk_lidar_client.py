@@ -43,7 +43,7 @@ class LidarSource(enum.Enum):
     def filepath(self, bulk_lidar_dir: str, grid_ref: str, res: Resolution):
         res_str = res.name[2:]
         if self == LidarSource.ENGLAND:
-            return join(bulk_lidar_dir, f"LIDAR-DSM-{res_str}-ENGLAND-EA", f"LIDAR-DSM-{res_str}-{grid_ref}.zip")
+            return join(bulk_lidar_dir, "206817_LIDAR_Comp_DSM", f"LIDAR-DSM-{res_str}-ENGLAND-EA", f"LIDAR-DSM-{res_str}-{grid_ref}.zip")
         elif self == LidarSource.WALES:
             return join(bulk_lidar_dir, "wales", f"{res_str.lower()}_res_{grid_ref}_dsm.zip")
         elif self == LidarSource.SCOTLAND_1:

@@ -31,7 +31,7 @@ def _check(filename: str):
     return ha.exclusion_reason()
 
 
-class RansacTestCase(ParameterisedTestCase):
+class OutdatedLidarTestCase(ParameterisedTestCase):
 
     def test_lidar_checker(self):
         self.parameterised_test([

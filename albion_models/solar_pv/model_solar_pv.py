@@ -10,7 +10,7 @@ import albion_models.solar_pv.tables as tables
 from albion_models.db_funcs import connect, sql_script_with_bindings, process_pg_uri
 from albion_models.solar_pv.outdated_lidar.outdated_lidar_check import check_lidar
 from albion_models.solar_pv.panels.panels import place_panels
-from albion_models.solar_pv.pvgis import pvgis
+from albion_models.solar_pv.pvgis.pvgis import pvgis
 from albion_models.solar_pv.ransac.run_ransac import run_ransac
 from albion_models.solar_pv.rasters import generate_rasters
 from albion_models.solar_pv.roof_polygons import create_roof_polygons
@@ -97,6 +97,7 @@ def model_solar_pv(pg_uri: str,
           horizon_search_radius=horizon_search_radius,
           horizon_slices=horizon_slices,
           peak_power_per_m2=peak_power_per_m2,
+          flat_roof_degrees=flat_roof_degrees,
           elevation_raster=elevation_raster,
           mask_raster=mask_raster,
           debug_mode=debug_mode)
@@ -163,3 +164,7 @@ def _validate_params(horizon_search_radius: int,
         raise ValueError(f"panel_width_m must be greater than 0, was {panel_width_m}")
     if panel_height_m <= 0:
         raise ValueError(f"panel_height_m must be greater than 0, was {panel_height_m}")
+    if os.environ.get("PVGIS_DATA_DIR", None) is None:
+        raise ValueError(f"env var PVGIS_DATA_DIR must be set")
+    if os.environ.get("PVGIS_GRASS_DBASE", None) is None:
+        raise ValueError(f"env var PVGIS_GRASS_DBASE must be set")

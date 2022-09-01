@@ -1,0 +1,87 @@
+<h2>DESCRIPTION</h2>
+<p>
+<b>r.pv</b> is an extension of <b>r.sun</b>. In addition to the solar radiation calculations of <b>r.sun</b> it uses temperature data to calculate the energy output of photovoltaic panels or arrays. For the details of the solar radiation calculations, see the <b>r.sun</b> documentation.  
+</p>
+
+<p>
+Like <b>r.sun</b>, <b>r.pv</b> can calculate either the instantaneous PV power for a single time and day, or it can calculate the total energy output for one day. In addition, it uses raster data for the air temperature to calculate the influence of irradiance and temperature on the PV power, according to the model described in Huld et al., 2010 and Huld et al., 2011. 
+<p>
+
+<p>
+All options are the same as for r.sun except for the following:
+</p>
+
+<ul>
+<li>
+<b>-a</b>: if you use this flag the solar irradiance will be corrected for the in-
+creased reflectivity of PV modules at shallow angles of incidence, accord-
+ing to the model of Martin and Ruiz(2001). 
+</li>
+<li>
+<b>-i</b>: if you use this flag the solar irradiance used to calculate the effect of irradiance on module performance  is the clear-sky value, not the real-sky value. See Huld et al., 2010.
+</li>
+<li>
+<b> temperatures</b>: one or more raster
+maps containing the temperature at regular intervals during the day. If
+you use the single time option you should give only one raster map here. If
+you give N raster maps as input the code will assume that these represent
+the temperature every 24/N hour. These times are assumed to be UTC.
+</li>
+<li>
+<b>modelparameters</b>: the name of a text file containing the coefficients for
+the PV power model for the given type of PV module. The format is
+described below.
+</li>
+<li>
+<b>glob_pow</b> : PV output power or energy. This is given in W for the single-
+time calculation and in watt-hours for the full day calculation, for a nom-
+inal PV power of 1 kWp.
+</li>
+</ul>
+
+/p>
+
+
+<h3>Coefficient file for the <b>modelparameters</b> option </h3>
+
+<p>
+The input to this option is the path to a simple text file containing one number on each line. 
+The PV power model uses 7 coefficients as described in Huld et al., 2010. These are given as 7 numbers each on its own line. In addition there is an extra coefficient for the dependence of module temperature on air temperature and irradiance.  
+
+hree sets of coefficients are supplied with the code, in the <b>r.pv</b> source directory. 
+
+
+
+<h2>REFERENCES</h2>
+
+<p> See also references in the documentation of <b>r.sun</b>.
+</p>
+
+<ul>
+<li>
+ N. Martin, J. Ruiz, Calculation of the PV modules angular losses under field
+conditions by means of an analytical model, Solar Energy Materials and
+Solar Cells 70 (1) (2001) 25–38. doi:10.1016/S0927-0248(00)00408-6.
+</li>
+<li>
+T. Huld, R. Gottschalg, H. Beyer, and M. Topič, “Mapping the performance
+of PV modules, effects of module type and data averaging,” Solar Energy,vol. 84, pp. 324–338, 2010.
+</li>
+<li> 
+T. A. Huld, G. Friesen, A. Skoczek, R. A. Kenny, T. Sample, M. Field, and
+E. D. Dunlop, “A power-rating model for crystalline silicon PV modules,”
+Solar Energy Materials & Solar Cells, vol. 95, pp. 3359–3369, Aug. 2011.
+</li>
+
+<h2>AUTHORS</h2>
+
+
+Thomas Huld, JRC, Italy <br>
+
+&copy; 2016, Thomas Huld. This program is free software under the GNU General Public License (&gt;=v2)
+<address>
+<a href="MAILTO:thomas.huld@jrc.ec.europa.eu">thomas.huld@jrc.ec.europa.eu</a>
+</address>
+
+<p>
+<i>Last changed: $Date: 2016-05-18 15:16:24 +0100 (Wed, 18 May 2016) $</i> 
