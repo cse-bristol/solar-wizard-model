@@ -1,5 +1,6 @@
 /* sun11.c */
 int INPUT(void);
+int MASK(void);
 int OUTGR(void);
 double amax1(double, double);
 double amin1(double, double);

@@ -66,6 +66,7 @@ const double rad2deg = 180. / M_PI;
 const double minAngle = DEG;
 
 const char *elevin;
+const char *mask;
 const char *horizon = NULL;
 const char *mapset = NULL;
 const char *per;
@@ -81,6 +82,7 @@ double bufferZone = 0., ebufferZone = 0., wbufferZone = 0.,
        nbufferZone = 0., sbufferZone = 0.;
 
 int INPUT(void);
+int MASK(void);
 int OUTGR(int numrows, int numcols);
 double amax1(double, double);
 double amin1(double, double);
@@ -108,6 +110,7 @@ int ip, jp, ip100, jp100;
 int n, m, m100, n100;
 int degreeOutput, compassOutput = FALSE;
 float **z, **z100, **horizon_raster;
+int **maska;
 double stepx, stepy, stepxhalf, stepyhalf, stepxy, xp, yp, op, dp, xg0, xx0,
     yg0, yy0, deltx, delty;
 double invstepx, invstepy, distxy;
@@ -163,7 +166,7 @@ int main(int argc, char *argv[])
     struct GModule *module;
     struct
     {
-	struct Option *elevin, *dist, *coord, *direction, *horizon,
+	struct Option *elevin, *mask, *dist, *coord, *direction, *horizon,
                       *step, *start, *end, *bufferzone, *e_buff, *w_buff,
                       *n_buff, *s_buff, *maxdistance, *output;
     } parm;
@@ -193,6 +196,14 @@ int main(int argc, char *argv[])
     parm.elevin = G_define_standard_option(G_OPT_R_ELEV);
     parm.elevin->guisection = _("Input");
 
+    parm.mask = G_define_option();
+    parm.mask->key = "mask";
+    parm.mask->type = TYPE_STRING;
+    parm.mask->required = YES;
+    parm.mask->gisprompt = "old,cell,raster";
+    parm.mask->description =
+	_("Name of the input mask raster. Must have the same alignment as the elevation raster");
+    parm.mask->guisection = _("Input");
 
     parm.direction = G_define_option();
     parm.direction->key = "direction";
@@ -354,6 +365,7 @@ int main(int argc, char *argv[])
         G_important_message(_("Note: In latitude-longitude coordinate system specify buffers in degree unit"));
 
     elevin = parm.elevin->answer;
+	mask = parm.mask->answer;
 
     if (parm.coord->answer == NULL) {
         G_debug(1, "Setting mode: WHOLE_RASTER");
@@ -555,6 +567,7 @@ int main(int argc, char *argv[])
 
 
     INPUT();
+	MASK();
     G_debug(1, "calculate() starts...");
     calculate(xcoord, ycoord, (int)(ebufferZone / stepx),
 	      (int)(wbufferZone / stepx), (int)(sbufferZone / stepy),
@@ -635,6 +648,41 @@ int INPUT(void)
     return 1;
 }
 
+int MASK(void)
+{
+    CELL *cell1;
+    int fd1, row, row_rev;
+    int l, j;
+
+    cell1 = Rast_allocate_c_buf();
+
+    maska = (int **)G_malloc(sizeof(int *) * (m));
+
+    for (l = 0; l < m; l++) {
+		maska[l] = (int *)G_malloc(sizeof(int) * (n));
+    }
+    /*read mask raster */
+
+    fd1 = Rast_open_old(mask, "");
+
+    for (row = 0; row < m; row++) {
+		Rast_get_c_row(fd1, cell1, row);
+
+		for (j = 0; j < n; j++) {
+			row_rev = m - row - 1;
+
+			if (!Rast_is_c_null_value(cell1 + j)) {
+				maska[row_rev][j] = (int)cell1[j];
+			}
+			else {
+				maska[row_rev][j] = UNDEFZ;
+			}
+		}
+    }
+    Rast_close(fd1);
+
+    return 1;
+}
 
 
 
@@ -1256,7 +1304,7 @@ void calculate(double xcoord, double ycoord, int buffer_e, int buffer_w,
 		    maxlength =
 			(maxlength < fixedMaxLength) ? maxlength : fixedMaxLength;
 
-		    if (z_orig != UNDEFZ) {
+		    if (z_orig != UNDEFZ && maska[j][i] == 1) {
 
 			G_debug(4,"**************new line %d %d\n", i, j);
 			shadow_angle = horizon_height();
@@ -1275,7 +1323,9 @@ void calculate(double xcoord, double ycoord, int buffer_e, int buffer_w,
 			horizon_raster[j - buffer_s][i - buffer_w] =
 			    shadow_angle;
 
-		    }	/* undefs */
+		    } else {
+				horizon_raster[j - buffer_s][i - buffer_w] = UNDEFZ;
+			}
 		}
 	    }
 
