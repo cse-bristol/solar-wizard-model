@@ -35,6 +35,7 @@ AND (NOT ST_Touches(ST_Centroid(b.geom_4326), q.bounds)
      OR b.geom_4326 &<| q.bounds
      OR b.geom_4326 &>  q.bounds);
 
+CREATE UNIQUE INDEX IF NOT EXISTS buildings_toid_idx ON {buildings} (toid);
 CREATE INDEX IF NOT EXISTS buildings_geom_27700_idx ON {buildings} USING GIST (geom_27700);
 
 --

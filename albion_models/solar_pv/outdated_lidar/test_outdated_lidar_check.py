@@ -17,7 +17,7 @@ def _load_data(filename: str) -> List[dict]:
                  'within_building': row['within_building'] == 'True',
                  'without_building': row['without_building'] == 'True',
                  'height': float(row['height']),
-                 'base_roof_height': float(row['base_roof_height']),
+                 'base_roof_height': float(row['base_roof_height']) if row['base_roof_height'] else None,
                  }
                 for row in csv.DictReader(f)]
 
@@ -52,4 +52,6 @@ class RansacTestCase(ParameterisedTestCase):
             # ('osgb1000020002198.csv', None),  # Failing
             # ('osgb1000043085181.csv', None),  # Failing
             ('osgb1000020002780.csv', None),
+            ('osgb5000005262592293.csv', None),
+            ('osgb5000005262593494.csv', None),
         ], _check)

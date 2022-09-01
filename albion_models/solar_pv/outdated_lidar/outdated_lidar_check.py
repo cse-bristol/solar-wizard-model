@@ -80,15 +80,17 @@ class HeightAggregator:
 
         if self.debug:
             print(f"OSMM heights: min {self.osmm_base_roof_height} avg {self.osmm_height}")
-            print(f"avg LiDAR height: {lidar_height} thresh1 {height_threshold} "
-                  f"thresh2 {self.osmm_base_roof_height / 2}")
+            print(f"avg LiDAR height: {lidar_height}")
 
-        if lidar_height <= height_threshold:
+        if lidar_height < 0.0:
+            return 'OUTDATED_LIDAR_COVERAGE'
+        elif lidar_height <= height_threshold:
             if self.osmm_height and abs(self.osmm_height - lidar_height) > 1:
                 return 'OUTDATED_LIDAR_COVERAGE'
             elif not self.osmm_height:
                 return 'OUTDATED_LIDAR_COVERAGE'
-        elif self.osmm_base_roof_height and self.osmm_base_roof_height / 2 > lidar_height:
+
+        if self.osmm_base_roof_height and self.osmm_base_roof_height / 2 > lidar_height:
             return 'OUTDATED_LIDAR_COVERAGE'
 
         return None
@@ -215,4 +217,4 @@ def _already_checked(pg_conn, job_id: int) -> bool:
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG,
                         format='[%(asctime)s] %(levelname)s: %(message)s')
-    check_lidar("postgresql://albion_ddl:albion320@localhost:5432/albion", 1617)
+    check_lidar("postgresql://albion_ddl:albion320@localhost:5432/albion", 1618)
