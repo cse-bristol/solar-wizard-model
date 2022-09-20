@@ -90,18 +90,18 @@ class PVMaps:
 
         if os.path.exists(grass_dbase_dir):
             if not os.path.isdir(grass_dbase_dir):
-                raise Exception(f"Grass dbase directory ({grass_dbase_dir}) must be a directory")
+                raise ValueError(f"Grass dbase directory ({grass_dbase_dir}) must be a directory")
         else:
             os.makedirs(grass_dbase_dir)
         self._g_dbase: str = grass_dbase_dir
 
         if not os.path.isdir(input_dir):
-            raise Exception(f"Input directory ({input_dir}) must exist and be a directory")
+            raise ValueError(f"Input directory ({input_dir}) must exist and be a directory")
         self._input_dir: str = input_dir
 
         if os.path.exists(output_dir):
             if not os.path.isdir(output_dir):
-                raise Exception(f"Output directory ({output_dir}) must be a directory")
+                raise ValueError(f"Output directory ({output_dir}) must be a directory")
         else:
             os.makedirs(output_dir)
         self._output_dir: str = output_dir
@@ -112,32 +112,32 @@ class PVMaps:
         if num_cpus is None:
             num_cpus = 1
         if not (1 <= num_processes <= num_cpus):
-            raise Exception(f"Num processes must be 1 to {num_cpus}")
+            raise ValueError(f"Num processes must be 1 to {num_cpus}")
         self._num_procs: int = num_processes
 
         self._output_direct_diffuse = output_direct_diffuse
 
         if not (1 <= horizon_step_degrees <= 360):
-            raise Exception(f"Horizon step must be 1 to 360")
+            raise ValueError(f"Horizon step must be 1 to 360")
         self._horizon_step: int = horizon_step_degrees  # 30
 
         if not (horizon_search_distance > 0):
-            raise Exception(f"Horizon search distance must be positive")
+            raise ValueError(f"Horizon search distance must be positive")
         self._horizon_search_distance = horizon_search_distance
 
         if not (0 <= flat_roof_degrees <= 90):
-            raise Exception(f"Flat roof degrees must be 0 to 90")
+            raise ValueError(f"Flat roof degrees must be 0 to 90")
         self._flat_roof_degrees = flat_roof_degrees
 
         if not (0 <= flat_roof_degrees_threshold <= 90):
-            raise Exception(f"Flat roof degrees must be 0 to 90")
+            raise ValueError(f"Flat roof degrees must be 0 to 90")
         self._flat_roof_degrees_threshold = flat_roof_degrees_threshold
 
         if panel_type not in (CSI, CDTE):
-            raise Exception(f"Panel type must be {CSI} or {CDTE}")
+            raise ValueError(f"Panel type must be {CSI} or {CDTE}")
         self._pv_model_coeff_file: str = join(pv_model_coeff_file_dir, f"{panel_type.lower()}.coeffs")
         if not os.path.isfile(self._pv_model_coeff_file):
-            raise Exception(f"Model coefficient file ({self._pv_model_coeff_file}) not found")
+            raise ValueError(f"Model coefficient file ({self._pv_model_coeff_file}) not found")
         self._r_spectral: str = f"spectraleffect_{panel_type}_"
 
         self._pv_time_steps: List[Tuple[int, int, int, int]]
@@ -145,7 +145,7 @@ class PVMaps:
             self._pv_time_steps = self._monthly_pv_time_steps()
         else:
             if not (1 <= num_pv_calcs_per_year <= 365):
-                raise Exception(f"Num PV calcs per year must be between 1 and 365")
+                raise ValueError(f"Num PV calcs per year must be between 1 and 365")
             else:
                 self._pv_time_steps = self._calc_pv_time_steps(num_pv_calcs_per_year)
         ###
@@ -291,7 +291,7 @@ class PVMaps:
                                        f"{grass_env.get('LD_LIBRARY_PATH', '')}"
 
         # Ref https://grasswiki.osgeo.org/wiki/Working_with_GRASS_without_starting_it_explicitly#Python:_GRASS_GIS_8_with_existing_location
-        python_path: str = join(self._grass_install_dir, "src", "python")
+        python_path: str = join(self._grass_install_dir, "etc", "python")
         grass_env["PYTHONPATH"] = f"{python_path}{os.pathsep}{grass_env.get('PYTHONPATH', '')}"  # for sub-processes
         self._grass_env = grass_env
 
@@ -299,19 +299,19 @@ class PVMaps:
         grass_bin = join(self._grass_install_dir, 'bin')
         grass_scripts = join(self._grass_install_dir, 'scripts')
         grass_lib = join(self._grass_install_dir, 'lib')
-        grass_python = join(self._grass_install_dir, 'etc' 'python')
+        grass_python = join(self._grass_install_dir, 'etc', 'python')
         if not os.path.exists(self._grass_install_dir):
-            raise Exception(f"Path {self._grass_install_dir} not found")
+            raise FileNotFoundError(f"Path {self._grass_install_dir} not found")
         if not os.path.exists(self._gisrc_filename):
-            raise Exception(f"Path {self._gisrc_filename} not found")
+            raise FileNotFoundError(f"Path {self._gisrc_filename} not found")
         if not os.path.exists(grass_bin):
-            raise Exception(f"Path {grass_bin} not found")
+            raise FileNotFoundError(f"Path {grass_bin} not found")
         if not os.path.exists(grass_scripts):
-            raise Exception(f"Path {grass_scripts} not found")
+            raise FileNotFoundError(f"Path {grass_scripts} not found")
         if not os.path.exists(grass_lib):
-            raise Exception(f"Path {grass_lib} not found")
+            raise FileNotFoundError(f"Path {grass_lib} not found")
         if not os.path.exists(grass_python):
-            raise Exception(f"Path {grass_python} not found")
+            raise FileNotFoundError(f"Path {grass_python} not found")
 
     def _update_mapset(self, mapset: str):
         with open(self._gisrc_filename, "w") as rcfile:
@@ -370,7 +370,7 @@ class PVMaps:
 
         if not os.path.exists(location):
             if not os.path.isfile(self._pvgis_data_tar):
-                raise Exception(f"File {self._pvgis_data_tar} not found")
+                raise FileNotFoundError(f"File {self._pvgis_data_tar} not found")
 
             logging.info("_init_grass_db_pvmaps_data")
 
@@ -381,7 +381,7 @@ class PVMaps:
                 tar.extractall(path=permanent_mapset)
 
         elif not os.path.exists(permanent_mapset):
-            raise Exception(f"Grass DB path ({location}) exists but {PERMANENT_MAPSET} is missing!")
+            raise FileNotFoundError(f"Grass DB path ({location}) exists but {PERMANENT_MAPSET} is missing!")
 
     def _remove_temp_mapset_if_reqd(self):
         if not self._keep_temp_mapset:
@@ -412,7 +412,7 @@ class PVMaps:
         for filename, _ in rasters_to_import:
             ip: str = join(self._input_dir, filename)
             if not os.path.isfile(ip):
-                raise Exception(f"Input raster file ({ip}) not found")
+                raise FileNotFoundError(f"Input raster file ({ip}) not found")
 
         self._run_cmd_via_method_p(self._import_raster, rasters_to_import)
 
@@ -551,7 +551,8 @@ class PVMaps:
         self._run_cmd_via_method_p(self._run_cmd, [(bha_cmd,), (dha_cmd,), (hpv_cmd,)])
 
     def _export_raster(self, in_raster: str, out_raster_file: str):
-        self._run_cmd(f"r.out.gdal --overwrite input={in_raster} output='{out_raster_file}' format=GTiff type=Float64 -c")
+        self._run_cmd(f"r.out.gdal --overwrite input={in_raster} output='{out_raster_file}' "
+                      f"format=GTiff type=Float64 -c createopt=\"COMPRESS=PACKBITS,TILED=YES\"")
 
     def _export_rasters(self) -> (str, List[str]):
         logging.info("_export_rasters")
@@ -582,7 +583,7 @@ class PVMaps:
     def _find_grass_locn(self):
         g_exe_locn: str = shutil.which("grass")
         if not g_exe_locn.endswith("grass"):
-            raise Exception("Failed to find grass install dir")
+            raise FileNotFoundError("Failed to find grass install dir")
         g_root_dir: str = os.path.dirname(g_exe_locn)
         if g_root_dir.endswith("bin"):
             g_root_dir: str = os.path.dirname(g_root_dir)

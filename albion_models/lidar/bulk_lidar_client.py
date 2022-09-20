@@ -5,7 +5,7 @@ import shutil
 from os.path import join
 from typing import List
 
-import gdal
+from osgeo import gdal
 
 from albion_models import gdal_helpers
 from albion_models.geos import bounds_polygon, get_grid_refs

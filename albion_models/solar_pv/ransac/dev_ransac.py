@@ -10,8 +10,7 @@ from albion_models import paths
 from albion_models.db_funcs import connection, sql_command
 
 import psycopg2.extras
-from osgeo import ogr
-import gdal
+from osgeo import ogr, gdal
 
 from albion_models.lidar.lidar import LIDAR_NODATA
 from albion_models.solar_pv import tables

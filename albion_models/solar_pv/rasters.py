@@ -11,6 +11,7 @@ from albion_models import gdal_helpers
 from albion_models.db_funcs import sql_script, copy_csv, count, connection
 from albion_models.postgis import get_merged_lidar
 from albion_models.solar_pv import mask
+from albion_models.transformations import _7_PARAM_SHIFT
 
 
 def generate_rasters(pg_uri: str,
@@ -94,9 +95,7 @@ def _generate_4326_rasters(solar_dir: str,
         # Use the 7-parameter shift rather than GDAL's default 3-parameter shift
         # for EN->long/lat transformation as it's much more accurate:
         # https://digimap.edina.ac.uk/webhelp/digimapgis/projections_and_transformations/transformations_in_gdalogr.htm
-        src_srs = "+proj=tmerc +lat_0=49 +lon_0=-2 " \
-                  "+k=0.999601 +x_0=400000 +y_0=-100000 +ellps=airy +units=m +no_defs " \
-                  "+towgs84=446.448,-125.157,542.060,0.1502,0.2470,0.8421,-20.4894"
+        src_srs = _7_PARAM_SHIFT
     else:
         src_srs = f"EPSG:{srid}"
 
@@ -144,9 +143,15 @@ def _load_rasters_to_db(pg_uri: str,
         )
 
 
-def copy_raster(pg_conn, solar_dir: str, raster: str, table: str, mask_raster: str = None, debug_mode: bool = False):
+def copy_raster(pg_conn,
+                solar_dir: str,
+                raster: str,
+                table: str,
+                mask_raster: str = None,
+                include_nans: bool = True,
+                debug_mode: bool = False):
     csv_file = join(solar_dir, f'temp-{table}.csv')
-    gdal_helpers.raster_to_csv(raster, csv_file, mask_raster)
+    gdal_helpers.raster_to_csv(raster, csv_file, mask_raster, include_nans)
     copy_csv(pg_conn, csv_file, table)
     if not debug_mode:
         try:

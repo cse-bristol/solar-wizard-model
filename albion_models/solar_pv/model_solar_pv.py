@@ -93,6 +93,7 @@ def model_solar_pv(pg_uri: str,
     pvgis(pg_uri=pg_uri,
           job_id=job_id,
           solar_dir=solar_dir,
+          resolution_metres=res,
           pv_tech=pv_tech,
           horizon_search_radius=horizon_search_radius,
           horizon_slices=horizon_slices,
@@ -154,7 +155,7 @@ def _validate_params(horizon_search_radius: int,
         raise ValueError(f"max_roof_slope_degrees must be between 0 and 90, was {max_roof_slope_degrees}")
     if min_roof_area_m < 0:
         raise ValueError(f"min_roof_area_m must be greater than or equal to 0, was {min_roof_area_m}")
-    if min_roof_degrees_from_north < 0 or min_roof_degrees_from_north > 180:   # todo change min
+    if min_roof_degrees_from_north < 0 or min_roof_degrees_from_north > 180:
         raise ValueError(f"min_roof_degrees_from_north must be between 0 and 180, was {min_roof_degrees_from_north}")
     if flat_roof_degrees < 0 or flat_roof_degrees > 90:
         raise ValueError(f"flat_roof_degrees must be between 0 and 90, was {flat_roof_degrees}")

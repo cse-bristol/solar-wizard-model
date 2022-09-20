@@ -1,13 +1,12 @@
 import shlex
 
-import gdal
 import json
 import logging
 import numpy as np
 import os
 import subprocess
 import textwrap
-from osgeo import ogr
+from osgeo import gdal
 from typing import List, Tuple
 
 
@@ -159,8 +158,14 @@ def reproject(raster_in: str, raster_out: str, src_srs: str, dst_srs: str):
     Reproject a raster. Will keep the same number of pixels as before.
     """
     ref = gdal.Open(raster_in)
+    ulx, xres, xskew, uly, yskew, yres = ref.GetGeoTransform()
+    lrx = ulx + (ref.RasterXSize * xres)
+    lry = uly + (ref.RasterYSize * yres)
+
     gdal.Warp(raster_out, raster_in, dstSRS=dst_srs, srcSRS=src_srs,
               width=ref.RasterXSize, height=ref.RasterYSize,
+              # resampleAlg="bilinear",
+              outputBounds=(ulx, lry, lrx, uly), outputBoundsSRS=src_srs,
               creationOptions=['TILED=YES', 'COMPRESS=PACKBITS'])
 
 
@@ -226,8 +231,13 @@ def run(command: str):
         raise ValueError(res.stderr)
 
 
-def raster_to_csv(raster_file: str, csv_out: str,  mask_raster: str = None,
-                  band: int = 1, mask_band: int = 1, mask_keep: int = 1):
+def raster_to_csv(raster_file: str,
+                  csv_out: str,
+                  mask_raster: str = None,
+                  band: int = 1,
+                  mask_band: int = 1,
+                  mask_keep: int = 1,
+                  include_nans: bool = True):
     """
     Adapted from https://github.com/postmates/gdal/blob/master/scripts/gdal2xyz.py
     with the addition of an optional mask raster
@@ -239,7 +249,7 @@ def raster_to_csv(raster_file: str, csv_out: str,  mask_raster: str = None,
     if mask_raster:
         mask_ds = gdal.Open(mask_raster)
         mb = mask_ds.GetRasterBand(mask_band)
-    gt = r_ds.GetGeoTransform()
+    ulx, xres, xskew, uly, yskew, yres = r_ds.GetGeoTransform()
 
     with open(csv_out, 'w') as f:
         for y in range(r_ds.RasterYSize):
@@ -251,9 +261,11 @@ def raster_to_csv(raster_file: str, csv_out: str,  mask_raster: str = None,
 
             for x in range(0, r_ds.RasterXSize):
                 if not mask_raster or int(mask_data[x]) == mask_keep:
-                    geo_x = gt[0] + (x + 0.5) * gt[1] + (y + 0.5) * gt[2]
-                    geo_y = gt[3] + (x + 0.5) * gt[4] + (y + 0.5) * gt[5]
-                    f.write(f"{float(geo_x)},{float(geo_y)},{float(data[x]):.2f}\n")
+                    if include_nans or data[x] != np.nan:
+                        # TODO do these 0.5s rely on res==1m?
+                        geo_x = ulx + (x + 0.5) * xres + (y + 0.5) * xskew
+                        geo_y = uly + (x + 0.5) * yskew + (y + 0.5) * yres
+                        f.write(f"{float(geo_x)},{float(geo_y)},{float(data[x]):.2f}\n")
 
 
 if __name__ == '__main__':
