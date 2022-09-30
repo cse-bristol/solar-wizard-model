@@ -151,7 +151,7 @@ def copy_raster(pg_conn,
                 include_nans: bool = True,
                 debug_mode: bool = False):
     csv_file = join(solar_dir, f'temp-{table}.csv')
-    gdal_helpers.raster_to_csv(raster, csv_file, mask_raster, include_nans)
+    gdal_helpers.raster_to_csv(raster, csv_file, mask_raster, include_nans=include_nans)
     copy_csv(pg_conn, csv_file, table)
     if not debug_mode:
         try:
