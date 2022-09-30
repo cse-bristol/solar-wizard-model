@@ -175,7 +175,7 @@ class PVMaps:
     def create_pvmap(self, elevation_filename: str, mask_filename: str,
                      forced_slope_filename: Optional[str] = None,
                      forced_aspect_filename: Optional[str] = None,
-                     forced_horizon_basefilename: Optional[str] = None) -> (str, List[str]):
+                     forced_horizon_basefilename: Optional[str] = None) -> None:
         """
         Run PVMaps steps against the input elevation and mask. Raises exception if something goes wrong.
         Creates output rasters in the dir setup in the constructor.
@@ -204,9 +204,8 @@ class PVMaps:
         self._apply_wind_corrections_p()
         self._apply_spectral_corrections_p()
         self._get_annual_rasters_p()
-        yearly_kwh_raster, monthly_kwh_rasters = self._export_rasters()
+        self._export_rasters()
         self._remove_temp_mapset_if_reqd()
-        return yearly_kwh_raster, monthly_kwh_rasters
 
     def _calc_solar_declinations(self):
         return [self._calc_solar_declination(day) for _, day, _, _ in self._pv_time_steps]
@@ -554,7 +553,7 @@ class PVMaps:
         self._run_cmd(f"r.out.gdal --overwrite input={in_raster} output='{out_raster_file}' "
                       f"format=GTiff type=Float64 -c createopt=\"COMPRESS=PACKBITS,TILED=YES\"")
 
-    def _export_rasters(self) -> (str, List[str]):
+    def _export_rasters(self):
         logging.info("_export_rasters")
         exports: List[(str, str)] = []
         monthly_kwh_rasters = []
@@ -578,7 +577,8 @@ class PVMaps:
         exports.append((f"{OUT_PV_POWER_WIND_SPECTRAL_BASENAME}year", yearly_kwh_raster))
 
         self._run_cmd_via_method_p(self._export_raster, exports)
-        return yearly_kwh_raster, monthly_kwh_rasters
+        self.yearly_kwh_raster = yearly_kwh_raster
+        self.monthly_kwh_rasters = monthly_kwh_rasters
 
     def _find_grass_locn(self):
         g_exe_locn: str = shutil.which("grass")

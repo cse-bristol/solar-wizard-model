@@ -52,43 +52,30 @@ def pvgis(pg_uri: str,
 
     horizon_step_degrees = 360 // horizon_slices
 
-    # pvm = pvmaps.PVMaps(
-    #     grass_dbase_dir=os.environ.get("PVGIS_GRASS_DBASE", None),
-    #     input_dir=solar_dir,
-    #     output_dir=pvmaps_dir,
-    #     pvgis_data_tar_file=join(os.environ.get("PVGIS_DATA_DIR", None), "pvgis_data.tar"),
-    #     pv_model_coeff_file_dir=paths.RESOURCES_DIR,
-    #     keep_temp_mapset=debug_mode,
-    #     num_processes=_pvmaps_cpu_count(),
-    #     output_direct_diffuse=False,
-    #     horizon_step_degrees=horizon_step_degrees,
-    #     horizon_search_distance=horizon_search_radius,
-    #     flat_roof_degrees=flat_roof_degrees,
-    #     flat_roof_degrees_threshold=5.0,
-    #     panel_type=panel_type,
-    # )
-    # yearly_kwh_raster, monthly_wh_rasters = pvm.create_pvmap(
-    #     elevation_filename=os.path.basename(elevation_raster),
-    #     mask_filename=os.path.basename(mask_raster))
+    pvm = pvmaps.PVMaps(
+        grass_dbase_dir=os.environ.get("PVGIS_GRASS_DBASE", None),
+        input_dir=solar_dir,
+        output_dir=pvmaps_dir,
+        pvgis_data_tar_file=join(os.environ.get("PVGIS_DATA_DIR", None), "pvgis_data.tar"),
+        pv_model_coeff_file_dir=paths.RESOURCES_DIR,
+        keep_temp_mapset=debug_mode,
+        num_processes=_pvmaps_cpu_count(),
+        output_direct_diffuse=False,
+        horizon_step_degrees=horizon_step_degrees,
+        horizon_search_distance=horizon_search_radius,
+        flat_roof_degrees=flat_roof_degrees,
+        flat_roof_degrees_threshold=5.0,
+        panel_type=panel_type,
+    )
+    pvm.create_pvmap(
+        elevation_filename=os.path.basename(elevation_raster),
+        mask_filename=os.path.basename(mask_raster))
 
-    yearly_kwh_raster = "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_year.tif"
-    monthly_wh_rasters = [
-        "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_17_1.tif",
-        "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_46_2.tif",
-        "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_75_3.tif",
-        "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_103_4.tif",
-        "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_135_5.tif",
-        "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_162_6.tif",
-        "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_198_7.tif",
-        "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_228_8.tif",
-        "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_259_9.tif",
-        "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_289_10.tif",
-        "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_319_11.tif",
-        "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_345_12.tif",
-    ]
+    yearly_kwh_raster = pvm.yearly_kwh_raster
+    monthly_wh_rasters = pvm.monthly_kwh_rasters
 
-    # yearly_kwh_27700, yearly_kwh_mask_27700, monthly_wh_27700 = _generate_27700_rasters(
-    #     pvmaps_dir, yearly_kwh_raster, mask_raster, monthly_wh_rasters)
+    yearly_kwh_27700, mask_27700, monthly_wh_27700 = _generate_27700_rasters(
+        pvmaps_dir, yearly_kwh_raster, mask_raster, monthly_wh_rasters)
 
     logging.info("Finished PVMAPS, loading into db...")
 
@@ -99,8 +86,9 @@ def pvgis(pg_uri: str,
             solar_dir=solar_dir,
             resolution_metres=resolution_metres,
             peak_power_per_m2=peak_power_per_m2,
-            yearly_kwh_raster=yearly_kwh_raster,
-            monthly_wh_rasters=monthly_wh_rasters,
+            yearly_kwh_raster=yearly_kwh_27700,
+            monthly_wh_rasters=monthly_wh_27700,
+            mask_raster=mask_27700,
             debug_mode=debug_mode)
 
 
@@ -133,6 +121,7 @@ def _write_results_to_db(pg_conn,
                          peak_power_per_m2: float,
                          yearly_kwh_raster: str,
                          monthly_wh_rasters: List[str],
+                         mask_raster: str,
                          debug_mode: bool):
     if len(monthly_wh_rasters) != 12:
         raise ValueError(f"Expected 12 monthly rasters - got {len(monthly_wh_rasters)}")
@@ -157,8 +146,8 @@ def _write_results_to_db(pg_conn,
             """,
             table=Identifier(schema, table))
         copy_raster(
-            pg_conn, solar_dir, raster, f"{schema}.{table}",
-            None, include_nans=False, debug_mode=debug_mode)
+            pg_conn, solar_dir, raster, f"{schema}.{table}", mask_raster,
+            include_nans=False, debug_mode=debug_mode)
         logging.info(f"Loaded {raster} into {table}")
 
     sql_script_with_bindings(
