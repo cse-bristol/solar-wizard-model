@@ -1,3 +1,4 @@
+"""NO LONGER USED - keeping for reference only. imports will be stale so won't be runnable"""
 import logging
 import os
 from os.path import join
@@ -24,8 +25,6 @@ _API_RATE_LIMIT_SECONDS_PER_WORKER = _API_RATE_LIMIT_SECONDS * _WORKERS
 _ALLOWED_ERRORS = ("Location over the sea. Please, select another location",)
 
 _session: requests.Session
-
-# TODO - this whole file needs to go. Leaving it for reference until the new adapter is done
 
 
 def pv_gis(pg_uri: str, job_id: int, peak_power_per_m2: float, pv_tech: str, solar_dir: str):

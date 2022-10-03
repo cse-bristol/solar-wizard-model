@@ -18,7 +18,7 @@ model_params = {
         "default": 1000,
         "help": "How far in each direction to look when determining horizon height. Unit: metres. (default: %(default)s)"},
     "horizon_slices": {
-        "default": 16,
+        "default": 36,
         "help": "The number of rays traced from each point to determine horizon height. (default: %(default)s)"},
     "max_roof_slope_degrees": {
         "default": 80,

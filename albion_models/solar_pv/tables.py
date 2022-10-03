@@ -9,10 +9,6 @@ ROOF_POLYGON_TABLE = 'roof_polygons'
 PANEL_POLYGON_TABLE = 'panel_polygons'
 """pixel data joined with polygons representing arrays of PV panels"""
 
-# TODO remove this, not needed:
-SOLAR_PV_TABLE = 'solar_pv'
-"""Table to store the raw solar PV data received from PV-GIS"""
-
 PIXEL_KWH_TABLE = 'pixel_kwh'
 """Table to store the raw per-pixel solar PV data received from PV-GIS"""
 

@@ -9,12 +9,11 @@ from psycopg2.sql import Identifier, Literal
 
 import albion_models.solar_pv.tables as tables
 from albion_models import paths, gdal_helpers
-from albion_models.db_funcs import sql_script, sql_script_with_bindings, connection, \
+from albion_models.db_funcs import sql_script, connection, \
     sql_command
 from albion_models.solar_pv.pvgis import pvmaps
 from albion_models.solar_pv.rasters import copy_raster
-from albion_models.transformations import OSTN15_TO_27700, OSTN15_TO_4326, OSTN02_PROJ4, \
-    _7_PARAM_SHIFT
+from albion_models.transformations import _7_PARAM_SHIFT
 from albion_models.util import get_cpu_count
 
 
@@ -37,7 +36,6 @@ def pvgis(pg_uri: str,
           debug_mode: bool):
     """
     TODO:
-     * load rasters into db and combine
      * usual check to see if stage of model has already happened
      * 14% loss param
     """
@@ -51,9 +49,14 @@ def pvgis(pg_uri: str,
     pvmaps_dir = join(solar_dir, "pvmaps")
     os.makedirs(pvmaps_dir, exist_ok=True)
 
-    # This won't always give the exact number of slices expected, due to step needing
-    # to be an integer for PVMAPS. This seems OK and shouldn't break anything.
+    # In theory for r.horizon and r.pv this value can be a float,
+    # but I can't get that to work. r.horizon seems to truncate it to int
+    # in the filename, though the code doesn't read like it should
     horizon_step_degrees = 360 // horizon_slices
+    if 360 % horizon_slices != 0:
+        logging.warning(f"Using f{horizon_step_degrees} for horizon step, "
+                        f"truncated from {360 / horizon_slices}. To avoid this, use"
+                        f"a horizon_slices value that is a factor of 360.")
 
     pvm = pvmaps.PVMaps(
         grass_dbase_dir=os.environ.get("PVGIS_GRASS_DBASE", None),
@@ -76,6 +79,7 @@ def pvgis(pg_uri: str,
 
     yearly_kwh_raster = pvm.yearly_kwh_raster
     monthly_wh_rasters = pvm.monthly_kwh_rasters
+    # horizons are CCW from East
     horizon_rasters = pvm.horizons
 
     yearly_kwh_27700, mask_27700, monthly_wh_27700, horizon_27700 = _generate_27700_rasters(
