@@ -184,4 +184,4 @@ def _already_checked(pg_conn, job_id: int) -> bool:
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG,
                         format='[%(asctime)s] %(levelname)s: %(message)s')
-    check_lidar("postgresql://albion_ddl:albion320@localhost:5432/albion", 1618)
+    check_lidar("postgresql://albion_ddl:albion320@localhost:5432/albion", 1618, 1.0)

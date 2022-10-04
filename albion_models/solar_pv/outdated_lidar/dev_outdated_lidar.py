@@ -65,30 +65,32 @@ if __name__ == "__main__":
     #     ],
     #     write_test_data=False)
 
-    check_toids_lidar(
-        "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion?application_name=blah",
-        1618,
-        [
-            "osgb5000005262593487",
-            "osgb5000005262593494",
-            "osgb5000005262592293",
-            "osgb5000005219846721",
-        ],
-        write_test_data=False)
-    #
     # check_toids_lidar(
     #     "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion?application_name=blah",
-    #     1619,
+    #     1618,
     #     [
+    #         "osgb5000005262593487",
+    #         "osgb5000005262593494",
+    #         "osgb5000005262592293",
+    #         "osgb5000005219846721",
     #         "osgb1000002085437860",
     #     ],
     #     write_test_data=False)
 
+    check_toids_lidar(
+        "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion?application_name=blah",
+        1623,
+        [
+            "osgb1000002085437860",
+        ],
+        write_test_data=True)
+
     # check_toids_lidar(
     #     "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion?application_name=blah",
-    #     1621,
+    #     1622,
     #     [
-    #         "osgb1000021445343",  # Not working - should keep. Hard to fix as it's ratio is higher than some things we shouldn't keep
+    #         # All keep:
+    #         "osgb1000021445343",
     #         "osgb1000021445346",
     #         "osgb5000005150981943",
     #     ],

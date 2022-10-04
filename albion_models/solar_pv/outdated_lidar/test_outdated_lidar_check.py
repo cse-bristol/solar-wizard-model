@@ -45,7 +45,7 @@ class OutdatedLidarTestCase(ParameterisedTestCase):
             ("osgb5000005262593494.json", 'OUTDATED_LIDAR_COVERAGE'),
             ("osgb5000005262592293.json", 'OUTDATED_LIDAR_COVERAGE'),
             ("osgb1000002085437860.json", 'OUTDATED_LIDAR_COVERAGE'),
-            # ("osgb1000021445343.json", None),  # Failing. Hard to fix as it's ratio is higher than some things we shouldn't keep
-            ("osgb1000021445346.json", None),
+            ("osgb1000021445343.json", None),
             ("osgb5000005150981943.json", None),
+            ("osgb1000021445346.json", None),
         ], _check)

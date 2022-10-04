@@ -45,7 +45,7 @@ def check_perimeter_gradient(building,
                              segment_length: int = 2,
                              bisector_length: int = 5,
                              gradient_threshold: float = 0.5,
-                             bad_bisector_ratio: float = 0.53,
+                             bad_bisector_ratio: float = 0.52,
                              debug: bool = False):
     """
     Second pass at attempting to detect outdated LiDAR, using a more sophisticated

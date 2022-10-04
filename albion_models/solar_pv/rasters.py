@@ -31,7 +31,8 @@ def generate_rasters(pg_uri: str,
     elevation_raster = join(solar_dir, 'elevation.tif')
     aspect_raster = join(solar_dir, 'aspect.tif')
     slope_raster = join(solar_dir, 'slope.tif')
-    mask_raster = join(solar_dir, 'mask.tif')
+    mask_raster_buf1 = join(solar_dir, 'mask_buf1.tif')
+    mask_raster_buf3 = join(solar_dir, 'mask_buf3.tif')
 
     if count(pg_uri, tables.schema(job_id), tables.LIDAR_PIXEL_TABLE) > 0:
         logging.info("Not creating rasters, raster data already loaded.")
@@ -56,15 +57,20 @@ def generate_rasters(pg_uri: str,
         raise ValueError(f"Albion cannot currently handle LIDAR where the SRS unit is "
                          f"not 1m: was {unit} {unit_dims}")
 
-    logging.info("Creating raster mask...")
-    mask_sql = mask.buildings_mask_sql(pg_uri, job_id, buffer=1)
+    logging.info("Creating raster masks...")
+    # Mask with a 1m buffer around buildings, for PVGIS:
+    mask_sql_buf1 = mask.buildings_mask_sql(pg_uri, job_id, buffer=1)
+    mask.create_mask(mask_sql_buf1, mask_raster_buf1, pg_uri, res=res, srid=srid)
+    gdal_helpers.expand(mask_raster_buf1, mask_raster_buf1, buffer=horizon_search_radius)
 
-    unbuffered_mask_raster = join(solar_dir, 'unbuffered_mask.tif')
-    mask.create_mask(mask_sql, unbuffered_mask_raster, pg_uri, res=res, srid=srid)
-    gdal_helpers.expand(unbuffered_mask_raster, mask_raster, buffer=horizon_search_radius)
+    # Mask with a 3m buffer around buildings, for various usages of pixel
+    # data. The main reason for the bigger buffer is for invalid LiDAR detection:
+    mask_sql_buf3 = mask.buildings_mask_sql(pg_uri, job_id, buffer=3)
+    mask.create_mask(mask_sql_buf3, mask_raster_buf3, pg_uri, res=res, srid=srid)
+    gdal_helpers.expand(mask_raster_buf3, mask_raster_buf3, buffer=horizon_search_radius)
 
     logging.info("Cropping lidar to mask dimensions...")
-    gdal_helpers.crop_or_expand(elevation_raster, mask_raster, elevation_raster,
+    gdal_helpers.crop_or_expand(elevation_raster, mask_raster_buf3, elevation_raster,
                                 adjust_resolution=True)
 
     logging.info("Creating aspect raster...")
@@ -75,11 +81,11 @@ def generate_rasters(pg_uri: str,
 
     logging.info("Converting to 4326...")
     cropped_lidar_4326, mask_raster_4326 = _generate_4326_rasters(
-        solar_dir, srid, elevation_raster, mask_raster)
+        solar_dir, srid, elevation_raster, mask_raster_buf1)
 
     logging.info("Loading raster data...")
     _load_rasters_to_db(pg_uri, job_id, srid, res, solar_dir, elevation_raster,
-                        aspect_raster, slope_raster, mask_raster, debug_mode)
+                        aspect_raster, slope_raster, mask_raster_buf3, debug_mode)
 
     return cropped_lidar_4326, mask_raster_4326, res
 
