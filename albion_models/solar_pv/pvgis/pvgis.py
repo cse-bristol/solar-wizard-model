@@ -110,23 +110,23 @@ def _generate_27700_rasters(pvmaps_dir: str,
         raise ValueError(f"Expected 12 monthly rasters - got {len(monthly_wh_rasters)}")
 
     yearly_kwh_27700 = join(pvmaps_dir, "kwh_year_27700.tif")
-    yearly_kwh_mask_27700 = join(pvmaps_dir, "kwh_year_mask_27700.tif")
+    mask_27700 = join(pvmaps_dir, "mask_27700.tif")
     gdal_helpers.reproject(yearly_kwh_raster, yearly_kwh_27700, src_srs="EPSG:4326", dst_srs=_7_PARAM_SHIFT)
-    gdal_helpers.reproject(mask_raster, yearly_kwh_mask_27700, src_srs="EPSG:4326", dst_srs=_7_PARAM_SHIFT)
+    gdal_helpers.reproject(mask_raster, mask_27700, src_srs="EPSG:4326", dst_srs=_7_PARAM_SHIFT)
 
-    gdal_helpers.crop_or_expand(yearly_kwh_27700, yearly_kwh_mask_27700, yearly_kwh_27700, False)
+    gdal_helpers.crop_or_expand(yearly_kwh_27700, mask_27700, yearly_kwh_27700, True)
 
     monthly_wh_27700 = [join(pvmaps_dir, f"wh_m{str(i).zfill(2)}_27700.tif") for i in range(1, 13)]
     for r_in, r_out in zip(monthly_wh_rasters, monthly_wh_27700):
         gdal_helpers.reproject(r_in, r_out, src_srs="EPSG:4326", dst_srs=_7_PARAM_SHIFT)
-        gdal_helpers.crop_or_expand(r_out, yearly_kwh_mask_27700, r_out, False)
+        gdal_helpers.crop_or_expand(r_out, mask_27700, r_out, True)
 
     horizon_27700 = [join(pvmaps_dir, f"horizon_{str(i).zfill(2)}_27700.tif") for i, _ in enumerate(horizon_rasters)]
     for r_in, r_out in zip(horizon_rasters, horizon_27700):
         gdal_helpers.reproject(r_in, r_out, src_srs="EPSG:4326", dst_srs=_7_PARAM_SHIFT)
-        gdal_helpers.crop_or_expand(r_out, yearly_kwh_mask_27700, r_out, False)
+        gdal_helpers.crop_or_expand(r_out, mask_27700, r_out, True)
 
-    return yearly_kwh_27700, yearly_kwh_mask_27700, monthly_wh_27700, horizon_27700
+    return yearly_kwh_27700, mask_27700, monthly_wh_27700, horizon_27700
 
 
 def _combine_horizons(pg_conn,

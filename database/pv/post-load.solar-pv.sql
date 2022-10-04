@@ -27,8 +27,7 @@ SELECT
     pv.y
 FROM
     {panel_polygons} pp
-    LEFT JOIN {pixel_kwh} pv ON ST_Intersects(pixel, pp.panel_geom_27700)
-WHERE pp.panel_geom_27700 IS NOT NULL;
+    LEFT JOIN {pixel_kwh} pv ON ST_Intersects(pixel, pp.panel_geom_27700);
 
 CREATE INDEX ON {pixels_in_panels} (roof_plane_id);
 CREATE INDEX ON {pixels_in_panels} (x, y);

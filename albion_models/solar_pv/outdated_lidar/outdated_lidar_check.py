@@ -1,21 +1,22 @@
 import logging
 import math
-from collections import defaultdict
 from dataclasses import dataclass
 from typing import Dict, Any, Tuple, List, Optional
 import multiprocessing as mp
 
 import psycopg2.extras
-from psycopg2.sql import SQL, Identifier
+from psycopg2.sql import SQL, Identifier, Literal
 
 from albion_models.db_funcs import count, sql_command, connection
 from albion_models.lidar.lidar import LIDAR_NODATA
 from albion_models.solar_pv import tables
+from albion_models.solar_pv.outdated_lidar.perimeter_gradient import \
+    check_perimeter_gradient
 from albion_models.util import get_cpu_count
 
 
 @dataclass
-class HeightAggregator:
+class HeightChecker:
     pixels_within: int = 0
     pixels_without: int = 0
     within_elevation_sum: float = 0.0
@@ -23,18 +24,20 @@ class HeightAggregator:
     osmm_height: Optional[float] = 0.0
     osmm_base_roof_height: Optional[float] = 0.0
 
-    def __init__(self, debug: bool = False) -> None:
+    def __init__(self, building, debug: bool = False) -> None:
+        self.osmm_height = building.get('height', None)
+        self.osmm_base_roof_height = building.get('base_roof_height', None)
         self.debug = debug
+        for pixel in building.get('pixels', []):
+            self._process_pixel(pixel)
 
-    def aggregate_row(self, row: Dict[str, Any]):
-        self.osmm_height = row['height']
-        self.osmm_base_roof_height = row['base_roof_height']
-        if row['within_building']:
+    def _process_pixel(self, pixel: Dict[str, Any]):
+        if pixel['within_building']:
             self.pixels_within += 1
-            self.within_elevation_sum += row['elevation']
-        elif row['without_building']:
+            self.within_elevation_sum += pixel['elevation']
+        elif pixel['without_building']:
             self.pixels_without += 1
-            self.without_elevation_sum += row['elevation']
+            self.without_elevation_sum += pixel['elevation']
 
     def average_heights(self) -> Tuple[float, float]:
         return (self.within_elevation_sum / self.pixels_within,
@@ -90,7 +93,7 @@ class HeightAggregator:
             elif not self.osmm_height:
                 return 'OUTDATED_LIDAR_COVERAGE'
 
-        if self.osmm_base_roof_height and self.osmm_base_roof_height / 2 > lidar_height:
+        if self.osmm_base_roof_height and self.osmm_base_roof_height / 4 > lidar_height:
             return 'OUTDATED_LIDAR_COVERAGE'
 
         return None
@@ -134,20 +137,24 @@ def check_lidar(pg_uri: str,
 
 def _check_lidar_page(pg_uri: str, job_id: int, page: int, page_size: int = 1000):
     with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
-        rows = _load_building_pixels(pg_conn, job_id, page, page_size)
-        by_toid = defaultdict(HeightAggregator)
-        for row in rows:
-            by_toid[row['toid']].aggregate_row(row)
-        rows = None
-
+        buildings = _load_buildings(pg_conn, job_id, page, page_size)
         to_exclude = []
-        for toid, building in by_toid.items():
-            reason = building.exclusion_reason()
+
+        for building in buildings:
+            reason = _check_building(building)
             if reason:
-                to_exclude.append((toid, reason))
+                to_exclude.append((building['toid'], reason))
 
         _write_exclusions(pg_conn, job_id, to_exclude)
         print(f"Checked page {page} of LiDAR")
+
+
+def _check_building(building, debug: bool = False):
+    ha = HeightChecker(building, debug=debug)
+    reason = ha.exclusion_reason()
+    if not reason:
+        reason = check_perimeter_gradient(building, debug=debug)
+    return reason
 
 
 def _write_exclusions(pg_conn, job_id: int, to_exclude: List[Tuple[str, str]]):
@@ -166,13 +173,43 @@ def _write_exclusions(pg_conn, job_id: int, to_exclude: List[Tuple[str, str]]):
         pg_conn.commit()
 
 
-def _load_building_pixels(pg_conn, job_id: int, page: int, page_size: int = 1000):
-    return sql_command(
+def _load_buildings(pg_conn, job_id: int, page: int, page_size: int = 1000, toids: List[str] = None):
+    if toids:
+        where_clause = SQL("WHERE b.toid = ANY( {toids} )") \
+            .format(toids=Literal(toids)) \
+            .as_string(pg_conn)
+    else:
+        where_clause = ""
+
+    buildings = sql_command(
+        pg_conn,
+        """
+        SELECT 
+            b.toid, 
+            ST_AsText(b.geom_27700) AS geom,
+            hh.height,
+            hh.rel_h2 AS base_roof_height
+        FROM {buildings} b
+        LEFT JOIN mastermap.height hh ON b.toid = hh.toid
+        """ + where_clause + """
+        ORDER BY b.toid
+        OFFSET %(offset)s LIMIT %(limit)s
+        """,
+        {
+            "offset": page * page_size,
+            "limit": page_size,
+        },
+        buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
+        result_extractor=lambda rows: [dict(row) for row in rows]
+    )
+
+    pixels = sql_command(
         pg_conn,
         """
         WITH building_page AS (
             SELECT b.toid, b.geom_27700
             FROM {buildings} b
+            """ + where_clause + """
             ORDER BY b.toid
             OFFSET %(offset)s LIMIT %(limit)s
         )
@@ -182,10 +219,9 @@ def _load_building_pixels(pg_conn, job_id: int, page: int, page_size: int = 1000
             b.toid,
             ST_Contains(b.geom_27700, h.en) AS within_building,
             h.toid IS NULL AS without_building,
-            hh.height,
-            hh.rel_h2 AS base_roof_height
+            h.easting AS x,
+            h.northing AS y
         FROM building_page b
-        LEFT JOIN mastermap.height hh ON b.toid = hh.toid
         LEFT JOIN {lidar_pixels} h ON ST_Contains(ST_Buffer(b.geom_27700, 5), h.en)
         WHERE h.elevation != %(lidar_nodata)s
         ORDER BY b.toid;
@@ -197,7 +233,16 @@ def _load_building_pixels(pg_conn, job_id: int, page: int, page_size: int = 1000
         },
         lidar_pixels=Identifier(tables.schema(job_id), tables.LIDAR_PIXEL_TABLE),
         buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
-        result_extractor=lambda rows: rows)
+        result_extractor=lambda rows: [dict(row) for row in rows])
+
+    buildings_by_toid = {}
+    for building in buildings:
+        building['pixels'] = []
+        buildings_by_toid[building['toid']] = building
+    for pixel in pixels:
+        building = buildings_by_toid[pixel['toid']]
+        building['pixels'].append(pixel)
+    return buildings
 
 
 def _already_checked(pg_conn, job_id: int) -> bool:

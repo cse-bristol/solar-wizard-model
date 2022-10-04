@@ -1,14 +1,13 @@
+import json
 from os.path import join
 from typing import List
 
 from psycopg2.extras import DictCursor
-from psycopg2.sql import Identifier
 
 from albion_models import paths
-from albion_models.db_funcs import sql_command, connection
-from albion_models.lidar.lidar import LIDAR_NODATA
-from albion_models.solar_pv import tables
-from albion_models.solar_pv.outdated_lidar.outdated_lidar_check import HeightAggregator
+from albion_models.db_funcs import connection
+from albion_models.solar_pv.outdated_lidar.outdated_lidar_check import _load_buildings, \
+    _check_building
 
 
 def check_toids_lidar(pg_uri: str, job_id: int, toids: List[str], write_test_data: bool = True):
@@ -17,19 +16,16 @@ def check_toids_lidar(pg_uri: str, job_id: int, toids: List[str], write_test_dat
 
 
 def check_toid_lidar(pg_uri: str, job_id: int, toid: str, write_test_data: bool):
-    ha = HeightAggregator(debug=True)
     with connection(pg_uri, cursor_factory=DictCursor) as pg_conn:
-        pixels = _load_building_pixels(pg_conn, job_id, toid)
-        for pixel in pixels:
-            ha.aggregate_row(pixel)
-
-    reason = ha.exclusion_reason()
+        buildings = _load_buildings(pg_conn, job_id, page=0, page_size=1000, toids=[toid])
+    building = buildings[0]
+    reason = _check_building(building, debug=True)
     if reason:
         print(f"toid {toid} excluded. Reason {reason}\n")
     else:
         print(f"toid {toid} not excluded.\n")
     if write_test_data:
-        _write_test_data(toid, pixels)
+        _write_test_data(toid, building)
 
 
 def _write_test_data(toid, building):
@@ -38,55 +34,18 @@ def _write_test_data(toid, building):
     See test_oudated_lidar_check.py
     """
     ransac_test_data_dir = join(paths.TEST_DATA, "outdated_lidar")
-    csv = join(ransac_test_data_dir, f"{toid}.csv")
-    with open(csv, 'w') as f:
-        f.write(
-            "pixel_id,elevation,toid,within_building,without_building,height,base_roof_height\n")
-        for p in building:
-            f.write(
-                f"{p['pixel_id']},{p['elevation']},{p['toid']},{p['within_building']},"
-                f"{p['without_building']},{p['height'] or ''},{p['base_roof_height'] or ''}\n")
-
-
-def _load_building_pixels(pg_conn, job_id: int, toid: str):
-    return sql_command(
-        pg_conn,
-        """
-        SELECT
-            h.pixel_id,
-            h.elevation,
-            b.toid,
-            ST_Contains(b.geom_27700, h.en) AS within_building,
-            h.toid IS NULL AS without_building,
-            hh.height,
-            hh.rel_h2 AS base_roof_height
-            -- hh.rel_hmax AS max_roof_height,
-            -- hh.abs_hmin AS ground_height
-        FROM {buildings} b
-        LEFT JOIN mastermap.height hh ON b.toid = hh.toid
-        LEFT JOIN {lidar_pixels} h 
-            -- ON ST_Contains(ST_Buffer(ST_ExteriorRing(b.geom_27700), 5), h.en)
-            ON ST_Contains(ST_Buffer(b.geom_27700, 5), h.en)
-        LEFT JOIN addressbase.address a ON a.toid = b.toid
-        WHERE h.elevation != %(lidar_nodata)s
-        AND b.toid = %(toid)s
-        """,
-        {
-            "toid": toid,
-            "lidar_nodata": LIDAR_NODATA,
-        },
-        lidar_pixels=Identifier(tables.schema(job_id), tables.LIDAR_PIXEL_TABLE),
-        buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
-        result_extractor=lambda rows: rows)
+    jsonfile = join(ransac_test_data_dir, f"{toid}.json")
+    with open(jsonfile, 'w') as f:
+        json.dump(building, f, sort_keys=True, default=str)
 
 
 if __name__ == "__main__":
     check_toids_lidar(
         "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion?application_name=blah",
-        1618,
+        1617,
         [
-            # "osgb5000005134753286",
-            # "osgb5000005134753280",
+            "osgb5000005134753286",
+            "osgb5000005134753280",
             # "osgb5000005134753270",
             # "osgb5000005134753276",
             # "osgb5000005152026792",
@@ -100,12 +59,26 @@ if __name__ == "__main__":
             # "osgb1000043085584",
             # "osgb1000019927618",
             # "osgb1000020002707",
-            # "osgb1000020002198",  # Not working - should keep
-            # "osgb1000043085181",  # Not working - should keep
+            # "osgb1000020002198",
+            "osgb1000043085181",  # Not working - should keep
             # "osgb1000020002780",
+        ],
+        write_test_data=False)
+
+    check_toids_lidar(
+        "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion?application_name=blah",
+        1618,
+        [
             "osgb5000005262593487",
             "osgb5000005262593494",
             "osgb5000005262592293",
         ],
-        write_test_data=True,
-    )
+        write_test_data=True)
+
+    check_toids_lidar(
+        "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion?application_name=blah",
+        1619,
+        [
+            # "osgb1000002085437860",
+        ],
+        write_test_data=False)
