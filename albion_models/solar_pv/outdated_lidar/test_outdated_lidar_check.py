@@ -16,13 +16,14 @@ def _load_data(filename: str) -> List[dict]:
 
 def _check(filename: str):
     building = _load_data(join(_PIXEL_DATA, filename))
-    return _check_building(building)
+    return _check_building(building, resolution_metres=1.0)
 
 
 class OutdatedLidarTestCase(ParameterisedTestCase):
 
     def test_lidar_checker(self):
         self.parameterised_test([
+            ('osgb5000005219846721.json', 'NO_LIDAR_COVERAGE'),
             ('osgb5000005134753276.json', 'OUTDATED_LIDAR_COVERAGE'),
             ('osgb5000005152026792.json', 'OUTDATED_LIDAR_COVERAGE'),
             ('osgb5000005152026801.json', 'OUTDATED_LIDAR_COVERAGE'),
@@ -38,10 +39,13 @@ class OutdatedLidarTestCase(ParameterisedTestCase):
             ('osgb1000019927618.json', None),
             ('osgb1000020002707.json', None),
             ('osgb1000020002198.json', None),
-            # ('osgb1000043085181.json', None),  # Failing
+            ('osgb1000043085181.json', None),
             ('osgb1000020002780.json', None),
             ("osgb5000005262593487.json", 'OUTDATED_LIDAR_COVERAGE'),
             ("osgb5000005262593494.json", 'OUTDATED_LIDAR_COVERAGE'),
             ("osgb5000005262592293.json", 'OUTDATED_LIDAR_COVERAGE'),
             ("osgb1000002085437860.json", 'OUTDATED_LIDAR_COVERAGE'),
+            # ("osgb1000021445343.json", None),  # Failing. Hard to fix as it's ratio is higher than some things we shouldn't keep
+            ("osgb1000021445346.json", None),
+            ("osgb5000005150981943.json", None),
         ], _check)

@@ -62,7 +62,7 @@ def model_solar_pv(pg_uri: str,
         debug_mode=debug_mode)
 
     logging.info("Checking for outdated LiDAR and missing LiDAR coverage...")
-    check_lidar(pg_uri, job_id)
+    check_lidar(pg_uri, job_id, resolution_metres=res)
 
     logging.info("Detecting roof planes...")
     run_ransac(pg_uri, job_id, resolution_metres=res)

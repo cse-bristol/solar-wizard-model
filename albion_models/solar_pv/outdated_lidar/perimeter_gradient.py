@@ -41,10 +41,11 @@ def _perpendicular_bisector(line_segment: LineString, length: float):
 
 
 def check_perimeter_gradient(building,
+                             resolution_metres: float,
                              segment_length: int = 2,
                              bisector_length: int = 5,
                              gradient_threshold: float = 0.5,
-                             bad_bisector_ratio: float = 0.5,
+                             bad_bisector_ratio: float = 0.53,
                              debug: bool = False):
     """
     Second pass at attempting to detect outdated LiDAR, using a more sophisticated
@@ -84,7 +85,7 @@ def check_perimeter_gradient(building,
         perp_bisector = _perpendicular_bisector(segment, bisector_length)
 
         # Find all the pixels that lie on it:
-        points_on_cross = pixel_rtree.query(perp_bisector.buffer(0.5))  # TODO other lidar resolutions
+        points_on_cross = pixel_rtree.query(perp_bisector.buffer(resolution_metres / 2))
         pixels_on_cross = [pixels_by_id[id(p)] for p in points_on_cross]
 
         # Count the bisectors where the difference in average height between
