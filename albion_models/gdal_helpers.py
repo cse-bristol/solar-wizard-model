@@ -1,3 +1,4 @@
+import math
 import shlex
 
 import json
@@ -110,11 +111,12 @@ def rasterize(pg_uri: str, mask_sql: str, mask_file: str, res: float, srid: int)
 
 
 def rasterize_3d(pg_uri: str, mask_sql: str, mask_file: str, res: float, srid: int):
+    """Use the Z value for the burn value for each polygon & nan outside of polygons"""
     res = subprocess.run(f"""
         gdal_rasterize
         -sql '{mask_sql}'
         -3d -tr {res} {res}
-        -init 0 -ot Int16
+        -init {math.nan} -ot Float64
         -of GTiff -a_srs EPSG:{srid}
         "PG:{pg_uri}"
         {mask_file}

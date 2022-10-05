@@ -52,7 +52,7 @@ def create_roof_polygons(pg_uri: str,
         pg_conn.close()
 
 
-def get_flat_roof_mask_sql(pg_uri: str, job_id: int) -> str:
+def get_flat_roof_aspect_sql(pg_uri: str, job_id: int) -> str:
     with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
         return SQL(
             "SELECT ST_Force3D(roof_geom_27700, aspect) FROM {roof_polygons} WHERE is_flat = true"
@@ -61,7 +61,7 @@ def get_flat_roof_mask_sql(pg_uri: str, job_id: int) -> str:
         ).as_string(pg_conn)
 
 
-def create_flat_roof_mask(mask_sql: str,
+def create_flat_roof_aspect(mask_sql: str,
                 mask_out: str,
                 pg_uri: str,
                 res: float,

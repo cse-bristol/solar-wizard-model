@@ -11,7 +11,7 @@ from albion_models import gdal_helpers
 from albion_models.db_funcs import sql_script, copy_csv, count, connection
 from albion_models.postgis import get_merged_lidar
 from albion_models.solar_pv import mask
-from albion_models.solar_pv.roof_polygons import get_flat_roof_mask_sql, create_flat_roof_mask
+from albion_models.solar_pv.roof_polygons import get_flat_roof_aspect_sql, create_flat_roof_aspect
 from albion_models.transformations import _7_PARAM_SHIFT
 
 
@@ -161,16 +161,17 @@ def copy_raster(pg_conn,
             pass
 
 
-def generate_flat_roof_mask_raster(pg_uri: str,
+def generate_flat_roof_aspect_raster(pg_uri: str,
                                    job_id: int,
-                                   solar_dir: str,
-                                   debug_mode: bool = False) -> Tuple[str, str, float]:
+                                   solar_dir: str) -> str:
     mask_raster = join(solar_dir, 'mask.tif')
     srid = gdal_helpers.get_srid(mask_raster, fallback=27700)
     res = gdal_helpers.get_res(mask_raster)
 
-    flat_roof_mask_sql = get_flat_roof_mask_sql(pg_uri=pg_uri, job_id=job_id)
+    flat_roof_aspect_sql = get_flat_roof_aspect_sql(pg_uri=pg_uri, job_id=job_id)
 
-    flat_roof_mask_raster_filename = join(solar_dir, 'flat_roof_mask.tif')
+    flat_roof_aspect_raster_filename = join(solar_dir, 'flat_roof_aspect.tif')
 
-    create_flat_roof_mask(flat_roof_mask_sql, flat_roof_mask_raster_filename, pg_uri, res=res, srid=srid)
+    create_flat_roof_aspect(flat_roof_aspect_sql, flat_roof_aspect_raster_filename, pg_uri, res=res, srid=srid)
+
+    return flat_roof_aspect_raster_filename

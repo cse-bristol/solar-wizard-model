@@ -33,6 +33,7 @@ def pvgis(pg_uri: str,
           flat_roof_degrees: int,
           elevation_raster: str,
           mask_raster: str,
+          flat_roof_aspect_raster: str,
           debug_mode: bool):
     """
     TODO:
@@ -40,6 +41,7 @@ def pvgis(pg_uri: str,
      * usual check to see if stage of model has already happened
      * 14% loss param
     """
+
     if pv_tech == "crystSi":
         panel_type = pvmaps.CSI
     elif pv_tech == "CdTe":
@@ -52,40 +54,42 @@ def pvgis(pg_uri: str,
 
     horizon_step_degrees = 360 // horizon_slices
 
-    # pvm = pvmaps.PVMaps(
-    #     grass_dbase_dir=os.environ.get("PVGIS_GRASS_DBASE", None),
-    #     input_dir=solar_dir,
-    #     output_dir=pvmaps_dir,
-    #     pvgis_data_tar_file=join(os.environ.get("PVGIS_DATA_DIR", None), "pvgis_data.tar"),
-    #     pv_model_coeff_file_dir=paths.RESOURCES_DIR,
-    #     keep_temp_mapset=debug_mode,
-    #     num_processes=_pvmaps_cpu_count(),
-    #     output_direct_diffuse=False,
-    #     horizon_step_degrees=horizon_step_degrees,
-    #     horizon_search_distance=horizon_search_radius,
-    #     flat_roof_degrees=flat_roof_degrees,
-    #     flat_roof_degrees_threshold=5.0,
-    #     panel_type=panel_type,
-    # )
-    # yearly_kwh_raster, monthly_wh_rasters = pvm.create_pvmap(
-    #     elevation_filename=os.path.basename(elevation_raster),
-    #     mask_filename=os.path.basename(mask_raster))
+    pvm = pvmaps.PVMaps(
+        grass_dbase_dir=os.environ.get("PVGIS_GRASS_DBASE_DIR", None),
+        input_dir=solar_dir,
+        output_dir=pvmaps_dir,
+        pvgis_data_tar_file=join(os.environ.get("PVGIS_DATA_TAR_FILE_DIR", None), "pvgis_data.tar"),
+        pv_model_coeff_file_dir=paths.RESOURCES_DIR,
+        keep_temp_mapset=debug_mode,
+        num_processes=_pvmaps_cpu_count(),
+        output_direct_diffuse=False,
+        horizon_step_degrees=horizon_step_degrees,
+        horizon_search_distance=horizon_search_radius,
+        flat_roof_degrees=flat_roof_degrees,
+        flat_roof_degrees_threshold=5.0,
+        panel_type=panel_type,
+    )
+    yearly_kwh_raster, monthly_wh_rasters = pvm.create_pvmap(
+        elevation_filename=os.path.basename(elevation_raster),
+        mask_filename=os.path.basename(mask_raster),
+        flat_roof_aspect_filename=os.path.basename(flat_roof_aspect_raster),
+    )
 
-    yearly_kwh_raster = "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_year.tif"
-    monthly_wh_rasters = [
-        "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_17_1.tif",
-        "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_46_2.tif",
-        "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_75_3.tif",
-        "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_103_4.tif",
-        "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_135_5.tif",
-        "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_162_6.tif",
-        "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_198_7.tif",
-        "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_228_8.tif",
-        "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_259_9.tif",
-        "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_289_10.tif",
-        "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_319_11.tif",
-        "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_345_12.tif",
-    ]
+    # yearly_kwh_raster = "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_year.tif"
+    # monthly_wh_rasters = [
+    #     "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_17_1.tif",
+    #     "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_46_2.tif",
+    #     "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_75_3.tif",
+    #     "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_103_4.tif",
+    #     "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_135_5.tif",
+    #     "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_162_6.tif",
+    #     "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_198_7.tif",
+    #     "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_228_8.tif",
+    #     "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_259_9.tif",
+    #     "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_289_10.tif",
+    #     "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_319_11.tif",
+    #     "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_345_12.tif",
+    # ]
 
     # yearly_kwh_27700, yearly_kwh_mask_27700, monthly_wh_27700 = _generate_27700_rasters(
     #     pvmaps_dir, yearly_kwh_raster, mask_raster, monthly_wh_rasters)

@@ -12,7 +12,7 @@ from albion_models.solar_pv.outdated_lidar.outdated_lidar_check import check_lid
 from albion_models.solar_pv.panels.panels import place_panels
 from albion_models.solar_pv.pvgis.pvgis import pvgis
 from albion_models.solar_pv.ransac.run_ransac import run_ransac
-from albion_models.solar_pv.rasters import generate_rasters, generate_flat_roof_mask_raster
+from albion_models.solar_pv.rasters import generate_rasters, generate_flat_roof_aspect_raster
 from albion_models.solar_pv.roof_polygons import create_roof_polygons
 
 
@@ -90,10 +90,9 @@ def model_solar_pv(pg_uri: str,
         panel_spacing_m=panel_spacing_m)
 
     logging.info("Generating flat roof raster")
-    generate_flat_roof_mask_raster(pg_uri=pg_uri,
+    flat_roof_aspect_raster = generate_flat_roof_aspect_raster(pg_uri=pg_uri,
         job_id=job_id,
-        solar_dir=solar_dir,
-        debug_mode=debug_mode)
+        solar_dir=solar_dir)
 
     logging.info("Running PV-GIS...")
     pvgis(pg_uri=pg_uri,
@@ -107,6 +106,7 @@ def model_solar_pv(pg_uri: str,
           flat_roof_degrees=flat_roof_degrees,
           elevation_raster=elevation_raster,
           mask_raster=mask_raster,
+          flat_roof_aspect_raster=flat_roof_aspect_raster,
           debug_mode=debug_mode)
 
     if not debug_mode:
@@ -171,7 +171,7 @@ def _validate_params(horizon_search_radius: int,
         raise ValueError(f"panel_width_m must be greater than 0, was {panel_width_m}")
     if panel_height_m <= 0:
         raise ValueError(f"panel_height_m must be greater than 0, was {panel_height_m}")
-    if os.environ.get("PVGIS_DATA_DIR", None) is None:
-        raise ValueError(f"env var PVGIS_DATA_DIR must be set")
-    if os.environ.get("PVGIS_GRASS_DBASE", None) is None:
-        raise ValueError(f"env var PVGIS_GRASS_DBASE must be set")
+    if os.environ.get("PVGIS_DATA_TAR_FILE_DIR", None) is None:
+        raise ValueError(f"env var PVGIS_DATA_TAR_FILE_DIR must be set")
+    if os.environ.get("PVGIS_GRASS_DBASE_DIR", None) is None:
+        raise ValueError(f"env var PVGIS_GRASS_DBASE_DIR must be set")

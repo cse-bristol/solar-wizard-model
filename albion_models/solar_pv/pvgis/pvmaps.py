@@ -23,6 +23,7 @@ from typing import List, Tuple, Optional
 # Raster names used in grass db
 ELEVATION = "elevation"
 MASK = "mask"
+FLAT_ROOF_ASPECT = "flat_roof_aspect"
 SLOPE = "slope"
 ASPECT_GRASS = "aspect_grass"
 ASPECT_COMPASS = "aspect_compass"
@@ -172,13 +173,14 @@ class PVMaps:
         if self._gisrc_filename is not None and os.path.exists(self._gisrc_filename):
             os.remove(self._gisrc_filename)
 
-    def create_pvmap(self, elevation_filename: str, mask_filename: str,
+    def create_pvmap(self, elevation_filename: str, mask_filename: str, flat_roof_aspect_filename: str,
                      forced_slope_filename: Optional[str] = None,
                      forced_aspect_filename: Optional[str] = None,
                      forced_horizon_basefilename: Optional[str] = None) -> (str, List[str]):
         """
         Run PVMaps steps against the input elevation and mask. Raises exception if something goes wrong.
         Creates output rasters in the dir setup in the constructor.
+        :param flat_roof_aspect_filename: Values to use for the aspects of arrays installed on flat roofs
         :param elevation_filename: Just the filename of the elevation raster
         :param mask_filename:  Just the filename of the mask raster
         :param forced_slope_filename: (mainly for testing) None - calculate slope from elevation raster; filename - use
@@ -190,7 +192,7 @@ class PVMaps:
         degrees, east = 0, CCW) - so e.g. horizon.tif becomes horizon_045.tif etc
         """
         self._create_temp_mapset()
-        self._import_rasters(elevation_filename, mask_filename,
+        self._import_rasters(elevation_filename, mask_filename, flat_roof_aspect_filename,
                              forced_slope_filename, forced_aspect_filename, forced_horizon_basefilename)
         self._mask_fix_nulls()
         self._set_region_to_mask_and_zoom()
@@ -416,13 +418,14 @@ class PVMaps:
 
         self._run_cmd_via_method_p(self._import_raster, rasters_to_import)
 
-    def _import_rasters(self, elevation_filename: str, mask_filename: str,
+    def _import_rasters(self, elevation_filename: str, mask_filename: str, flat_roof_aspect_filename: str,
                         forced_slope_filename: Optional[str],
                         forced_aspect_filename: Optional[str],
                         forced_horizon_basefilename: Optional[str]):
         rasters_to_import: List[Tuple[str, str]] = [
             (elevation_filename, ELEVATION),
             (mask_filename, MASK),
+            (flat_roof_aspect_filename, FLAT_ROOF_ASPECT)
         ]
 
         ###
@@ -478,10 +481,11 @@ class PVMaps:
         logging.info("_flat_panel_correction")
         self._run_cmd_via_method_p(self._run_cmd, [
             (f'r.mapcalc expression="{SLOPE_ADJUSTED} = if({SLOPE} < {self._flat_roof_degrees_threshold}, {self._flat_roof_degrees}, {SLOPE})"',),
-            # Set aspect = south if slope shallower than _flat_roof_degrees_threshold
-            (f'r.mapcalc expression="{ASPECT_GRASS_ADJUSTED} = if({SLOPE} < {self._flat_roof_degrees_threshold}, 270, {ASPECT_GRASS})"',)
-            # See comment in _calc_slope_aspect() above
-            # (f'r.mapcalc expression="{ASPECT_GRASS_ADJUSTED} = if({SLOPE} < {self._flat_roof_degrees_threshold}, 180, {ASPECT_COMPASS})"', )
+            # If slope shallower than _flat_roof_degrees_threshold, set aspect = value from flat_roof_aspect if
+            # available, otherwise south
+            (f'r.mapcalc '
+             f'expression="{ASPECT_GRASS_ADJUSTED} = '
+             f'if({SLOPE} < {self._flat_roof_degrees_threshold}, if (isnull({FLAT_ROOF_ASPECT}), 270.0, {FLAT_ROOF_ASPECT}), {ASPECT_GRASS})"',)
         ])
 
     def _pv_calc(self, ix: int, day: int, mon: int, _: int):
@@ -519,14 +523,20 @@ class PVMaps:
         self._run_cmd_via_method_p(self._pv_calc, self._pv_time_steps)
 
     def _apply_wind_correction(self, ix: int, day: int, mon: int, num_days: int):
-        self._run_cmd(f"r.mapcalc --quiet expression={OUT_PV_POWER_WIND_BASENAME}{day}=windeffect_{mon:02d}*{OUT_PV_POWER_BASENAME}{day}")
+        """The windeffect data rasters have missing data in Northern Scotland, so default to 1.0"""
+        self._run_cmd(f"r.mapcalc --quiet "
+                      f"expression={OUT_PV_POWER_WIND_BASENAME}{day}="
+                      f"if(isnull(windeffect_{mon:02d}),1.0,windeffect_{mon:02d})*{OUT_PV_POWER_BASENAME}{day}")
 
     def _apply_wind_corrections_p(self):
         logging.info("_apply_wind_corrections")
         self._run_cmd_via_method_p(self._apply_wind_correction, self._pv_time_steps)
 
     def _apply_spectral_correction(self, ix: int, day: int, mon: int, num_days: int):
-        self._run_cmd(f"r.mapcalc --quiet expression={OUT_PV_POWER_WIND_SPECTRAL_BASENAME}{day}={self._r_spectral}{mon:02d}*{OUT_PV_POWER_WIND_BASENAME}{day}")
+        """The spectral data rasters have missing data in Northern England and Scotland, so default to 1.0"""
+        self._run_cmd(f"r.mapcalc --quiet "
+                      f"expression={OUT_PV_POWER_WIND_SPECTRAL_BASENAME}{day}="
+                      f"if(isnull({self._r_spectral}{mon:02d}),1.0,{self._r_spectral}{mon:02d})*{OUT_PV_POWER_WIND_BASENAME}{day}")
 
     def _apply_spectral_corrections_p(self):
         logging.info("_apply_spectral_corrections")
@@ -581,17 +591,38 @@ class PVMaps:
         return yearly_kwh_raster, monthly_kwh_rasters
 
     def _find_grass_locn(self):
-        g_exe_locn: str = shutil.which("grass")
-        if not g_exe_locn.endswith("grass"):
-            raise FileNotFoundError("Failed to find grass install dir")
-        g_root_dir: str = os.path.dirname(g_exe_locn)
-        if g_root_dir.endswith("bin"):
-            g_root_dir: str = os.path.dirname(g_root_dir)
-        for f in os.listdir(g_root_dir):
-            if f.startswith("grass"):
-                self._grass_install_dir = join(g_root_dir, f)
-                break
-        logging.info(f"Using grass from here: {self._grass_install_dir}")
+        self._grass_install_dir = ""
+        g_exe_locns: List[str] = self._whereis("grass")
+        for g_exe_locn in g_exe_locns:
+            if g_exe_locn.endswith("grass"):
+                g_root_dir: str = os.path.dirname(g_exe_locn)
+                if g_root_dir.endswith("bin"):
+                    g_root_dir: str = os.path.dirname(g_root_dir)
+                for f in os.listdir(g_root_dir):
+                    if f.startswith("grass"):
+                        self._grass_install_dir = join(g_root_dir, f)
+                        logging.info(f"Using grass from here: {self._grass_install_dir}")
+                        return
+        raise FileNotFoundError(f"Failed to find grass install dir")
+
+    @staticmethod
+    def _whereis(cmd: str) -> List[str]:
+        """Based on shutil.which() but does whereis i.e. finds all matches where a dir from
+        the path contains an executable file called 'cmd'"""
+        matches = []
+        path = os.environ.get("PATH", None)
+        if path is None:
+            path = os.defpath
+        if path:
+            path_dirs = path.split(os.pathsep)
+            seen = set()
+            for path_dir in path_dirs:
+                if path_dir not in seen:
+                    seen.add(path_dir)
+                    name = os.path.join(path_dir, cmd)
+                    if os.path.exists(name) and os.access(name, os.F_OK | os.X_OK) and not os.path.isdir(name):
+                        matches.append(name)
+        return matches
 
 
 # Command line processing
