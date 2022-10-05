@@ -30,6 +30,7 @@ ASPECT_COMPASS = "aspect_compass"
 SLOPE_ADJUSTED = "slope_adjusted"
 ASPECT_GRASS_ADJUSTED = "aspect_adjusted"
 HORIZON_BASENAME = "horizon"
+HORIZON090_BASENAME = "horizon090"  # horizon between 0 and 90 degrees
 TEMP_BASENAME = "t2m_avg_"
 LINKE_TURBIDITY_BASENAME = "tl_0m_"
 BEAM_RADIATION_BASENAME = "kcb_"
@@ -48,6 +49,7 @@ PERMANENT_MAPSET = "PERMANENT"
 CSI = "cSi"  # Case matches spectraleffect_ rasters!
 CDTE = "CdTe"  # Case matches spectraleffect_ rasters!
 
+PI_HALF: float = math.pi / 2.0
 
 class PVMaps:
     """Class that sets up a grass db for PV Maps and runs the PV Maps steps"""
@@ -465,6 +467,11 @@ class PVMaps:
         # in https://grass.osgeo.org/grass80/manuals/r.sun.html
         self._run_cmd(f"r.horizonmask elevation={ELEVATION} mask={MASK} direction={direction} "
                       f"output={HORIZON_BASENAME} maxdistance={self._horizon_search_distance}")
+        # Force horizon to be 0-90 degrees
+        horizon: str = f"{HORIZON_BASENAME}_{direction:03d}"
+        horizon090: str = f"{HORIZON090_BASENAME}_{direction:03d}"
+        self._run_cmd(
+            f'r.mapcalc "{horizon090} = if({horizon} >= 0.0, if({horizon} < {PI_HALF}, {horizon}, {PI_HALF}), 0.0)"')
 
     def _calc_horizons_p(self):
         logging.info("_calc_horizons")
@@ -495,12 +502,13 @@ class PVMaps:
         # -s Do you want to incorporate the shadowing effect of terrain (y/n) => include to use the horizon data
         # -m Do you want to use the low-memory version of the program (y/n)
         # -i Do you want to use clear-sky irradiance for calculating efficiency (y/n) ... i.e. ignore clouds etc
+	# Albedo value of 0.2 confirmed as being value used by pvgis api - see email from JRC-PVGIS@ec.europa.eu 6/9/22
         cmd: str = f"r.pv -a -s --quiet " \
                    f"elevation={ELEVATION} " \
                    f"aspect={ASPECT_GRASS_ADJUSTED} " \
                    f"slope={SLOPE_ADJUSTED} " \
-                   f"horizon_basename={HORIZON_BASENAME} horizon_step={self._horizon_step} " \
-                   f"albedo_value=0.15 " \
+                   f"horizon_basename={HORIZON090_BASENAME} horizon_step={self._horizon_step} " \
+                   f"albedo_value=0.2 " \
                    f"linke={LINKE_TURBIDITY_BASENAME}{mon_str} " \
                    f"coefbh={BEAM_RADIATION_BASENAME}{mon_str} " \
                    f"coefdh={DIFFUSE_RADIATION_BASENAME}{mon_str} " \
