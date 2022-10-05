@@ -18,13 +18,16 @@ from albion_models.test.solar_pv.pvgis.test_pvmaps import TestPVMaps
 
 
 class TestPVMapsRealData(TestPVMaps):
-    INPUT_DIR = os.path.realpath("./test_data/inputs")
-    EXPECTED_DIR = os.path.realpath("./test_data/expected")
-    REAL_DATA_INPUT_DIR = os.path.realpath("./test_data/inputs")
-    REAL_DATA_OUTPUT_DIR = os.path.realpath("./test_data/outputs")
+    INPUT_DIR = os.path.realpath("test_data/test_pvmaps_real_data/inputs")
+    DATA_INPUT_DIR = os.path.realpath("test_data/test_pvmaps_real_data/inputs")
+    DATA_OUTPUT_DIR = os.path.realpath("test_data/test_pvmaps_real_data/outputs")
+    PV_MODEL_COEFF_FILE_DIR = os.path.realpath("./test_data/inputs")
+
+    EXPECTED_DIR = os.path.realpath("test_data/test_pvmaps_real_data/expected")
 
     ELEVATION_RASTER_FILENAME: str = "elevation_4326.tif"
     MASK_RASTER_FILENAME: str = "mask_4326.tif"
+    FLAT_ROOF_RASTER_FILENAME: str = "flat_roof_nan_4326.tif"
 
     @classmethod
     def setup_class(cls):
@@ -55,27 +58,29 @@ class TestPVMapsRealData(TestPVMaps):
 
     def test_slope_raster(self):
         self.instance._run_cmd(f"r.import --overwrite input={self.EXPECTED_DIR}/slope_4326.tif output=exp_slope")
-        self.instance._run_cmd(f'r.mapcalc --overwrite expression="slope_diff=(abs(({SLOPE}/exp_slope))-1)>0.01"')
+        # Note values in slope_4326.tif have been converted to uint16 to save space
+        self.instance._run_cmd(f'r.mapcalc --overwrite expression="slope_diff=(abs({SLOPE} - exp_slope))>1"')
 
         stats = self._get_raster_stats("slope_diff")
         print(stats)
 
-        assert stats["0"] >= 2149179
-        assert stats["1"] <= 3606
-        assert stats["*"] <= 2799
+        assert stats["0"] >= 2095726
+        assert stats["1"] <= 1834
+        assert stats["*"] <= 58024
 
     def test_aspect_raster(self):
         self.instance._run_cmd(f"r.import --overwrite input={self.EXPECTED_DIR}/aspect_4326.tif output=exp_aspect")
         # Change from compass to grass angles
         self.instance._run_cmd('r.mapcalc --overwrite "exp_aspect_grass = if(exp_aspect == 0, 0, if(exp_aspect < 90, 90 - exp_aspect, 450 - exp_aspect))"')
-        self.instance._run_cmd(f'r.mapcalc --overwrite expression="aspect_diff=abs(({ASPECT_GRASS}/exp_aspect_grass)-1)>0.01"')
+        # Note values in aspect_4326.tif have been converted to uint16 to save space
+        self.instance._run_cmd(f'r.mapcalc --overwrite expression="aspect_diff=(abs({ASPECT_GRASS} - exp_aspect_grass))>1"')
 
         stats = self._get_raster_stats("aspect_diff")
         print(stats)
 
-        assert stats["0"] >= 2138288
-        assert stats["1"] <= 9442
-        assert stats["*"] <= 7854
+        assert stats["0"] >= 2135313
+        assert stats["1"] <= 17812
+        assert stats["*"] <= 2459
 
     def test_pv_output(self):
         """Test the PV results for randomly sampled locations that are not masked against API results
@@ -84,10 +89,7 @@ class TestPVMapsRealData(TestPVMaps):
         the set of test points used are in loc_real_pv_sample_locns.pkl.
         """
 
-        # Use to not assert and plot results
-        # max_diff_pc_year = None
-        # max_diff_pc_day = None
-        # Use to assert and not plot results - checks results for the "loc_real_pv_sample_locns.pkl" in git
+        # Checks results for the "loc_real_pv_sample_locns.pkl" in git
         # haven't changed
         max_diff_pc_year = 3.73  # for "loc_real_pv_sample_locns.pkl" in git, max: 3.7239958592930784
         max_diff_pc_day = 100.0  # To use, turn on day values in _get_local_pv_data()
@@ -103,79 +105,15 @@ class TestPVMapsRealData(TestPVMaps):
         test_locs: List[Tuple[float, float]] = [(lrx, lry) for _, _, lrx, lry in sampled_locns]
 
         # Do the tests
-        api_results, loc_results, diff_results = \
-            self._test_pv_output(test_locs, "api_real_pv_output", max_diff_pc_year, max_diff_pc_day)
-
-        if max_diff_pc_year is None:
-            # This will print out edge cases that can then be used with test_get_elevations_for()
-            self._get_stats_and_find_edge_cases(diff_results, sampled_locns)
-
-            # Plot
-            self._plot_results(api_results, loc_results, diff_results, max_x, max_y)
-
-            # Save raster for sharing etc
-            self._save_as_raster(diff_results, sampled_locns)
-
-    def _save_as_raster(self, diff_results, sampled_locns):
-        ds: gdal.Dataset = gdal.Open(f"{self.REAL_DATA_INPUT_DIR}/mask_4326.tif")
-        gt = ds.GetGeoTransform()
-        pr = ds.GetProjection()
-        band = ds.GetRasterBand(1)
-
-        values = np.full((band.YSize, band.XSize), np.nan)
-        for (x_coord, y_coord, _, _), (_, diff_year) in zip(sampled_locns, diff_results):
-            values[y_coord, x_coord] = abs(diff_year)
-
-        driver = gdal.GetDriverByName("GTiff")
-        driver.Register()
-        ds: gdal.Dataset = driver.Create(f"{self.REAL_DATA_OUTPUT_DIR}/diffs.tif", xsize=band.XSize, ysize=band.YSize,
-                                         bands=1, eType=gdal.GDT_Float32)
-        ds.SetGeoTransform(gt)
-        ds.SetProjection(pr)
-        ds_band: gdal.Band = ds.GetRasterBand(1)
-        ds_band.WriteArray(values)
-        ds_band.SetNoDataValue(np.nan)
-        ds_band.FlushCache()
-
-    @staticmethod
-    def _plot_results(api_results, loc_results, diff_results, max_x, max_y):
-        api_result = np.zeros((max_y, max_x))
-        loc_result = np.zeros((max_y, max_x))
-        diff_result = np.zeros((max_y, max_x))
-        x = 0
-        y = 0
-        for (local_e_day, local_e_year), (api_e_day, api_e_year), (diff_day, diff_year) in zip(loc_results, api_results,
-                                                                                               diff_results):
-            api_result[y, x] = api_e_year
-            loc_result[y, x] = local_e_year
-            diff_result[y, x] = abs(diff_year)
-            x += 1
-            if x == max_x:
-                x = 0
-                y += 1
-
-        mean_diff = np.mean(diff_result)
-        std_diff = np.std(diff_result)
-        max_diff = np.amax(diff_result)
-        min_diff = np.amin(diff_result)
-        print(f"Abs diff % stats: Max: {max_diff} / Mean: {mean_diff} / Min: {min_diff} / SD: {std_diff}")
-
-        fig, axs = plt.subplots(ncols=3)
-        axs[0].set_title('API')
-        axs[0].imshow(api_result)
-        axs[1].set_title('LOC')
-        axs[1].imshow(loc_result)
-        axs[2].set_title('ABS DIFF (%)')
-        axs[2].imshow(diff_result)
-        plt.show()
+        self._test_pv_output(test_locs, "api_real_pv_output", max_diff_pc_year, max_diff_pc_day)
 
     def _get_sample_locns_cached(self, sample_size: int) -> List[Tuple[int, int, float, float]]:
         cached_data_filename: str = "loc_real_pv_sample_locns"
         sampled_locns: List[Tuple[int, int, float, float]]
-        if os.path.exists(f"{self.REAL_DATA_INPUT_DIR}/{cached_data_filename}.pkl"):
-            sampled_locns = pickle.load(open(f"{self.REAL_DATA_INPUT_DIR}/{cached_data_filename}.pkl", "rb"))
+        if os.path.exists(f"{self.DATA_INPUT_DIR}/{cached_data_filename}.pkl"):
+            sampled_locns = pickle.load(open(f"{self.DATA_INPUT_DIR}/{cached_data_filename}.pkl", "rb"))
         else:
-            mask_ds: Optional[gdal.Dataset] = gdal.Open(f"{self.REAL_DATA_INPUT_DIR}/mask_4326.tif")
+            mask_ds: Optional[gdal.Dataset] = gdal.Open(f"{self.DATA_INPUT_DIR}/mask_4326.tif")
             gt = mask_ds.GetGeoTransform()
             mask_band = mask_ds.GetRasterBand(1)
             band_vals = mask_band.ReadAsArray(0, 0, mask_band.XSize, mask_band.YSize)
@@ -207,56 +145,6 @@ class TestPVMapsRealData(TestPVMaps):
             print(f"Available size = {len(test_locs)}, sample_size = {sample_size}")
             sampled_locns = sample(test_locs, sample_size)
 
-            pickle.dump(sampled_locns, open(f"{self.REAL_DATA_INPUT_DIR}/{cached_data_filename}.pkl", "wb"))
+            pickle.dump(sampled_locns, open(f"{self.DATA_INPUT_DIR}/{cached_data_filename}.pkl", "wb"))
         return sampled_locns
 
-    @staticmethod
-    def _get_stats_and_find_edge_cases(diff_results, sampled_locns):
-        diff_result = np.array([abs(r_year) for _, r_year in diff_results])
-
-        mean_diff = np.mean(diff_result)
-        std_diff = np.std(diff_result)
-        max_diff = np.amax(diff_result)
-        min_diff = np.amin(diff_result)
-        print(f"Abs diff % stats: Max: {max_diff} / Mean: {mean_diff} / Min: {min_diff} / SD: {std_diff}")
-
-        std_mult = 3.0
-        edge_case_above = mean_diff + std_mult * std_diff
-
-        print(f"Cases greater the {std_mult} * SD:")
-        for (_, r_year), (x_coord, y_coord, lrx, lry) in zip(diff_results, sampled_locns):
-            if abs(r_year) > edge_case_above:
-                print(f"({lrx}, {lry}),")
-
-    @pytest.mark.skip(reason="Not a test, use to see horizons at some test locations")
-    def test_get_elevations_for(self):
-        """Not a test, use to see horizons at some test locations"""
-        # > 3 * SD:
-        test_locns = (
-            (-1.980795210965064, 51.70583290172531),
-            (-1.9660424731956845, 51.702064291177415),
-            (-1.9768283315256037, 51.70478056894702),
-            (-1.97758116995937, 51.70879202552067),
-            (-1.9769441528231062, 51.70389013351924),
-            (-1.9771323624315478, 51.70897191146568),
-            (-1.9704292048385912, 51.70343142435947),
-            (-1.98108476420882, 51.70770371555338),
-            (-1.9838644753488799, 51.70916978600519),
-            (-1.9767993762012281, 51.70214523985267),
-            (-1.9810413312222568, 51.70632758807408),
-        )
-        for ix, (lon_east, lat_north) in enumerate(test_locns):
-            userhorizon: str = ""
-            for grass_angle in range(0, 360, 45):
-                horizon_raster = f"{HORIZON090_BASENAME}_{grass_angle:03d}"
-                horizon: float = self._get_raster_val(horizon_raster, lon_east, lat_north)
-                if horizon < 0.0:
-                    raise Exception(f"Unexpected horizon value {horizon}")
-                if horizon > PI_HALF:
-                    raise Exception(f"Unexpected horizon value {horizon}")
-                if userhorizon:
-                    userhorizon += ", "
-                userhorizon += f"{horizon}"
-            angle, aspect, aspect_grass = self._get_aspect_slope_from_rasters(lon_east, lat_north)
-
-            print(f'"t-{ix}": [{userhorizon}],  # s={angle}, a={aspect_grass}')

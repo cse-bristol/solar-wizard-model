@@ -8,25 +8,26 @@ from osgeo import gdal
 import numpy as np
 import matplotlib.pyplot as plt
 
-from tests.test_pvmaps import TestPVMaps
+from albion_models.test.solar_pv.pvgis.test_pvmaps import TestPVMaps
 
 # Run pytest with this to see results while running and see logging outputs
 # --capture=no --log-cli-level=INFO
 
 
 class TestPVMapsTestData(TestPVMaps):
-    REAL_DATA_INPUT_DIR = os.path.realpath("./test_data/inputs")
-    INPUT_DIR: str = os.path.realpath("./test_data/test_inputs")
+    DATA_INPUT_DIR = os.path.realpath("./test_data/test_pvmaps_test_data/inputs")
+    INPUT_DIR: str = os.path.realpath("./test_data/test_pvmaps_test_data/generated_test_inputs")
+    PV_MODEL_COEFF_FILE_DIR = os.path.realpath("./test_data/inputs")
 
     ELEVATION_RASTER_FILENAME: str = "elevation.tif"
     MASK_RASTER_FILENAME: str = "mask.tif"
+    FLAT_ROOF_RASTER_FILENAME: str = "flat_roof_aspect_nan.tif"
     FORCED_SLOPE_FILENAME: Optional[str] = "slope.tif"
     FORCED_ASPECT_FILENAME: Optional[str] = "aspect.tif"
     FORCED_HORIZON_BASEFILENAME: Optional[str] = "horizon"
 
-
     ###
-    # !!! MIN RASTER SIZE IS 10 by 10 - r.pv will coredump if less !!!5
+    # !!! MIN RASTER SIZE IS 10 by 10 - r.pv will coredump if less !!!
     XSIZE = 10
     Y_BLOCK_SIZE = 10
     ###
@@ -66,7 +67,6 @@ class TestPVMapsTestData(TestPVMaps):
     @classmethod
     def setup_class(cls):
         cls.test_locns = cls.create_test_rasters()
-        os.symlink(f"{cls.REAL_DATA_INPUT_DIR}/csi.coeffs", f"{cls.INPUT_DIR}/csi.coeffs")
 
     def test_outputs(self):
         """
@@ -76,11 +76,7 @@ class TestPVMapsTestData(TestPVMaps):
         """
         self._run_pvmaps(self.FORCED_HORIZON_BASEFILENAME + ".tif")
 
-        # self.do_test_pv_output(max_diff_pc_year=None, max_diff_pc_day=None)  # Use to not assert and plot results
-        self.do_test_pv_output(max_diff_pc_year=5.8, max_diff_pc_day=100.0)  # Use to assert if gets worse and not plot results
-
-        # self.do_test_radiation_outputs(max_diff_pc_beam=None, max_diff_pc_diffuse=None)
-        # self.do_test_radiation_outputs(max_diff_pc_beam=2.0, max_diff_pc_diffuse=2.0)
+        self.do_test_pv_output(max_diff_pc_year=5.8, max_diff_pc_day=100.0)  # Use to assert error if gets worse and not plot results
 
     def do_test_pv_output(self, max_diff_pc_year: Optional[float], max_diff_pc_day: Optional[float]):
         print("test_pv_output")
@@ -125,7 +121,8 @@ class TestPVMapsTestData(TestPVMaps):
         print("do_test_radiation_outputs")
 
         api_results, loc_results, diff_results = \
-            self._test_radiation_outputs(self.test_locns, "api_test_radiation_output", max_diff_pc_beam, max_diff_pc_diffuse)
+            self._test_radiation_outputs(self.test_locns, "api_test_radiation_output",
+                                         max_diff_pc_beam, max_diff_pc_diffuse)
 
         # Create np arrays containing multiple object references (using e.g.
         # "api_result = [[np.zeros((self.XSIZE, self.YSIZE))] * 2] * 12" creates copies of the same reference
@@ -172,7 +169,7 @@ class TestPVMapsTestData(TestPVMaps):
 
     @classmethod
     def borrow_transform_projection(cls):
-        ds: gdal.Dataset = gdal.Open(f"{cls.REAL_DATA_INPUT_DIR}/mask_4326.tif")
+        ds: gdal.Dataset = gdal.Open(f"{cls.DATA_INPUT_DIR}/mask_4326.tif")
         gt = ds.GetGeoTransform()
         pr = ds.GetProjection()
         return gt, pr
@@ -229,6 +226,10 @@ class TestPVMapsTestData(TestPVMaps):
         # Un-masked area needs to be > 10 by 10 too!
         mask = np.full((total_ysize, cls.XSIZE), 1)
         cls.create_raster(gt, pr, f"{cls.INPUT_DIR}/{cls.MASK_RASTER_FILENAME}", mask, gdal.GDT_Int32)
+
+        # Flat roof aspect values
+        mask = np.full((total_ysize, cls.XSIZE), math.nan)
+        cls.create_raster(gt, pr, f"{cls.INPUT_DIR}/{cls.FLAT_ROOF_RASTER_FILENAME}", mask, gdal.GDT_Int32)
 
         # Slope
         vals = np.zeros((total_ysize, cls.XSIZE))

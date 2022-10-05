@@ -200,6 +200,7 @@ class PVMaps:
         self._set_region_to_mask_and_zoom()
         if not forced_horizon_basefilename:
             self._calc_horizons_p()
+        self._ensure_horizon_ranges_p()
         self._set_mask()
         if not (forced_slope_filename and forced_aspect_filename):
             self._calc_slope_aspect()
@@ -467,22 +468,27 @@ class PVMaps:
         # in https://grass.osgeo.org/grass80/manuals/r.sun.html
         self._run_cmd(f"r.horizonmask elevation={ELEVATION} mask={MASK} direction={direction} "
                       f"output={HORIZON_BASENAME} maxdistance={self._horizon_search_distance}")
-        # Force horizon to be 0-90 degrees
-        horizon: str = f"{HORIZON_BASENAME}_{direction:03d}"
-        horizon090: str = f"{HORIZON090_BASENAME}_{direction:03d}"
-        self._run_cmd(
-            f'r.mapcalc "{horizon090} = if({horizon} >= 0.0, if({horizon} < {PI_HALF}, {horizon}, {PI_HALF}), 0.0)"')
 
     def _calc_horizons_p(self):
         logging.info("_calc_horizons")
         directions: List[Tuple[float]] = [(a,) for a in range(0, 360, self._horizon_step)]
         self._run_cmd_via_method_p(self._calc_horizon, directions)
 
+    def _ensure_horizon_ranges(self, direction):
+        """Ensure horizon all horizons are 0-90 degrees"""
+        horizon: str = f"{HORIZON_BASENAME}_{direction:03d}"
+        horizon090: str = f"{HORIZON090_BASENAME}_{direction:03d}"
+        self._run_cmd(
+            f'r.mapcalc "{horizon090} = if({horizon} >= 0.0, if({horizon} < {PI_HALF}, {horizon}, {PI_HALF}), 0.0)"')
+
+    def _ensure_horizon_ranges_p(self):
+        logging.info("_ensure_horizon_ranges")
+        directions: List[Tuple[float]] = [(a,) for a in range(0, 360, self._horizon_step)]
+        self._run_cmd_via_method_p(self._ensure_horizon_ranges, directions)
+
     def _calc_slope_aspect(self):
         logging.info("_calc_slope_aspect")
         self._run_cmd(f"r.slope.aspect elevation={ELEVATION} slope={SLOPE} aspect={ASPECT_GRASS}")
-        # is r.pv expecting compass angles? see --aspect_value ... but no info for --aspect
-        # self._run_cmd(f'r.mapcalc "{ASPECT_COMPASS} = if({ASPECT_GRASS} == 0, 0, if({ASPECT_GRASS} < 90, 90 - {ASPECT_GRASS}, 450 - {ASPECT_GRASS}))"')
 
     def _flat_panel_correction(self):
         logging.info("_flat_panel_correction")

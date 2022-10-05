@@ -17,10 +17,12 @@ from albion_models.solar_pv.pvgis.pvmaps import PVMaps, CSI, OUT_DIRECT_RAD_BASE
 class TestPVMaps:
     instance: PVMaps
     INPUT_DIR: str
-    REAL_DATA_INPUT_DIR: str
+    DATA_INPUT_DIR: str
+    PV_MODEL_COEFF_FILE_DIR: str
 
     ELEVATION_RASTER_FILENAME: str
     MASK_RASTER_FILENAME: str
+    FLAT_ROOF_RASTER_FILENAME: str
 
     FORCED_SLOPE_FILENAME: Optional[str] = None
     FORCED_ASPECT_FILENAME: Optional[str] = None
@@ -38,7 +40,7 @@ class TestPVMaps:
             input_dir=cls.INPUT_DIR,
             output_dir=os.path.realpath("./test_data/outputs"),
             pvgis_data_tar_file=os.path.realpath("./test_data/pvgis_data_tar/pvgis_data.tar"),
-            pv_model_coeff_file_dir=cls.INPUT_DIR,
+            pv_model_coeff_file_dir=cls.PV_MODEL_COEFF_FILE_DIR,
             keep_temp_mapset=True,
             num_processes=os.cpu_count(),
             output_direct_diffuse=False,
@@ -67,7 +69,7 @@ class TestPVMaps:
             if num_test_mapsets > 1:
                 cls._clean_test_mapsets()
             print("Running create_pvmap for tests")
-            cls.instance.create_pvmap(cls.ELEVATION_RASTER_FILENAME, cls.MASK_RASTER_FILENAME,
+            cls.instance.create_pvmap(cls.ELEVATION_RASTER_FILENAME, cls.MASK_RASTER_FILENAME, cls.FLAT_ROOF_RASTER_FILENAME,
                                       cls.FORCED_SLOPE_FILENAME, cls.FORCED_ASPECT_FILENAME, forced_horizon_basename)
 
         # Disable mask if it's enabled
@@ -185,6 +187,7 @@ class TestPVMaps:
 
         do_assert: bool = max_diff_pc_year is not None and max_diff_pc_day is not None
 
+        print("Checking results...")
         diff_results = []
         for ix, ((local_days, loc_year), (api_days, api_year), (lon_east, lat_north)) in \
                 enumerate(zip(loc_results, api_results, test_locns)):
@@ -236,8 +239,8 @@ class TestPVMaps:
     def _read_api_pv_data_with_cache(self, test_locns: List[Tuple[float, float]], cached_data_filename: str):
         api_results = None
 
-        if os.path.exists(f"{self.REAL_DATA_INPUT_DIR}/{cached_data_filename}.pkl"):
-            api_results = pickle.load(open(f"{self.REAL_DATA_INPUT_DIR}/{cached_data_filename}.pkl", "rb"))
+        if os.path.exists(f"{self.DATA_INPUT_DIR}/{cached_data_filename}.pkl"):
+            api_results = pickle.load(open(f"{self.DATA_INPUT_DIR}/{cached_data_filename}.pkl", "rb"))
             if len(api_results) != len(test_locns):
                 api_results = None
 
@@ -251,7 +254,7 @@ class TestPVMaps:
     def _create_cached_api_pv_data(self, test_locns: List[Tuple[float, float]], cached_data_filename: str):
         print("Re-fetching data from API")
         api_results = [self._get_api_pv_data(lon_east, lat_north) for lon_east, lat_north in test_locns]
-        pickle.dump(api_results, open(f"{self.REAL_DATA_INPUT_DIR}/{cached_data_filename}.pkl", "wb"))
+        pickle.dump(api_results, open(f"{self.DATA_INPUT_DIR}/{cached_data_filename}.pkl", "wb"))
         return api_results
 
     def _get_api_pv_data(self, lon_east: float, lat_north: float):
@@ -299,7 +302,7 @@ class TestPVMaps:
         return loc_results
 
     def _get_local_pv_data(self, lon_east: float, lat_north: float):
-        """This is very slow ... """
+        """This is very slow ... hence not getting day data"""
         ###
         # locally calced day Wh values
         local_e_day = []
@@ -352,8 +355,8 @@ class TestPVMaps:
     def _read_api_radiation_data_with_cache(self, test_locns: List[Tuple[float, float]], cached_data_filename: str):
         api_results = None
 
-        if os.path.exists(f"{self.REAL_DATA_INPUT_DIR}/{cached_data_filename}.pkl"):
-            api_results = pickle.load(open(f"{self.REAL_DATA_INPUT_DIR}/{cached_data_filename}.pkl", "rb"))
+        if os.path.exists(f"{self.DATA_INPUT_DIR}/{cached_data_filename}.pkl"):
+            api_results = pickle.load(open(f"{self.DATA_INPUT_DIR}/{cached_data_filename}.pkl", "rb"))
             if len(api_results) != len(test_locns):
                 api_results = None
 
@@ -367,7 +370,7 @@ class TestPVMaps:
     def _create_cached_api_radiation_data(self, test_locns: List[Tuple[float, float]], cached_data_filename: str):
         print("Re-fetching data from API")
         api_results = [self._get_api_radiation_data(lat_north, lon_east) for lon_east, lat_north in test_locns]
-        pickle.dump(api_results, open(f"{self.REAL_DATA_INPUT_DIR}/{cached_data_filename}.pkl", "wb"))
+        pickle.dump(api_results, open(f"{self.DATA_INPUT_DIR}/{cached_data_filename}.pkl", "wb"))
         return api_results
 
     def _get_api_radiation_data(self, lon_east: float, lat_north: float):
