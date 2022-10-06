@@ -1,6 +1,6 @@
 import logging
 from os.path import join
-from typing import List
+from typing import List, Optional
 
 import os
 
@@ -33,7 +33,7 @@ def pvgis(pg_uri: str,
           flat_roof_degrees: int,
           elevation_raster: str,
           mask_raster: str,
-          flat_roof_aspect_raster: str,
+          flat_roof_aspect_raster: Optional[str],
           debug_mode: bool):
     """
     TODO:
@@ -72,7 +72,7 @@ def pvgis(pg_uri: str,
     yearly_kwh_raster, monthly_wh_rasters = pvm.create_pvmap(
         elevation_filename=os.path.basename(elevation_raster),
         mask_filename=os.path.basename(mask_raster),
-        flat_roof_aspect_filename=os.path.basename(flat_roof_aspect_raster),
+        flat_roof_aspect_filename=os.path.basename(flat_roof_aspect_raster) if flat_roof_aspect_raster else None,
     )
 
     # yearly_kwh_raster = "/home/neil/data/albion-models/solar/job_1194/pvmaps/hpv_wind_spectral_year.tif"

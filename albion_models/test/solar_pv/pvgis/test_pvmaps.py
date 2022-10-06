@@ -22,7 +22,7 @@ class TestPVMaps:
 
     ELEVATION_RASTER_FILENAME: str
     MASK_RASTER_FILENAME: str
-    FLAT_ROOF_RASTER_FILENAME: str
+    FLAT_ROOF_RASTER_FILENAME: Optional[str]
 
     FORCED_SLOPE_FILENAME: Optional[str] = None
     FORCED_ASPECT_FILENAME: Optional[str] = None
@@ -181,40 +181,25 @@ class TestPVMaps:
 
     #############
     def _test_pv_output(self, test_locns: List[Tuple[float, float]], cached_data_filename: str,
-                        max_diff_pc_year: Optional[float] = None, max_diff_pc_day: Optional[float] = None):
+                        max_diff_pc_year: float):
         api_results = self._read_api_pv_data_with_cache(test_locns, cached_data_filename)
         loc_results = self._read_local_pv_data(test_locns)
 
-        do_assert: bool = max_diff_pc_year is not None and max_diff_pc_day is not None
-
         print("Checking results...")
-        diff_results = []
-        for ix, ((local_days, loc_year), (api_days, api_year), (lon_east, lat_north)) in \
-                enumerate(zip(loc_results, api_results, test_locns)):
-            diff_year = self._pc_diff(loc_year, api_year)
-            diff_days = []
-            for local, api in zip(local_days, api_days):
-                diff_day = self._pc_diff(local/1000, api)
-                diff_days.append(diff_day)
-            diff_results.append((diff_days, diff_year))
+        act_max_diff_pc_year: float = 0.0
+        for ix, ((loc_days, loc_year), (api_days, api_year)) in \
+                enumerate(zip(loc_results, api_results)):
+            diff_year = abs(self._pc_diff(loc_year, api_year))
+            act_max_diff_pc_year = max(act_max_diff_pc_year, diff_year)
+        print(f"Actual max diff year = {act_max_diff_pc_year}%")
 
-            if not do_assert:
-                angle, aspect, _ = self._get_aspect_slope_from_rasters(lon_east, lat_north)
-                hor_ix = math.floor(ix / self.Y_BLOCK_SIZE)
-                print(f"Cell values:"
-                      f"\nhor_ix: {hor_ix}"
-                      f"\nangle: {angle}"
-                      f"\naspect: {aspect}"
-                      f"\napi:\t{api_year}\t{api_days}"
-                      f"\nlocal:\t {loc_year}\t{[round(l/1000, 2) for l in local_days]}"
-                      f"\ndiff:\t{diff_year}\t{diff_days}")
-
-        if do_assert:
-            for ix, ((diff_days, diff_year), (loc_days, loc_year), (api_days, api_year), (lon_east, lat_north)) \
-                    in enumerate(zip(diff_results, loc_results, api_results, test_locns)):
-                angle, aspect, _ = self._get_aspect_slope_from_rasters(lon_east, lat_north)
-                hor_ix = math.floor(ix/self.Y_BLOCK_SIZE)
-                if abs(diff_year) >= max_diff_pc_year:
+        if act_max_diff_pc_year >= max_diff_pc_year:
+            for ix, ((loc_days, loc_year), (api_days, api_year), (lon_east, lat_north)) \
+                    in enumerate(zip(loc_results, api_results, test_locns)):
+                diff_year = abs(self._pc_diff(loc_year, api_year))
+                if diff_year >= max_diff_pc_year:
+                    angle, aspect, _ = self._get_aspect_slope_from_rasters(lon_east, lat_north)
+                    hor_ix = math.floor(ix/self.Y_BLOCK_SIZE)
                     print(f"Year value:"
                           f"\nhor_ix: {hor_ix}"
                           f"\nangle: {angle}"
@@ -222,19 +207,9 @@ class TestPVMaps:
                           f"\napi: {api_year}"
                           f"\nlocal: {loc_year}"
                           f"\ndiff: {diff_year}")
-                    assert abs(diff_year) < max_diff_pc_year
-                for diff_day, loc_day, api_day in zip(diff_days, loc_days, api_days):
-                    if abs(diff_day) >= max_diff_pc_day:
-                        print(f"Month value:"
-                              f"\nhor_ix: {hor_ix}"
-                              f"\nangle: {angle}"
-                              f"\naspect: {aspect}"
-                              f"\napi: {api_day}"
-                              f"\nlocal: {(loc_day/1000.0):.2f}"
-                              f"\ndiff: {diff_day}")
-                        assert abs(diff_day) < max_diff_pc_day
+                    assert diff_year < max_diff_pc_year
 
-        return api_results, loc_results, diff_results
+        return api_results, loc_results
 
     def _read_api_pv_data_with_cache(self, test_locns: List[Tuple[float, float]], cached_data_filename: str):
         api_results = None

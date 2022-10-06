@@ -2,6 +2,8 @@ from os.path import join
 
 import logging
 import os
+from typing import Optional
+
 import psycopg2.extras
 import shutil
 from psycopg2.sql import Identifier
@@ -90,7 +92,7 @@ def model_solar_pv(pg_uri: str,
         panel_spacing_m=panel_spacing_m)
 
     logging.info("Generating flat roof raster")
-    flat_roof_aspect_raster = generate_flat_roof_aspect_raster(pg_uri=pg_uri,
+    flat_roof_aspect_raster: Optional[str] = generate_flat_roof_aspect_raster(pg_uri=pg_uri,
         job_id=job_id,
         solar_dir=solar_dir)
 

@@ -82,7 +82,7 @@ class TestPVMapsTestData(TestPVMaps):
         print("test_pv_output")
 
         api_results, loc_results, diff_results = \
-            self._test_pv_output(self.test_locns, "api_test_pv_output", max_diff_pc_year, max_diff_pc_day)
+            self._test_pv_output(self.test_locns, "api_test_pv_output", max_diff_pc_year)
 
         if max_diff_pc_year is None or max_diff_pc_day is None:
             # Get overall stats and plot results

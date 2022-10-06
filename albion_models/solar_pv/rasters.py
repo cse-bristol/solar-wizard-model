@@ -3,7 +3,7 @@ from os.path import join
 import logging
 import os
 from psycopg2.sql import Identifier, Literal
-from typing import Tuple
+from typing import Tuple, Optional
 
 import albion_models.solar_pv.tables as tables
 import psycopg2.extras
@@ -11,7 +11,7 @@ from albion_models import gdal_helpers
 from albion_models.db_funcs import sql_script, copy_csv, count, connection
 from albion_models.postgis import get_merged_lidar
 from albion_models.solar_pv import mask
-from albion_models.solar_pv.roof_polygons import get_flat_roof_aspect_sql, create_flat_roof_aspect
+from albion_models.solar_pv.roof_polygons import get_flat_roof_aspect_sql, create_flat_roof_aspect, has_flat_roof
 from albion_models.transformations import _7_PARAM_SHIFT
 
 
@@ -162,16 +162,17 @@ def copy_raster(pg_conn,
 
 
 def generate_flat_roof_aspect_raster(pg_uri: str,
-                                   job_id: int,
-                                   solar_dir: str) -> str:
-    mask_raster = join(solar_dir, 'mask.tif')
-    srid = gdal_helpers.get_srid(mask_raster, fallback=27700)
-    res = gdal_helpers.get_res(mask_raster)
+                                     job_id: int,
+                                     solar_dir: str) -> Optional[str]:
+    if has_flat_roof(pg_uri, job_id):
+        mask_raster = join(solar_dir, 'mask.tif')
+        srid = gdal_helpers.get_srid(mask_raster, fallback=27700)
+        res = gdal_helpers.get_res(mask_raster)
 
-    flat_roof_aspect_sql = get_flat_roof_aspect_sql(pg_uri=pg_uri, job_id=job_id)
+        flat_roof_aspect_raster_filename = join(solar_dir, 'flat_roof_aspect.tif')
+        flat_roof_aspect_sql = get_flat_roof_aspect_sql(pg_uri=pg_uri, job_id=job_id)
+        create_flat_roof_aspect(flat_roof_aspect_sql, flat_roof_aspect_raster_filename, pg_uri, res=res, srid=srid)
 
-    flat_roof_aspect_raster_filename = join(solar_dir, 'flat_roof_aspect.tif')
+        return flat_roof_aspect_raster_filename
 
-    create_flat_roof_aspect(flat_roof_aspect_sql, flat_roof_aspect_raster_filename, pg_uri, res=res, srid=srid)
-
-    return flat_roof_aspect_raster_filename
+    return None

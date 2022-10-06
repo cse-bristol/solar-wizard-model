@@ -111,7 +111,7 @@ class TestPVMapsRealData(TestPVMaps):
         test_locs: List[Tuple[float, float]] = [(lrx, lry) for _, _, lrx, lry in sampled_locns]
 
         # Do the tests
-        self._test_pv_output(test_locs, "api_real_pv_output", max_diff_pc_year, max_diff_pc_day)
+        self._test_pv_output(test_locs, "api_real_pv_output", max_diff_pc_year)
 
     def _get_sample_locns_cached(self, sample_size: int) -> List[Tuple[int, int, float, float]]:
         cached_data_filename: str = "loc_real_pv_sample_locns"

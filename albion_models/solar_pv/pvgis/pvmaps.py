@@ -23,7 +23,8 @@ from typing import List, Tuple, Optional
 # Raster names used in grass db
 ELEVATION = "elevation"
 MASK = "mask"
-FLAT_ROOF_ASPECT = "flat_roof_aspect"
+FLAT_ROOF_ASPECT_COMPASS = "flat_roof_aspect_compass"
+FLAT_ROOF_ASPECT_GRASS = "flat_roof_aspect_grass"
 SLOPE = "slope"
 ASPECT_GRASS = "aspect_grass"
 ASPECT_COMPASS = "aspect_compass"
@@ -175,14 +176,15 @@ class PVMaps:
         if self._gisrc_filename is not None and os.path.exists(self._gisrc_filename):
             os.remove(self._gisrc_filename)
 
-    def create_pvmap(self, elevation_filename: str, mask_filename: str, flat_roof_aspect_filename: str,
+    def create_pvmap(self, elevation_filename: str, mask_filename: str, flat_roof_aspect_filename: Optional[str],
                      forced_slope_filename: Optional[str] = None,
                      forced_aspect_filename: Optional[str] = None,
                      forced_horizon_basefilename: Optional[str] = None) -> (str, List[str]):
         """
         Run PVMaps steps against the input elevation and mask. Raises exception if something goes wrong.
         Creates output rasters in the dir setup in the constructor.
-        :param flat_roof_aspect_filename: Values to use for the aspects of arrays installed on flat roofs
+        :param flat_roof_aspect_filename: Values to use for the aspects of arrays installed on flat roofs, None if
+        there are no flat roofs
         :param elevation_filename: Just the filename of the elevation raster
         :param mask_filename:  Just the filename of the mask raster
         :param forced_slope_filename: (mainly for testing) None - calculate slope from elevation raster; filename - use
@@ -193,6 +195,8 @@ class PVMaps:
         filename - will have _<angle> appended before extension, angle = steps using horizon_step_degrees, (points in
         degrees, east = 0, CCW) - so e.g. horizon.tif becomes horizon_045.tif etc
         """
+        use_flat_roof_aspects: bool = flat_roof_aspect_filename is not None
+
         self._create_temp_mapset()
         self._import_rasters(elevation_filename, mask_filename, flat_roof_aspect_filename,
                              forced_slope_filename, forced_aspect_filename, forced_horizon_basefilename)
@@ -204,7 +208,8 @@ class PVMaps:
         self._set_mask()
         if not (forced_slope_filename and forced_aspect_filename):
             self._calc_slope_aspect()
-        self._flat_panel_correction()
+        self._conv_flat_panel_aspects(use_flat_roof_aspects)
+        self._flat_panel_correction(use_flat_roof_aspects)
         self._pv_calcs_p()
         self._apply_wind_corrections_p()
         self._apply_spectral_corrections_p()
@@ -428,8 +433,10 @@ class PVMaps:
         rasters_to_import: List[Tuple[str, str]] = [
             (elevation_filename, ELEVATION),
             (mask_filename, MASK),
-            (flat_roof_aspect_filename, FLAT_ROOF_ASPECT)
         ]
+
+        if flat_roof_aspect_filename:
+            rasters_to_import.append((flat_roof_aspect_filename, FLAT_ROOF_ASPECT_COMPASS))
 
         ###
         if forced_slope_filename and forced_aspect_filename:
@@ -490,15 +497,35 @@ class PVMaps:
         logging.info("_calc_slope_aspect")
         self._run_cmd(f"r.slope.aspect elevation={ELEVATION} slope={SLOPE} aspect={ASPECT_GRASS}")
 
-    def _flat_panel_correction(self):
+    def _conv_flat_panel_aspects(self, use_flat_roof_aspects: bool):
+        if use_flat_roof_aspects:
+            self._run_cmd(f'r.mapcalc '
+                          f'expression="{FLAT_ROOF_ASPECT_GRASS} = if({FLAT_ROOF_ASPECT_COMPASS} == 0, 0, if({FLAT_ROOF_ASPECT_COMPASS} < 90, 90 - {FLAT_ROOF_ASPECT_COMPASS}, 450 - {FLAT_ROOF_ASPECT_COMPASS}))"')
+
+    def _flat_panel_correction(self, use_flat_roof_aspects: bool):
         logging.info("_flat_panel_correction")
+
+        # If slope shallower than _flat_roof_degrees_threshold, set aspect = value from flat_roof_aspect if
+        # available, otherwise south
+        aspect_cmd: str
+        if use_flat_roof_aspects:
+            aspect_cmd = \
+                f'r.mapcalc '\
+                f'expression="{ASPECT_GRASS_ADJUSTED} = '\
+                f'if({SLOPE} < {self._flat_roof_degrees_threshold}, if (isnull({FLAT_ROOF_ASPECT_GRASS}), 270.0, {FLAT_ROOF_ASPECT_GRASS}), {ASPECT_GRASS})"'
+        else:
+            aspect_cmd = \
+                f'r.mapcalc '\
+                f'expression="{ASPECT_GRASS_ADJUSTED} = '\
+                f'if({SLOPE} < {self._flat_roof_degrees_threshold}, 270.0, {ASPECT_GRASS})"'
+
+        slope_cmd: str = \
+            f'r.mapcalc ' \
+            f'expression="{SLOPE_ADJUSTED} = if({SLOPE} < {self._flat_roof_degrees_threshold}, {self._flat_roof_degrees}, {SLOPE})"'
+
         self._run_cmd_via_method_p(self._run_cmd, [
-            (f'r.mapcalc expression="{SLOPE_ADJUSTED} = if({SLOPE} < {self._flat_roof_degrees_threshold}, {self._flat_roof_degrees}, {SLOPE})"',),
-            # If slope shallower than _flat_roof_degrees_threshold, set aspect = value from flat_roof_aspect if
-            # available, otherwise south
-            (f'r.mapcalc '
-             f'expression="{ASPECT_GRASS_ADJUSTED} = '
-             f'if({SLOPE} < {self._flat_roof_degrees_threshold}, if (isnull({FLAT_ROOF_ASPECT}), 270.0, {FLAT_ROOF_ASPECT}), {ASPECT_GRASS})"',)
+            (slope_cmd,),
+            (aspect_cmd,)
         ])
 
     def _pv_calc(self, ix: int, day: int, mon: int, _: int):
