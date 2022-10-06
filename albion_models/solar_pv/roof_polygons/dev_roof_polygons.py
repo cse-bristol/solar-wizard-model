@@ -1,0 +1,153 @@
+import json
+import logging
+import os
+from os.path import join
+from typing import List
+
+import psycopg2.extras
+from psycopg2.sql import Identifier
+import numpy as np
+from shapely import geometry, wkt
+from shapely.geometry import Polygon
+
+from albion_models import paths
+from albion_models.db_funcs import connection, sql_command
+from albion_models.solar_pv import tables
+from albion_models.solar_pv.roof_polygons.roof_polygons import _building_geoms, _create_roof_polygons
+
+_MAX_ROOF_SLOPE_DEGREES = 80
+_MIN_ROOF_AREA_M = 8
+_MIN_ROOF_DEGREES_FROM_NORTH = 45
+_FLAT_ROOF_DEGREES = 10
+_LARGE_BUILDING_THRESHOLD = 200
+_MIN_DIST_TO_EDGE_M = 0.3
+_MIN_DIST_TO_EDGE_LARGE_M = 1
+
+
+def make_roof_polygons_all(pg_uri: str, job_id: int, toids: List[str],
+                           resolution_metres: float, out_dir: str,
+                           write_test_data: bool = True):
+    for toid in toids:
+        make_roof_polygons(pg_uri, job_id, toid, resolution_metres, out_dir, write_test_data)
+
+
+def make_roof_polygons(pg_uri: str, job_id: int, toid: str,
+                       resolution_metres: float, out_dir: str,
+                       write_test_data: bool = True):
+    logging.basicConfig(level=logging.DEBUG,
+                        format='[%(asctime)s] %(levelname)s: %(message)s')
+    os.makedirs(out_dir, exist_ok=True)
+
+    planes = _load_toid_planes(pg_uri, job_id, toid)
+    building_geoms = _building_geoms(pg_uri, job_id, [toid])
+
+    if write_test_data:
+        _write_test_data(toid, planes, building_geoms[toid], out_dir)
+
+    _create_roof_polygons(building_geoms,
+                          planes,
+                          max_roof_slope_degrees=_MAX_ROOF_SLOPE_DEGREES,
+                          min_roof_area_m=_MIN_ROOF_AREA_M,
+                          min_roof_degrees_from_north=_MIN_ROOF_DEGREES_FROM_NORTH,
+                          flat_roof_degrees=_FLAT_ROOF_DEGREES,
+                          large_building_threshold=_LARGE_BUILDING_THRESHOLD,
+                          min_dist_to_edge_m=_MIN_DIST_TO_EDGE_M,
+                          min_dist_to_edge_large_m=_MIN_DIST_TO_EDGE_LARGE_M,
+                          resolution_metres=resolution_metres)
+
+    if write_test_data:
+        _write_outputs(toid, planes, building_geoms[toid], out_dir)
+
+
+def _write_test_data(toid: str, planes: List[dict], building_geom: Polygon, out_dir: str):
+    jsonfile = join(out_dir, f"{toid}.json")
+    planes_ = []
+    for plane in planes:
+        plane = plane.copy()
+        plane["inliers_xy"] = list(map(tuple, plane["inliers_xy"]))
+        planes_.append(plane)
+
+    with open(jsonfile, 'w') as f:
+        data = {
+            "planes": planes_,
+            "building_geom": building_geom.wkt,
+            "toid": toid,
+        }
+        json.dump(data, f, sort_keys=True)
+
+
+def _write_outputs(toid: str, planes: List[dict], building_geom: Polygon, out_dir: str):
+    geojson_features = []
+    for plane in planes:
+        plane['building_geom'] = building_geom.wkt
+        geojson_geom = geometry.mapping(wkt.loads(plane['roof_geom_27700']))
+        del plane['roof_geom_27700']
+        del plane['inliers_xy']
+        geojson_feature = {
+          "type": "Feature",
+          "geometry": geojson_geom,
+          "properties": plane
+        }
+        geojson_features.append(geojson_feature)
+
+    geojson = {
+        "type": "FeatureCollection",
+        "crs": {"type": "name", "properties": {"name": "urn:ogc:def:crs:EPSG::27700"}},
+        "features": geojson_features
+    }
+    with open(join(out_dir, f"{toid}.geojson"), 'w') as f:
+        json.dump(geojson, f)
+
+
+def _load_toid_planes(pg_uri: str, job_id: int, toid: str):
+    """
+    Load LIDAR pixel data for RANSAC processing for a specific TOID.
+    """
+    with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
+        planes = sql_command(
+            pg_conn,
+            """
+            SELECT toid, roof_plane_id, slope, aspect 
+            FROM {roof_polygons} 
+            WHERE toid = %(toid)s
+            ORDER BY roof_plane_id
+            """,
+            {"toid": toid},
+            roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE),
+            result_extractor=lambda res: [dict(row) for row in res])
+
+        pixels = sql_command(
+            pg_conn,
+            """
+            SELECT roof_plane_id, easting, northing 
+            FROM {lidar_pixels} 
+            WHERE toid = %(toid)s AND roof_plane_id IS NOT NULL
+            """,
+            {"toid": toid},
+            lidar_pixels=Identifier(tables.schema(job_id), tables.LIDAR_PIXEL_TABLE),
+            result_extractor=lambda res: res)
+
+        by_id = {}
+        for plane in planes:
+            plane['inliers_xy'] = []
+            by_id[plane['roof_plane_id']] = plane
+        for pixel in pixels:
+            roof_plane_id = pixel['roof_plane_id']
+            by_id[roof_plane_id]['inliers_xy'].append([pixel['easting'], pixel['northing']])
+        for plane in planes:
+            plane['inliers_xy'] = np.array(plane['inliers_xy'])
+        return planes
+
+
+if __name__ == "__main__":
+    roof_polys_dir = join(paths.TEST_DATA, "roof_polygons")
+    make_roof_polygons_all(
+        "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion?application_name=blah",
+        1621,
+        [
+            # "osgb1000021445362",
+            "osgb1000021445086",
+            "osgb1000021445097",
+        ],
+        1.0,
+        roof_polys_dir)

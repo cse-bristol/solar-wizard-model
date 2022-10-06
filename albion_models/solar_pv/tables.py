@@ -18,9 +18,6 @@ BOUNDS_TABLE = 'bounds_4326'
 BUILDINGS_TABLE = 'buildings'
 """All the buildings inside the job bounds, transformed to 27700"""
 
-ROOF_PLANE_TABLE = 'roof_planes'
-"""All the roof planes detected using RANSAC"""
-
 BUILDING_EXCLUSION_REASONS_TABLE = 'building_exclusion_reasons'
 """A lookup from toid to the reason why the building has no PV
 (or null if the building has PV)"""

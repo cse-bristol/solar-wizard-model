@@ -92,7 +92,11 @@ SELECT
     pp.toid,
     pp.roof_plane_id,
     %(job_id)s AS job_id,
-    ST_SetSrid(ST_Transform(pp.panel_geom_27700, 4326), 4326)::geometry(multipolygon, 4326) AS panel_geom_4326,
+    ST_SetSrid(
+      ST_Transform(pp.panel_geom_27700,
+                   '+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 '
+                   '+y_0=-100000 +datum=OSGB36 +nadgrids=@OSTN15_NTv2_OSGBtoETRS.gsb +units=m +no_defs'
+    ), 4326)::geometry(multipolygon, 4326) AS panel_geom_4326,
     kwh.kwh_m01,
     kwh.kwh_m02,
     kwh.kwh_m03,

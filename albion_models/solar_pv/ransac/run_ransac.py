@@ -16,6 +16,7 @@ import numpy as np
 
 from albion_models.solar_pv.ransac.ransac import RANSACRegressorForLIDAR, _aspect, \
     _slope, RANSACValueError
+from albion_models.solar_pv.roof_polygons.roof_polygons import create_roof_polygons
 from albion_models.util import get_cpu_count
 
 
@@ -26,11 +27,18 @@ def _ransac_cpu_count():
 
 def run_ransac(pg_uri: str,
                job_id: int,
+               max_roof_slope_degrees: int,
+               min_roof_area_m: int,
+               min_roof_degrees_from_north: int,
+               flat_roof_degrees: int,
+               large_building_threshold: float,
+               min_dist_to_edge_m: float,
+               min_dist_to_edge_large_m: float,
                resolution_metres: float,
                workers: int = _ransac_cpu_count(),
                building_page_size: int = 100) -> None:
 
-    if count(pg_uri, tables.schema(job_id), tables.ROOF_PLANE_TABLE) > 0:
+    if count(pg_uri, tables.schema(job_id), tables.ROOF_POLYGON_TABLE) > 0:
         logging.info("Not detecting roof planes, already detected.")
         return
 
@@ -39,8 +47,18 @@ def run_ransac(pg_uri: str,
     logging.info(f"{building_count} buildings, in {segments} batches to process")
     start_time = time.time()
 
+    params = {
+        "max_roof_slope_degrees": max_roof_slope_degrees,
+        "min_roof_area_m": min_roof_area_m,
+        "min_roof_degrees_from_north": min_roof_degrees_from_north,
+        "flat_roof_degrees": flat_roof_degrees,
+        "large_building_threshold": large_building_threshold,
+        "min_dist_to_edge_m": min_dist_to_edge_m,
+        "min_dist_to_edge_large_m": min_dist_to_edge_large_m,
+        "resolution_metres": resolution_metres,
+    }
     with mp.Pool(workers) as pool:
-        wrapped_iterable = ((pg_uri, job_id, seg, building_page_size, resolution_metres)
+        wrapped_iterable = ((pg_uri, job_id, seg, building_page_size, params)
                             for seg in range(0, segments))
         for res in pool.starmap(_handle_building_page, wrapped_iterable):
             pass
@@ -49,15 +67,16 @@ def run_ransac(pg_uri: str,
     logging.info(f"RANSAC for {building_count} roofs took {round(time.time() - start_time, 2)} s.")
 
 
-def _handle_building_page(pg_uri: str, job_id: int, page: int, page_size: int, resolution_metres: float):
+def _handle_building_page(pg_uri: str, job_id: int, page: int, page_size: int, params: dict):
     by_toid = _load(pg_uri, job_id, page, page_size)
 
     planes = []
     for toid, building in by_toid.items():
-        found = _ransac_building(building, toid, resolution_metres)
+        found = _ransac_building(building, toid, params['resolution_metres'])
         if len(found) > 0:
             planes.extend(found)
 
+    create_roof_polygons(pg_uri, job_id, planes, **params)
     _save_planes(pg_uri, job_id, planes)
     print(f"Page {page} of buildings complete")
 
@@ -114,6 +133,7 @@ def _ransac_building(pixels_in_building: List[dict],
                 "slope": _slope(a, b),
                 "aspect": _aspect(a, b),
                 "inliers": pixel_ids[inlier_mask],
+                "inliers_xy": XY[inlier_mask],
                 "sd": ransac.sd,
                 "aspect_circ_mean": ransac.plane_properties["aspect_circ_mean"],
                 "aspect_circ_sd": ransac.plane_properties["aspect_circ_sd"],
@@ -190,16 +210,22 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[dict]):
     for plane in planes:
         plane_inliers.append(plane['inliers'])
         del plane['inliers']
+        del plane['inliers_xy']
 
     with connection(pg_uri) as pg_conn, pg_conn.cursor() as cursor:
         plane_ids = execute_values(cursor, SQL("""
-            INSERT INTO {roof_planes} (toid, x_coef, y_coef, intercept, slope, aspect, sd)
+            INSERT INTO {roof_polygons} (toid, roof_geom_27700, x_coef, y_coef, 
+                                         intercept, slope, aspect, sd, is_flat, usable, 
+                                         easting, northing, raw_footprint, raw_area)
             VALUES %s
             RETURNING roof_plane_id;
         """).format(
-            roof_planes=Identifier(tables.schema(job_id), tables.ROOF_PLANE_TABLE),
+            roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE),
         ), argslist=planes, fetch=True,
-            template="(%(toid)s, %(x_coef)s, %(y_coef)s, %(intercept)s, %(slope)s, %(aspect)s, %(sd)s)")
+            template="(%(toid)s, %(roof_geom_27700)s, %(x_coef)s,"
+                     " %(y_coef)s, %(intercept)s, %(slope)s, %(aspect)s, %(sd)s, "
+                     " %(is_flat)s, %(usable)s, %(easting)s, %(northing)s, "
+                     " %(raw_footprint)s, %(raw_area)s)")
 
         pixel_plane_data = []
         for i in range(0, len(plane_ids)):
@@ -230,9 +256,9 @@ def _mark_buildings_with_no_planes(pg_uri: str, job_id: int):
             UPDATE {building_exclusion_reasons} ber
             SET exclusion_reason = 'NO_ROOF_PLANES_DETECTED'
             WHERE
-                NOT EXISTS (SELECT FROM {roof_planes} rp WHERE rp.toid = ber.toid)
+                NOT EXISTS (SELECT FROM {roof_polygons} rp WHERE rp.toid = ber.toid)
                 AND ber.exclusion_reason IS NULL
             """,
-            roof_planes=Identifier(tables.schema(job_id), tables.ROOF_PLANE_TABLE),
+            roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE),
             building_exclusion_reasons=Identifier(tables.schema(job_id),
                                                   tables.BUILDING_EXCLUSION_REASONS_TABLE))

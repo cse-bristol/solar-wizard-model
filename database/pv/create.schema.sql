@@ -22,7 +22,10 @@ CREATE INDEX IF NOT EXISTS bounds_4326_bounds_idx ON {bounds_4326} using gist (b
 CREATE TABLE IF NOT EXISTS {buildings} AS
 SELECT
     toid,
-    ST_SetSrid(ST_Transform(geom_4326, 27700),27700)::geometry(polygon,27700) as geom_27700
+    ST_SetSrid(
+        ST_Transform(geom_4326, '+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 '
+                                '+ellps=airy +nadgrids=@OSTN15_NTv2_OSGBtoETRS.gsb +units=m +no_defs'
+    ), 27700)::geometry(polygon,27700) as geom_27700
 FROM mastermap.building b
 LEFT JOIN {bounds_4326} q ON ST_Intersects(b.geom_4326, q.bounds)
 WHERE q.job_id=%(job_id)s
@@ -52,13 +55,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS building_exclusions_toid ON {building_exclusio
 --
 -- Create the table for storing roof planes:
 --
-CREATE TABLE IF NOT EXISTS {roof_planes} (
+CREATE TABLE IF NOT EXISTS {roof_polygons} (
     roof_plane_id SERIAL PRIMARY KEY,
-    toid text,
-    x_coef double precision,
-    y_coef double precision,
-    intercept double precision,
-    slope double precision,
-    aspect double precision,
-    sd double precision
+    toid text NOT NULL,
+    roof_geom_27700 geometry(polygon, 27700) NOT NULL,
+    x_coef double precision NOT NULL,
+    y_coef double precision NOT NULL,
+    intercept double precision NOT NULL,
+    slope double precision NOT NULL,
+    aspect double precision NOT NULL,
+    sd double precision NOT NULL,
+    is_flat bool NOT NULL,
+    usable bool NOT NULL,
+    easting double precision NOT NULL,
+    northing double precision NOT NULL,
+    raw_footprint double precision NOT NULL,
+    raw_area double precision NOT NULL
 );
+
+CREATE INDEX ON {roof_polygons} USING GIST (roof_geom_27700);
