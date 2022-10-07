@@ -1,3 +1,7 @@
+"""
+Create some simulated test data for a range of aspects, slopes and horizons then compare local pv o/p values with the
+values from the pvgis api for the same aspects, slopes and horizons.
+"""
 
 import math
 import os
@@ -6,7 +10,6 @@ from typing import List, Optional, Tuple
 
 from osgeo import gdal
 import numpy as np
-import matplotlib.pyplot as plt
 
 from albion_models.test.solar_pv.pvgis.test_pvmaps import TestPVMaps
 
@@ -76,96 +79,7 @@ class TestPVMapsTestData(TestPVMaps):
         """
         self._run_pvmaps(self.FORCED_HORIZON_BASEFILENAME + ".tif")
 
-        self.do_test_pv_output(max_diff_pc_year=5.8, max_diff_pc_day=100.0)  # Use to assert error if gets worse and not plot results
-
-    def do_test_pv_output(self, max_diff_pc_year: Optional[float], max_diff_pc_day: Optional[float]):
-        print("test_pv_output")
-
-        api_results, loc_results, diff_results = \
-            self._test_pv_output(self.test_locns, "api_test_pv_output", max_diff_pc_year)
-
-        if max_diff_pc_year is None or max_diff_pc_day is None:
-            # Get overall stats and plot results
-            max_x: int = self.USE_X_IX_MAX - self.USE_X_IX_MIN
-            max_y: int = int(len(self.test_locns) / max_x)
-            api_result = np.zeros((max_y, max_x))
-            loc_result = np.zeros((max_y, max_x))
-            diff_result = np.zeros((max_y, max_x))
-            x = 0
-            y = 0
-            for (local_e_day, local_e_year), (api_e_day, api_e_year), (diff_day, diff_year) in zip(loc_results, api_results, diff_results):
-                api_result[y, x] = api_e_year
-                loc_result[y, x] = local_e_year
-                diff_result[y, x] = abs(diff_year)
-                x += 1
-                if x == max_x:
-                    x = 0
-                    y += 1
-
-            mean_diff = np.mean(diff_result)
-            std_diff = np.std(diff_result)
-            max_diff = np.amax(diff_result)
-            min_diff = np.amin(diff_result)
-            print(f"Abs diff % stats: Max: {max_diff} / Mean: {mean_diff} / Min: {min_diff} / SD: {std_diff}")
-
-            fig, axs = plt.subplots(ncols=3)
-            axs[0].set_title('API')
-            axs[0].imshow(api_result)
-            axs[1].set_title('LOC')
-            axs[1].imshow(loc_result)
-            axs[2].set_title('ABS DIFF (%)')
-            axs[2].imshow(diff_result)
-            plt.show()
-
-    def do_test_radiation_outputs(self, max_diff_pc_beam: Optional[float], max_diff_pc_diffuse: Optional[float]):
-        print("do_test_radiation_outputs")
-
-        api_results, loc_results, diff_results = \
-            self._test_radiation_outputs(self.test_locns, "api_test_radiation_output",
-                                         max_diff_pc_beam, max_diff_pc_diffuse)
-
-        # Create np arrays containing multiple object references (using e.g.
-        # "api_result = [[np.zeros((self.XSIZE, self.YSIZE))] * 2] * 12" creates copies of the same reference
-        api_result = []
-        loc_result = []
-        diff_result = []
-        for mon_ix in range(12):
-            api_ = []
-            loc_ = []
-            dif_ = []
-            for val_ix in range(2):
-                api_.append(np.zeros((self.XSIZE, self.Y_BLOCK_SIZE)))
-                loc_.append(np.zeros((self.XSIZE, self.Y_BLOCK_SIZE)))
-                dif_.append(np.zeros((self.XSIZE, self.Y_BLOCK_SIZE)))
-            api_result.append(api_)
-            loc_result.append(loc_)
-            diff_result.append(dif_)
-
-        x = self.USE_X_IX_MIN
-        y = self.USE_Y_IX_MIN
-        for api_rad_month, local_rad_month, diff_rad_month in zip(api_results, loc_results, diff_results):
-            for mon_ix in range(12):
-                for val_ix in range(2):
-                    api_result[mon_ix][val_ix][y][x] = api_rad_month[mon_ix][val_ix]
-                    loc_result[mon_ix][val_ix][y][x] = local_rad_month[mon_ix][val_ix]
-                    diff_result[mon_ix][val_ix][y][x] = abs(diff_rad_month[mon_ix][val_ix])
-
-            y += 1
-            if y == self.USE_Y_IX_MAX:
-                y = self.USE_Y_IX_MIN
-                x += 1
-
-        for mon_ix in range(12):
-            fig, axs = plt.subplots(nrows=2, ncols=3)
-            for val_ix in range(2):
-                tpe = f" ({mon_ix})(beam)" if val_ix == 0 else f" ({mon_ix})(diffuse)"
-                axs[val_ix, 0].set_title(f'API {tpe}')
-                axs[val_ix, 0].imshow(api_result[mon_ix][val_ix])
-                axs[val_ix, 1].set_title(f'LOC {tpe}')
-                axs[val_ix, 1].imshow(loc_result[mon_ix][val_ix])
-                axs[val_ix, 2].set_title(f'ABS DIFF {tpe} (%)')
-                axs[val_ix, 2].imshow(diff_result[mon_ix][val_ix])
-        plt.show()
+        self._test_pv_output(self.test_locns, "api_test_pv_output", max_diff_pc_year=5.8)  # Use to assert error if gets worse and not plot results
 
     @classmethod
     def borrow_transform_projection(cls):

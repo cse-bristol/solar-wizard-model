@@ -14,7 +14,7 @@ from albion_models.solar_pv.outdated_lidar.outdated_lidar_check import check_lid
 from albion_models.solar_pv.panels.panels import place_panels
 from albion_models.solar_pv.pvgis.pvgis import pvgis
 from albion_models.solar_pv.ransac.run_ransac import run_ransac
-from albion_models.solar_pv.rasters import generate_rasters, generate_flat_roof_aspect_raster
+from albion_models.solar_pv.rasters import generate_rasters, generate_flat_roof_aspect_raster_4326
 from albion_models.solar_pv.roof_polygons import create_roof_polygons
 
 
@@ -92,9 +92,9 @@ def model_solar_pv(pg_uri: str,
         panel_spacing_m=panel_spacing_m)
 
     logging.info("Generating flat roof raster")
-    flat_roof_aspect_raster: Optional[str] = generate_flat_roof_aspect_raster(pg_uri=pg_uri,
-        job_id=job_id,
-        solar_dir=solar_dir)
+    flat_roof_aspect_raster_4326: Optional[str] = generate_flat_roof_aspect_raster_4326(pg_uri=pg_uri,
+                                                                                        job_id=job_id,
+                                                                                        solar_dir=solar_dir)
 
     logging.info("Running PV-GIS...")
     pvgis(pg_uri=pg_uri,
@@ -108,7 +108,7 @@ def model_solar_pv(pg_uri: str,
           flat_roof_degrees=flat_roof_degrees,
           elevation_raster=elevation_raster,
           mask_raster=mask_raster,
-          flat_roof_aspect_raster=flat_roof_aspect_raster,
+          flat_roof_aspect_raster=flat_roof_aspect_raster_4326,
           debug_mode=debug_mode)
 
     if not debug_mode:

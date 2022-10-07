@@ -92,6 +92,15 @@ def _generate_4326_rasters(solar_dir: str,
     elevation_raster_4326 = join(solar_dir, 'elevation_4326.tif')
     mask_raster_4326 = join(solar_dir, 'mask_4326.tif')
 
+    src_srs: str = _get_srs_for_reproject_to_4326(srid)
+
+    gdal_helpers.reproject(elevation_raster, elevation_raster_4326, src_srs=src_srs, dst_srs="EPSG:4326")
+    gdal_helpers.reproject(mask_raster, mask_raster_4326, src_srs=src_srs, dst_srs="EPSG:4326")
+
+    return elevation_raster_4326, mask_raster_4326
+
+
+def _get_srs_for_reproject_to_4326(srid: int) -> str:
     if srid == 27700:
         # Use the 7-parameter shift rather than GDAL's default 3-parameter shift
         # for EN->long/lat transformation as it's much more accurate:
@@ -99,11 +108,7 @@ def _generate_4326_rasters(solar_dir: str,
         src_srs = _7_PARAM_SHIFT
     else:
         src_srs = f"EPSG:{srid}"
-
-    gdal_helpers.reproject(elevation_raster, elevation_raster_4326, src_srs=src_srs, dst_srs="EPSG:4326")
-    gdal_helpers.reproject(mask_raster, mask_raster_4326, src_srs=src_srs, dst_srs="EPSG:4326")
-
-    return elevation_raster_4326, mask_raster_4326
+    return src_srs
 
 
 def _load_rasters_to_db(pg_uri: str,
@@ -161,9 +166,9 @@ def copy_raster(pg_conn,
             pass
 
 
-def generate_flat_roof_aspect_raster(pg_uri: str,
-                                     job_id: int,
-                                     solar_dir: str) -> Optional[str]:
+def generate_flat_roof_aspect_raster_4326(pg_uri: str,
+                                          job_id: int,
+                                          solar_dir: str) -> Optional[str]:
     if has_flat_roof(pg_uri, job_id):
         mask_raster = join(solar_dir, 'mask.tif')
         srid = gdal_helpers.get_srid(mask_raster, fallback=27700)
@@ -173,6 +178,11 @@ def generate_flat_roof_aspect_raster(pg_uri: str,
         flat_roof_aspect_sql = get_flat_roof_aspect_sql(pg_uri=pg_uri, job_id=job_id)
         create_flat_roof_aspect(flat_roof_aspect_sql, flat_roof_aspect_raster_filename, pg_uri, res=res, srid=srid)
 
-        return flat_roof_aspect_raster_filename
+        flat_roof_aspect_raster_4326_filename = join(solar_dir, 'flat_roof_aspect_4326.tif')
+        src_srs: str = _get_srs_for_reproject_to_4326(srid)
+        gdal_helpers.reproject(flat_roof_aspect_raster_filename, flat_roof_aspect_raster_4326_filename,
+                               src_srs=src_srs, dst_srs="EPSG:4326")
+
+        return flat_roof_aspect_raster_4326_filename
 
     return None

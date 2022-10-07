@@ -30,7 +30,8 @@ class TestPVMaps:
     Y_BLOCK_SIZE: int = 1
 
     @classmethod
-    def _run_pvmaps(cls, forced_horizon_basename: Optional[str] = None):
+    def _run_pvmaps(cls, forced_horizon_basename: Optional[str] = None,
+                    flat_roof_degrees: float = 0.0, flat_roof_degrees_threshold: float = 0.0):
         logging.basicConfig(format='%(asctime)s: %(levelname)s: %(message)s',
                             level=logging.DEBUG, datefmt="%d/%m/%Y %H:%M:%S")
 
@@ -46,8 +47,8 @@ class TestPVMaps:
             output_direct_diffuse=False,
             horizon_step_degrees=45,
             horizon_search_distance=1000,
-            flat_roof_degrees=0.0,
-            flat_roof_degrees_threshold=0.0,
+            flat_roof_degrees=flat_roof_degrees,
+            flat_roof_degrees_threshold=flat_roof_degrees_threshold,
             panel_type=CSI,
             num_pv_calcs_per_year=None
         )

@@ -7,7 +7,6 @@ from typing import List, Tuple, Optional
 
 import numpy as np
 import pytest
-from matplotlib import pyplot as plt
 from osgeo import gdal
 
 from albion_models.solar_pv.pvgis.pvmaps import SLOPE, ASPECT_GRASS, HORIZON090_BASENAME, PI_HALF
