@@ -15,7 +15,6 @@ from albion_models.solar_pv.panels.panels import place_panels
 from albion_models.solar_pv.pvgis.pvgis import pvgis
 from albion_models.solar_pv.ransac.run_ransac import run_ransac
 from albion_models.solar_pv.rasters import generate_rasters, generate_flat_roof_aspect_raster_4326
-from albion_models.solar_pv.roof_polygons import create_roof_polygons
 
 
 def model_solar_pv(pg_uri: str,
@@ -64,23 +63,18 @@ def model_solar_pv(pg_uri: str,
         debug_mode=debug_mode)
 
     logging.info("Checking for outdated LiDAR and missing LiDAR coverage...")
-    check_lidar(pg_uri, job_id)
+    check_lidar(pg_uri, job_id, resolution_metres=res)
 
     logging.info("Detecting roof planes...")
-    run_ransac(pg_uri, job_id, resolution_metres=res)
-
-    logging.info("Creating and filtering roof polygons...")
-    create_roof_polygons(
-        pg_uri=pg_uri,
-        job_id=job_id,
-        max_roof_slope_degrees=max_roof_slope_degrees,
-        min_roof_area_m=min_roof_area_m,
-        min_roof_degrees_from_north=min_roof_degrees_from_north,
-        flat_roof_degrees=flat_roof_degrees,
-        large_building_threshold=large_building_threshold,
-        min_dist_to_edge_m=min_dist_to_edge_m,
-        min_dist_to_edge_large_m=min_dist_to_edge_large_m,
-        resolution_metres=res)
+    run_ransac(pg_uri, job_id,
+               max_roof_slope_degrees=max_roof_slope_degrees,
+               min_roof_area_m=min_roof_area_m,
+               min_roof_degrees_from_north=min_roof_degrees_from_north,
+               flat_roof_degrees=flat_roof_degrees,
+               large_building_threshold=large_building_threshold,
+               min_dist_to_edge_m=min_dist_to_edge_m,
+               min_dist_to_edge_large_m=min_dist_to_edge_large_m,
+               resolution_metres=res)
 
     logging.info("Adding individual PV panels...")
     place_panels(
@@ -128,7 +122,7 @@ def _init_schema(pg_uri: str, job_id: int):
             schema=Identifier(tables.schema(job_id)),
             bounds_4326=Identifier(tables.schema(job_id), tables.BOUNDS_TABLE),
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
-            roof_planes=Identifier(tables.schema(job_id), tables.ROOF_PLANE_TABLE),
+            roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE),
             building_exclusion_reasons=Identifier(tables.schema(job_id), tables.BUILDING_EXCLUSION_REASONS_TABLE),
         )
     finally:

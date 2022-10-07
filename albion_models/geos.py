@@ -1,6 +1,7 @@
 import json
-from typing import List
+from typing import List, Tuple, Union
 
+import math
 from shapely.strtree import STRtree
 from shapely.geometry import Polygon, shape, MultiPolygon
 from shapely import wkt
@@ -12,7 +13,7 @@ from albion_models.lidar.en_to_grid_ref import en_to_grid_ref
 from albion_models.util import round_down_to, round_up_to, frange
 
 
-def rect(x: int, y: int, w: int, h: int) -> Polygon:
+def rect(x: float, y: float, w: float, h: float) -> Polygon:
     return Polygon([(x, y),
                     (x, y + h),
                     (x + w, y + h),
@@ -20,7 +21,7 @@ def rect(x: int, y: int, w: int, h: int) -> Polygon:
                     (x, y)])
 
 
-def square(x: int, y: int, edge: int) -> Polygon:
+def square(x: float, y: float, edge: float) -> Polygon:
     return rect(x, y, edge, edge)
 
 
@@ -98,5 +99,12 @@ def get_grid_refs(poly, cell_size: int) -> List[str]:
     return grid_refs
 
 
-def largest_polygon(multi: MultiPolygon):
+def largest_polygon(multi: Union[MultiPolygon, Polygon]):
+    if multi.type == 'Polygon':
+        return multi
     return max(multi.geoms, key=lambda poly: poly.area)
+
+
+def azimuth(p1: Tuple[float, float], p2: Tuple[float, float]) -> float:
+    angle = math.atan2(p2[0] - p1[0], p2[1] - p1[1])
+    return math.degrees(angle) if angle > 0 else math.degrees(angle) + 180

@@ -18,7 +18,7 @@ model_params = {
         "default": 1000,
         "help": "How far in each direction to look when determining horizon height. Unit: metres. (default: %(default)s)"},
     "horizon_slices": {
-        "default": 16,
+        "default": 36,
         "help": "The number of rays traced from each point to determine horizon height. (default: %(default)s)"},
     "max_roof_slope_degrees": {
         "default": 80,
@@ -211,7 +211,7 @@ def extract_run_data(pg_conn, pg_uri: str, os_run_id: int, gpkg: str):
         FROM
             models.job_queue q
             LEFT JOIN models.open_solar_jobs osj ON osj.job_id = q.job_id
-            LEFT JOIN models.building_exclusion_reasons ber ON ber.job_id = osj.job_id
+            LEFT JOIN models.pv_building ber ON ber.job_id = osj.job_id
             LEFT JOIN aggregates.building b ON b.toid = ber.toid
         WHERE osj.os_run_id = %(os_run_id)s
         """,

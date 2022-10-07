@@ -30,31 +30,15 @@ def place_panels(pg_uri: str,
                  page_size: int = 1000):
     schema = tables.schema(job_id)
 
-    roof_polygon_count = count(pg_uri, schema, tables.PANEL_POLYGON_TABLE)
-    if roof_polygon_count > 0:
+    panel_polygon_count = count(pg_uri, schema, tables.PANEL_POLYGON_TABLE)
+    if panel_polygon_count > 0:
         logging.info("Not adding PV panels, panels already added")
         return
 
     logging.info(f"Placing panels using {workers} parallel processes...")
-    with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
-        sql_command(
-            pg_conn,
-            """
-            DROP TABLE IF EXISTS {panel_polygons};
-            
-            CREATE TABLE {panel_polygons} AS
-            SELECT
-                null::geometry(MultiPolygon, 27700) AS panel_geom_27700,
-                0.0::double precision AS footprint,
-                0.0::double precision AS area,
-                rh.*
-            FROM {roof_polygons} rh;
-            
-            ALTER TABLE {panel_polygons} ADD PRIMARY KEY (roof_plane_id);
-            """,
-            roof_polygons=Identifier(schema, tables.ROOF_POLYGON_TABLE),
-            panel_polygons=Identifier(schema, tables.PANEL_POLYGON_TABLE))
+    _setup(pg_uri, schema)
 
+    roof_polygon_count = count(pg_uri, schema, tables.ROOF_POLYGON_TABLE)
     pages = math.ceil(roof_polygon_count / page_size)
     logging.info(f"{roof_polygon_count} roof polygons, in {pages} batches to process")
 
@@ -65,13 +49,41 @@ def place_panels(pg_uri: str,
             pass
 
     logging.info(f"Panels placed, finalising...")
+    _post_load(pg_uri, schema, min_roof_area_m)
 
+    logging.info("Finished placing panels")
+
+
+def _setup(pg_uri: str, schema: str):
+    with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
+        sql_command(
+            pg_conn,
+            """
+            DROP TABLE IF EXISTS {panel_polygons};
+
+            CREATE TABLE {panel_polygons} AS
+            SELECT
+                null::geometry(MultiPolygon, 27700) AS panel_geom_27700,
+                0.0::double precision AS footprint,
+                0.0::double precision AS area,
+                rh.*
+            FROM {roof_polygons} rh;
+
+            ALTER TABLE {panel_polygons} ADD PRIMARY KEY (roof_plane_id);
+            """,
+            roof_polygons=Identifier(schema, tables.ROOF_POLYGON_TABLE),
+            panel_polygons=Identifier(schema, tables.PANEL_POLYGON_TABLE))
+
+
+def _post_load(pg_uri: str, schema: str, min_roof_area_m: float):
     with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
         sql_command(
             pg_conn,
             """
             UPDATE {panel_polygons} SET usable = false
             WHERE usable = true AND area < %(min_roof_area_m)s;
+            
+            DELETE FROM {panel_polygons} WHERE panel_geom_27700 IS NULL;
             
             CREATE INDEX ON {panel_polygons} USING GIST (panel_geom_27700);
             
@@ -85,10 +97,7 @@ def place_panels(pg_uri: str,
             """,
             {"min_roof_area_m": min_roof_area_m},
             building_exclusion_reasons=Identifier(schema, tables.BUILDING_EXCLUSION_REASONS_TABLE),
-            panel_polygons=Identifier(schema,
-                                      tables.PANEL_POLYGON_TABLE))
-
-    logging.info("Finished placing panels")
+            panel_polygons=Identifier(schema, tables.PANEL_POLYGON_TABLE))
 
 
 def _place_panel_page(pg_uri: str,
@@ -208,8 +217,7 @@ def _roof_panels(roof: MultiPolygon,
     # Rotate the roof area CCW by aspect, to be gridded easily:
     centroid = roof.centroid
     rotated_roof = affinity.rotate(roof, aspect, origin=centroid)
-    # TODO would be nice but requires new version of shapely (1.8) -
-    #  and might not be necessary - see if any more errors happen
+    # TODO might not be necessary - see if any more errors happen
     # rotated_roof = make_valid(rotated_roof)
 
     # Define grids of portrait and landscape panels:
