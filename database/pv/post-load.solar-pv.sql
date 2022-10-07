@@ -41,24 +41,21 @@ SELECT
     -- sum of the kwh of each pixel that intersects the panel,
     -- multiplied by the proportion of the pixel that intersects the panel.
     -- PVMAPS produces kWh values per pixel as if a pixel was a 1kWp panel
-    -- so the values are adjusted accordingly
-    -- TODO multiplying by res^2 assumes that PVMAPS always gives outputs as if
-    -- TODO  peak power per m2 was 1kWp - but is it actually 1kWp per pixel? in
-    -- TODO  which case this should be removed.
-    SUM(overlap_area * pv.kwh) * %(peak_power_per_m2)s * {res} * {res} AS kwh_year,
+    -- so the values are adjusted accordingly.
+    SUM(overlap_area * pv.kwh) * %(peak_power_per_m2)s * {res} * {res} * (1 - {system_loss}) AS kwh_year,
 
-    SUM(overlap_area * pv.kwh_m01) * %(peak_power_per_m2)s * {res} * {res} AS kwh_m01,
-    SUM(overlap_area * pv.kwh_m02) * %(peak_power_per_m2)s * {res} * {res} AS kwh_m02,
-    SUM(overlap_area * pv.kwh_m03) * %(peak_power_per_m2)s * {res} * {res} AS kwh_m03,
-    SUM(overlap_area * pv.kwh_m04) * %(peak_power_per_m2)s * {res} * {res} AS kwh_m04,
-    SUM(overlap_area * pv.kwh_m05) * %(peak_power_per_m2)s * {res} * {res} AS kwh_m05,
-    SUM(overlap_area * pv.kwh_m06) * %(peak_power_per_m2)s * {res} * {res} AS kwh_m06,
-    SUM(overlap_area * pv.kwh_m07) * %(peak_power_per_m2)s * {res} * {res} AS kwh_m07,
-    SUM(overlap_area * pv.kwh_m08) * %(peak_power_per_m2)s * {res} * {res} AS kwh_m08,
-    SUM(overlap_area * pv.kwh_m09) * %(peak_power_per_m2)s * {res} * {res} AS kwh_m09,
-    SUM(overlap_area * pv.kwh_m10) * %(peak_power_per_m2)s * {res} * {res} AS kwh_m10,
-    SUM(overlap_area * pv.kwh_m11) * %(peak_power_per_m2)s * {res} * {res} AS kwh_m11,
-    SUM(overlap_area * pv.kwh_m12) * %(peak_power_per_m2)s * {res} * {res} AS kwh_m12,
+    SUM(overlap_area * pv.kwh_m01) * %(peak_power_per_m2)s * {res} * {res} * (1 - {system_loss}) AS kwh_m01,
+    SUM(overlap_area * pv.kwh_m02) * %(peak_power_per_m2)s * {res} * {res} * (1 - {system_loss}) AS kwh_m02,
+    SUM(overlap_area * pv.kwh_m03) * %(peak_power_per_m2)s * {res} * {res} * (1 - {system_loss}) AS kwh_m03,
+    SUM(overlap_area * pv.kwh_m04) * %(peak_power_per_m2)s * {res} * {res} * (1 - {system_loss}) AS kwh_m04,
+    SUM(overlap_area * pv.kwh_m05) * %(peak_power_per_m2)s * {res} * {res} * (1 - {system_loss}) AS kwh_m05,
+    SUM(overlap_area * pv.kwh_m06) * %(peak_power_per_m2)s * {res} * {res} * (1 - {system_loss}) AS kwh_m06,
+    SUM(overlap_area * pv.kwh_m07) * %(peak_power_per_m2)s * {res} * {res} * (1 - {system_loss}) AS kwh_m07,
+    SUM(overlap_area * pv.kwh_m08) * %(peak_power_per_m2)s * {res} * {res} * (1 - {system_loss}) AS kwh_m08,
+    SUM(overlap_area * pv.kwh_m09) * %(peak_power_per_m2)s * {res} * {res} * (1 - {system_loss}) AS kwh_m09,
+    SUM(overlap_area * pv.kwh_m10) * %(peak_power_per_m2)s * {res} * {res} * (1 - {system_loss}) AS kwh_m10,
+    SUM(overlap_area * pv.kwh_m11) * %(peak_power_per_m2)s * {res} * {res} * (1 - {system_loss}) AS kwh_m11,
+    SUM(overlap_area * pv.kwh_m12) * %(peak_power_per_m2)s * {res} * {res} * (1 - {system_loss}) AS kwh_m12,
     NULL::real[] AS horizon -- gets filled out below
 FROM
     {panel_polygons} pp

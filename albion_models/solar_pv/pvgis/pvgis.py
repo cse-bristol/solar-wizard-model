@@ -11,6 +11,7 @@ import albion_models.solar_pv.tables as tables
 from albion_models import paths, gdal_helpers
 from albion_models.db_funcs import sql_script, connection, \
     sql_command
+from albion_models.solar_pv.constants import FLAT_ROOF_DEGREES_THRESHOLD, SYSTEM_LOSS
 from albion_models.solar_pv.pvgis import pvmaps
 from albion_models.solar_pv.rasters import copy_raster
 from albion_models.transformations import _7_PARAM_SHIFT
@@ -70,7 +71,7 @@ def pvgis(pg_uri: str,
         horizon_step_degrees=horizon_step_degrees,
         horizon_search_distance=horizon_search_radius,
         flat_roof_degrees=flat_roof_degrees,
-        flat_roof_degrees_threshold=5.0,
+        flat_roof_degrees_threshold=FLAT_ROOF_DEGREES_THRESHOLD,
         panel_type=panel_type,
     )
     pvm.create_pvmap(
@@ -238,4 +239,5 @@ def _write_results_to_db(pg_conn,
         panel_polygons=Identifier(schema, tables.PANEL_POLYGON_TABLE),
         building_exclusion_reasons=Identifier(schema, tables.BUILDING_EXCLUSION_REASONS_TABLE),
         job_view=Identifier(f"solar_pv_job_{job_id}"),
-        res=Literal(resolution_metres))
+        res=Literal(resolution_metres),
+        system_loss=Literal(SYSTEM_LOSS))

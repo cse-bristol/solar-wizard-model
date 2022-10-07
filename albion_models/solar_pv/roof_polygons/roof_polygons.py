@@ -11,6 +11,8 @@ from shapely.validation import make_valid
 import albion_models.solar_pv.tables as tables
 from albion_models.db_funcs import connection, sql_command
 from albion_models.geos import azimuth, square, largest_polygon
+from albion_models.solar_pv.constants import FLAT_ROOF_DEGREES_THRESHOLD, \
+    FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD, AZIMUTH_ALIGNMENT_THRESHOLD
 
 
 def create_roof_polygons(pg_uri: str,
@@ -54,7 +56,7 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
     for plane in planes:
         toid = plane['toid']
         # set is_flat, update slope and aspect of flat roofs
-        is_flat = plane['slope'] <= 5  # TODO constant - also used in pvgis.py
+        is_flat = plane['slope'] <= FLAT_ROOF_DEGREES_THRESHOLD
         plane['is_flat'] = is_flat
         if is_flat:
             plane['slope'] = flat_roof_degrees
@@ -63,7 +65,7 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
         building_geom = building_geoms[toid]
         orientations = _building_orientations(building_geom)
         for orientation in orientations:
-            threshold = 15 if not is_flat else 45  # TODO constants
+            threshold = AZIMUTH_ALIGNMENT_THRESHOLD if not is_flat else FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD
             if abs(orientation - plane['aspect']) < threshold:
                 plane['aspect'] = orientation
                 break
