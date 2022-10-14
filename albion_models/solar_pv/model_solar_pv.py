@@ -114,8 +114,7 @@ def _init_schema(pg_uri: str, job_id: int):
             schema=Identifier(tables.schema(job_id)),
             bounds_4326=Identifier(tables.schema(job_id), tables.BOUNDS_TABLE),
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
-            roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE),
-            building_exclusion_reasons=Identifier(tables.schema(job_id), tables.BUILDING_EXCLUSION_REASONS_TABLE),
+            roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE)
         )
     finally:
         pg_conn.close()

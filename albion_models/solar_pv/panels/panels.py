@@ -87,16 +87,16 @@ def _post_load(pg_uri: str, schema: str, min_roof_area_m: float):
             
             CREATE INDEX ON {panel_polygons} USING GIST (panel_geom_27700);
             
-            -- Update building_exclusion_reasons for any buildings that have roof planes but no
+            -- Update building.exclusion_reason for any buildings that have roof planes but no
             -- usable ones:
-            UPDATE {building_exclusion_reasons} ber
+            UPDATE {buildings} b
             SET exclusion_reason = 'ALL_ROOF_PLANES_UNUSABLE'
             WHERE
-                NOT EXISTS (SELECT FROM {panel_polygons} pp WHERE pp.usable AND pp.toid = ber.toid)
-                AND ber.exclusion_reason IS NULL;
+                NOT EXISTS (SELECT FROM {panel_polygons} pp WHERE pp.usable AND pp.toid = b.toid)
+                AND b.exclusion_reason IS NULL;
             """,
             {"min_roof_area_m": min_roof_area_m},
-            building_exclusion_reasons=Identifier(schema, tables.BUILDING_EXCLUSION_REASONS_TABLE),
+            buildings=Identifier(schema, tables.BUILDINGS_TABLE),
             panel_polygons=Identifier(schema, tables.PANEL_POLYGON_TABLE))
 
 

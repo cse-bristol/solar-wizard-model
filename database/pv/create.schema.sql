@@ -25,7 +25,9 @@ SELECT
     ST_SetSrid(
         ST_Transform(geom_4326, '+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 '
                                 '+ellps=airy +nadgrids=@OSTN15_NTv2_OSGBtoETRS.gsb +units=m +no_defs'
-    ), 27700)::geometry(polygon,27700) as geom_27700
+    ), 27700)::geometry(polygon,27700) as geom_27700,
+    NULL::models.pv_exclusion_reason AS exclusion_reason,
+    NULL::real AS height
 FROM mastermap.building b
 LEFT JOIN {bounds_4326} q ON ST_Intersects(b.geom_4326, q.bounds)
 WHERE q.job_id=%(job_id)s
@@ -40,17 +42,6 @@ AND (NOT ST_Touches(ST_Centroid(b.geom_4326), q.bounds)
 
 CREATE UNIQUE INDEX IF NOT EXISTS buildings_toid_idx ON {buildings} (toid);
 CREATE INDEX IF NOT EXISTS buildings_geom_27700_idx ON {buildings} USING GIST (geom_27700);
-
---
--- Building exclusion reasons table:
---
-CREATE TABLE IF NOT EXISTS {building_exclusion_reasons} AS
-SELECT
-    toid,
-    NULL::models.pv_exclusion_reason AS exclusion_reason
-FROM {buildings};
-
-CREATE UNIQUE INDEX IF NOT EXISTS building_exclusions_toid ON {building_exclusion_reasons} (toid);
 
 --
 -- Create the table for storing roof planes:

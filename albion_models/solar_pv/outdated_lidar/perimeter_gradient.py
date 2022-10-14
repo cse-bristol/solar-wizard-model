@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional
 
 from shapely import wkt, strtree
 from shapely.geometry import LineString, Point
@@ -26,12 +26,19 @@ class HeightAggregator:
             self.pixels_without += 1
             self.without_elevation_sum += pixel['elevation']
 
-    def average_heights(self) -> Tuple[float, float]:
+    def average_heights(self) -> Tuple[Optional[float], Optional[float]]:
         if self.pixels_without > 0 and self.pixels_within > 0:
             return (self.within_elevation_sum / self.pixels_within,
                     self.without_elevation_sum / self.pixels_without)
         else:
             return None, None
+
+    def height(self) -> Optional[float]:
+        h_within, h_without = self.average_heights()
+        if h_without and h_within:
+            return h_within - h_without
+        else:
+            return None
 
 
 def _perpendicular_bisector(line_segment: LineString, length: float):
@@ -48,12 +55,11 @@ def check_perimeter_gradient(building,
                              bad_bisector_ratio: float = 0.52,
                              debug: bool = False):
     """
-    Second pass at attempting to detect outdated LiDAR, using a more sophisticated
-    algorithm:
+    Attempt to detect outdated LiDAR.
 
     * Every `segment_length` metres along the building perimeter, take the
     perpendicular bisector of the line segment at that point and find all the pixels
-    that lie on it within a given distance.
+    that lie on it within a given distance (`bisector_length`).
 
     * Take the difference in average height between the interior and exterior pixels
     that lie on that bisector. If it's below `gradient_threshold` metres, it counts

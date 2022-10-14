@@ -164,10 +164,8 @@ def _load(pg_uri: str, job_id: int, page: int, page_size: int):
             """
             WITH building_page AS (
                 SELECT b.toid, b.geom_27700
-                FROM
-                    {buildings} b
-                    LEFT JOIN {building_exclusion_reasons} ber ON b.toid = ber.toid
-                WHERE ber.exclusion_reason IS NULL
+                FROM {buildings} b
+                WHERE b.exclusion_reason IS NULL
                 ORDER BY b.toid
                 OFFSET %(offset)s LIMIT %(limit)s
             )
@@ -184,7 +182,6 @@ def _load(pg_uri: str, job_id: int, page: int, page_size: int):
             },
             lidar_pixels=Identifier(tables.schema(job_id), tables.LIDAR_PIXEL_TABLE),
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
-            building_exclusion_reasons=Identifier(tables.schema(job_id), tables.BUILDING_EXCLUSION_REASONS_TABLE),
             result_extractor=lambda res: res)
 
         by_toid = defaultdict(list)
@@ -253,12 +250,11 @@ def _mark_buildings_with_no_planes(pg_uri: str, job_id: int):
         sql_command(
             pg_conn,
             """
-            UPDATE {building_exclusion_reasons} ber
+            UPDATE {buildings} b
             SET exclusion_reason = 'NO_ROOF_PLANES_DETECTED'
             WHERE
-                NOT EXISTS (SELECT FROM {roof_polygons} rp WHERE rp.toid = ber.toid)
-                AND ber.exclusion_reason IS NULL
+                NOT EXISTS (SELECT FROM {roof_polygons} rp WHERE rp.toid = b.toid)
+                AND b.exclusion_reason IS NULL
             """,
             roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE),
-            building_exclusion_reasons=Identifier(tables.schema(job_id),
-                                                  tables.BUILDING_EXCLUSION_REASONS_TABLE))
+            buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE))

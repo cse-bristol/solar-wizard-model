@@ -237,7 +237,7 @@ def _write_results_to_db(pg_conn,
         panel_kwh=Identifier(schema, "panel_kwh"),
         pixels_in_panels=Identifier(schema, "pixels_in_panels"),
         panel_polygons=Identifier(schema, tables.PANEL_POLYGON_TABLE),
-        building_exclusion_reasons=Identifier(schema, tables.BUILDING_EXCLUSION_REASONS_TABLE),
+        building_exclusion_reasons=Identifier(schema, tables.BUILDINGS_TABLE),
         job_view=Identifier(f"solar_pv_job_{job_id}"),
         res=Literal(resolution_metres),
         system_loss=Literal(SYSTEM_LOSS))

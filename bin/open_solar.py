@@ -194,7 +194,8 @@ def extract_run_data(pg_conn, pg_uri: str, os_run_id: int, gpkg: str):
             b.toid, 
             b.postcode,
             b.addresses,
-            ber.exclusion_reason,
+            pvb.exclusion_reason,
+            pvb.height,
             b.is_residential,
             b.heating_fuel,
             b.heating_system,
@@ -213,8 +214,8 @@ def extract_run_data(pg_conn, pg_uri: str, os_run_id: int, gpkg: str):
         FROM
             models.job_queue q
             LEFT JOIN models.open_solar_jobs osj ON osj.job_id = q.job_id
-            LEFT JOIN models.pv_building ber ON ber.job_id = osj.job_id
-            LEFT JOIN aggregates.building b ON b.toid = ber.toid
+            LEFT JOIN models.pv_building bpv ON bpv.job_id = osj.job_id
+            LEFT JOIN aggregates.building b ON b.toid = pvb.toid
         WHERE osj.os_run_id = %(os_run_id)s
         """,
         os_run_id=os_run_id)

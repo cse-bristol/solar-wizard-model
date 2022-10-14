@@ -10,7 +10,7 @@ from albion_models.db_funcs import count, sql_command, connection
 from albion_models.lidar.lidar import LIDAR_NODATA
 from albion_models.solar_pv import tables
 from albion_models.solar_pv.outdated_lidar.perimeter_gradient import \
-    check_perimeter_gradient
+    check_perimeter_gradient, HeightAggregator
 from albion_models.util import get_cpu_count
 
 
@@ -54,14 +54,14 @@ def check_lidar(pg_uri: str,
 def _check_lidar_page(pg_uri: str, job_id: int, resolution_metres: float, page: int, page_size: int = 1000):
     with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
         buildings = _load_buildings(pg_conn, job_id, page, page_size)
-        to_exclude = []
+        to_write = []
 
         for building in buildings:
             reason = _check_building(building, resolution_metres)
-            if reason:
-                to_exclude.append((building['toid'], reason))
+            height = HeightAggregator(building['pixels']).height() if reason is None else None
+            to_write.append((building['toid'], reason, height))
 
-        _write_exclusions(pg_conn, job_id, to_exclude)
+        _write_exclusions(pg_conn, job_id, to_write)
         print(f"Checked page {page} of LiDAR")
 
 
@@ -79,18 +79,19 @@ def _check_coverage(building):
     return 'NO_LIDAR_COVERAGE'
 
 
-def _write_exclusions(pg_conn, job_id: int, to_exclude: List[Tuple[str, str]]):
+def _write_exclusions(pg_conn, job_id: int, to_exclude: List[Tuple[str, str, float]]):
     with pg_conn.cursor() as cursor:
         psycopg2.extras.execute_values(
             cursor,
             SQL("""
-                UPDATE {building_exclusion_reasons}
-                SET exclusion_reason = data.exclusion_reason::models.pv_exclusion_reason
-                FROM (VALUES %s) AS data (toid, exclusion_reason)
-                WHERE {building_exclusion_reasons}.toid = data.toid;
+                UPDATE {buildings}
+                SET 
+                    exclusion_reason = data.exclusion_reason::models.pv_exclusion_reason,
+                    height = data.height
+                FROM (VALUES %s) AS data (toid, exclusion_reason, height)
+                WHERE {buildings}.toid = data.toid;
             """).format(
-                building_exclusion_reasons=Identifier(tables.schema(job_id),
-                                                      tables.BUILDING_EXCLUSION_REASONS_TABLE),
+                buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
             ), argslist=to_exclude)
         pg_conn.commit()
 
@@ -106,13 +107,8 @@ def _load_buildings(pg_conn, job_id: int, page: int, page_size: int = 1000, toid
     buildings = sql_command(
         pg_conn,
         """
-        SELECT 
-            b.toid, 
-            ST_AsText(b.geom_27700) AS geom,
-            hh.height,
-            hh.rel_h2 AS base_roof_height
+        SELECT b.toid, ST_AsText(b.geom_27700) AS geom
         FROM {buildings} b
-        LEFT JOIN mastermap.height hh ON b.toid = hh.toid
         """ + where_clause + """
         ORDER BY b.toid
         OFFSET %(offset)s LIMIT %(limit)s
@@ -171,14 +167,10 @@ def _already_checked(pg_conn, job_id: int) -> bool:
     return sql_command(
         pg_conn,
         """
-        SELECT COUNT(*) != 0 
-        FROM {building_exclusion_reasons}
-        WHERE exclusion_reason IS NOT NULL
+        SELECT COUNT(*) != 0 FROM {buildings} WHERE exclusion_reason IS NOT NULL
         """,
-        building_exclusion_reasons=Identifier(tables.schema(job_id),
-                                              tables.BUILDING_EXCLUSION_REASONS_TABLE),
-        result_extractor=lambda rows: rows[0][0]
-    )
+        buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
+        result_extractor=lambda rows: rows[0][0])
 
 
 if __name__ == '__main__':
