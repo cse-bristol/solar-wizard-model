@@ -5,7 +5,8 @@ import math
 from psycopg2.sql import Identifier
 import psycopg2.extras
 from shapely import wkt, affinity, ops
-from shapely.geometry import LineString, Polygon, CAP_STYLE, JOIN_STYLE
+from shapely.geometry import LineString, Polygon, CAP_STYLE, JOIN_STYLE, MultiPoint, \
+    MultiPolygon
 from shapely.validation import make_valid
 
 import albion_models.solar_pv.tables as tables
@@ -25,20 +26,21 @@ def create_roof_polygons(pg_uri: str,
                          large_building_threshold: float,
                          min_dist_to_edge_m: float,
                          min_dist_to_edge_large_m: float,
-                         resolution_metres: float):
+                         resolution_metres: float) -> List[dict]:
     """Add roof polygons and other related fields to the dicts in `planes`"""
     toids = list({plane['toid'] for plane in planes})
     building_geoms = _building_geoms(pg_uri, job_id, toids)
-    _create_roof_polygons(building_geoms,
-                          planes,
-                          max_roof_slope_degrees=max_roof_slope_degrees,
-                          min_roof_area_m=min_roof_area_m,
-                          min_roof_degrees_from_north=min_roof_degrees_from_north,
-                          flat_roof_degrees=flat_roof_degrees,
-                          large_building_threshold=large_building_threshold,
-                          min_dist_to_edge_m=min_dist_to_edge_m,
-                          min_dist_to_edge_large_m=min_dist_to_edge_large_m,
-                          resolution_metres=resolution_metres)
+    return _create_roof_polygons(
+        building_geoms,
+        planes,
+        max_roof_slope_degrees=max_roof_slope_degrees,
+        min_roof_area_m=min_roof_area_m,
+        min_roof_degrees_from_north=min_roof_degrees_from_north,
+        flat_roof_degrees=flat_roof_degrees,
+        large_building_threshold=large_building_threshold,
+        min_dist_to_edge_m=min_dist_to_edge_m,
+        min_dist_to_edge_large_m=min_dist_to_edge_large_m,
+        resolution_metres=resolution_metres)
 
 
 def _create_roof_polygons(building_geoms: Dict[str, Polygon],
@@ -50,8 +52,9 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
                           large_building_threshold: float,
                           min_dist_to_edge_m: float,
                           min_dist_to_edge_large_m: float,
-                          resolution_metres: float):
+                          resolution_metres: float) -> List[dict]:
     polygons_by_toid = defaultdict(list)
+    roof_polygons = []
 
     for plane in planes:
         toid = plane['toid']
@@ -86,6 +89,27 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
                                                    join_style=JOIN_STYLE.mitre,
                                                    resolution=1)
         roof_poly = largest_polygon(roof_poly)
+
+        # # TODO: algorithm extension to consider:
+        # # basically a smooth diff between the poly and its convex hull.
+        # # doesn't work so well when an individual tooth to smooth has a shape
+        # # very different from its own hull.
+        # # 1. cv = convex_hull(poly)
+        # # 2. cvd = cv.difference(poly)
+        # # 3. remove any small things (like pixel jags) from cvd
+        # # 4. use cv.difference(cvd)
+        # cv = roof_poly.convex_hull
+        # cvd = cv.difference(roof_poly)
+        # if cvd.type == 'MultiPolygon':
+        #     cvd = make_valid(MultiPolygon([g.convex_hull for g in cvd.geoms]))
+        #     roof_poly = cv.difference(cvd)
+        # else:
+        #     roof_poly = cv.difference(cvd.convex_hull)
+        # roof_poly = largest_polygon(roof_poly)
+        # roof_poly = make_valid(roof_poly.buffer(0))
+
+        if roof_poly.is_empty:
+            continue
 
         # constrain roof polygons to building geometry, enforcing min dist to edge:
         if building_geom.area < large_building_threshold:
@@ -126,6 +150,9 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
         plane['northing'] = northing[0]
         plane['raw_footprint'] = roof_poly.area
         plane['raw_area'] = roof_poly.area / math.cos(math.radians(plane['slope']))
+        roof_polygons.append(plane)
+
+    return roof_polygons
 
 
 def _building_geoms(pg_uri: str, job_id: int, toids: List[str]) -> Dict[str, Polygon]:

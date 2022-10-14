@@ -61,7 +61,7 @@ FROM
     {panel_polygons} pp
     LEFT JOIN {pixels_in_panels} pip ON pp.roof_plane_id = pip.roof_plane_id
     LEFT JOIN {pixel_kwh} pv ON pv.x = pip.x AND pv.y = pip.y
-WHERE pp.panel_geom_27700 IS NOT NULL
+WHERE pp.panel_geom_27700 IS NOT NULL AND pp.usable
 GROUP BY pp.roof_plane_id;
 
 ALTER TABLE {panel_kwh} ADD PRIMARY KEY (roof_plane_id);
@@ -92,7 +92,8 @@ SELECT
     ST_SetSrid(
       ST_Transform(pp.panel_geom_27700,
                    '+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 '
-                   '+y_0=-100000 +datum=OSGB36 +nadgrids=@OSTN15_NTv2_OSGBtoETRS.gsb +units=m +no_defs'
+                   '+y_0=-100000 +datum=OSGB36 +nadgrids=@OSTN15_NTv2_OSGBtoETRS.gsb +units=m +no_defs',
+                   4326
     ), 4326)::geometry(multipolygon, 4326) AS panel_geom_4326,
     kwh.kwh_m01,
     kwh.kwh_m02,
@@ -119,7 +120,8 @@ SELECT
     pp.is_flat
 FROM
     {panel_polygons} pp
-    LEFT JOIN {panel_kwh} kwh ON kwh.roof_plane_id = pp.roof_plane_id;
+    LEFT JOIN {panel_kwh} kwh ON kwh.roof_plane_id = pp.roof_plane_id
+WHERE pp.panel_geom_27700 IS NOT NULL AND pp.usable;
 
 DROP TABLE {panel_kwh};
 DROP TABLE {pixel_kwh};

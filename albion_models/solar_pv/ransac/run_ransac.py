@@ -76,7 +76,7 @@ def _handle_building_page(pg_uri: str, job_id: int, page: int, page_size: int, p
         if len(found) > 0:
             planes.extend(found)
 
-    create_roof_polygons(pg_uri, job_id, planes, **params)
+    planes = create_roof_polygons(pg_uri, job_id, planes, **params)
     _save_planes(pg_uri, job_id, planes)
     print(f"Page {page} of buildings complete")
 

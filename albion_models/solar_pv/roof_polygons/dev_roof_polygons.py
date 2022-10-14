@@ -24,6 +24,41 @@ _MIN_DIST_TO_EDGE_M = 0.3
 _MIN_DIST_TO_EDGE_LARGE_M = 1
 
 
+def make_job_roof_polygons(pg_uri: str, job_id: int,
+                           resolution_metres: float, out_dir: str,
+                           write_test_data: bool = True):
+    logging.basicConfig(level=logging.DEBUG,
+                        format='[%(asctime)s] %(levelname)s: %(message)s')
+
+    with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
+        toids = sql_command(
+            pg_conn,
+            "SELECT toid FROM {buildings}",
+            buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
+            result_extractor=lambda rows: [row[0] for row in rows])
+        logging.info(f"TOIDS: {len(toids)}")
+
+        building_geoms = _building_geoms(pg_uri, job_id, toids)
+        all_planes = []
+        for toid in toids:
+            planes = _load_toid_planes(pg_uri, job_id, toid)
+            _create_roof_polygons(building_geoms,
+                                  planes,
+                                  max_roof_slope_degrees=_MAX_ROOF_SLOPE_DEGREES,
+                                  min_roof_area_m=_MIN_ROOF_AREA_M,
+                                  min_roof_degrees_from_north=_MIN_ROOF_DEGREES_FROM_NORTH,
+                                  flat_roof_degrees=_FLAT_ROOF_DEGREES,
+                                  large_building_threshold=_LARGE_BUILDING_THRESHOLD,
+                                  min_dist_to_edge_m=_MIN_DIST_TO_EDGE_M,
+                                  min_dist_to_edge_large_m=_MIN_DIST_TO_EDGE_LARGE_M,
+                                  resolution_metres=resolution_metres)
+            logging.info(f"Created {len(planes)} planes for toid {toid}")
+            all_planes.extend(planes)
+
+        if write_test_data:
+            _write_outputs(f"{job_id}_planes", all_planes, out_dir)
+
+
 def make_roof_polygons_all(pg_uri: str, job_id: int, toids: List[str],
                            resolution_metres: float, out_dir: str,
                            write_test_data: bool = True):
@@ -56,7 +91,7 @@ def make_roof_polygons(pg_uri: str, job_id: int, toid: str,
                           resolution_metres=resolution_metres)
 
     if write_test_data:
-        _write_outputs(toid, planes, building_geoms[toid], out_dir)
+        _write_outputs(toid, planes, out_dir, building_geoms[toid])
 
 
 def _write_test_data(toid: str, planes: List[dict], building_geom: Polygon, out_dir: str):
@@ -76,10 +111,11 @@ def _write_test_data(toid: str, planes: List[dict], building_geom: Polygon, out_
         json.dump(data, f, sort_keys=True)
 
 
-def _write_outputs(toid: str, planes: List[dict], building_geom: Polygon, out_dir: str):
+def _write_outputs(name: str, planes: List[dict], out_dir: str, building_geom: Polygon = None):
     geojson_features = []
     for plane in planes:
-        plane['building_geom'] = building_geom.wkt
+        if building_geom:
+            plane['building_geom'] = building_geom.wkt
         geojson_geom = geometry.mapping(wkt.loads(plane['roof_geom_27700']))
         del plane['roof_geom_27700']
         del plane['inliers_xy']
@@ -95,7 +131,7 @@ def _write_outputs(toid: str, planes: List[dict], building_geom: Polygon, out_di
         "crs": {"type": "name", "properties": {"name": "urn:ogc:def:crs:EPSG::27700"}},
         "features": geojson_features
     }
-    with open(join(out_dir, f"{toid}.geojson"), 'w') as f:
+    with open(join(out_dir, f"{name}.geojson"), 'w') as f:
         json.dump(geojson, f)
 
 
@@ -140,14 +176,20 @@ def _load_toid_planes(pg_uri: str, job_id: int, toid: str):
 
 
 if __name__ == "__main__":
-    roof_polys_dir = join(paths.TEST_DATA, "roof_polygons")
-    make_roof_polygons_all(
+    # roof_polys_dir = join(paths.TEST_DATA, "roof_polygons")
+    # make_roof_polygons_all(
+    #     "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion?application_name=blah",
+    #     1621,
+    #     [
+    #         # "osgb1000021445362",
+    #         "osgb1000021445086",
+    #         "osgb1000021445097",
+    #     ],
+    #     1.0,
+    #     roof_polys_dir)
+
+    make_job_roof_polygons(
         "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion?application_name=blah",
-        1621,
-        [
-            # "osgb1000021445362",
-            "osgb1000021445086",
-            "osgb1000021445097",
-        ],
+        1620,
         1.0,
-        roof_polys_dir)
+        "/home/neil/data/albion-models/roof-polys")
