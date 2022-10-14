@@ -2,7 +2,9 @@
 # A roof is considered to be flat if it's slope is less than this. Not to be confused
 # with the model parameter `flat_roof_degrees`, which is the slope at which panels
 # are mounted on flat roofs.
-FLAT_ROOF_DEGREES_THRESHOLD = 5.0
+# Source: clause 5.8.11
+# https://mcssco.wpenginepowered.com/wp-content/uploads/2021/10/MIS-3002_Solar-PV-Systems-V4.0.pdf#page=19
+FLAT_ROOF_DEGREES_THRESHOLD = 10.0
 
 # If a roof plane has an aspect which is closer than this value to the azimuth of
 # one of the facings of a building, re-align the roof plane to that azimuth.

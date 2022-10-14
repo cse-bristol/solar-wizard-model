@@ -20,8 +20,9 @@ model_params = {
     "horizon_slices": {
         "default": 36,
         "help": "The number of rays traced from each point to determine horizon height. (default: %(default)s)"},
+    # source: https://mcssco.wpenginepowered.com/wp-content/uploads/2021/10/MIS-3002_Solar-PV-Systems-V4.0.pdf#page=16
     "max_roof_slope_degrees": {
-        "default": 80,
+        "default": 70,
         "help": "Unit: degrees. (default: %(default)s)"},
     "min_roof_area_m": {
         "default": 8,
@@ -59,8 +60,9 @@ model_params = {
         "help": "This is currently only used to switch between alternative "
                 "minimum distances to edge of roof, but might be used for "
                 "more in the future. (default: %(default)s)"},
+    # source: clause 5.8.7 https://mcssco.wpenginepowered.com/wp-content/uploads/2021/10/MIS-3002_Solar-PV-Systems-V4.0.pdf#page=18
     "min_dist_to_edge_m": {
-        "default": 0.3,
+        "default": 0.4,
         "help": "This only counts the edge of the building, not the edges of "
                 "other areas of roof. (default: %(default)s)"},
     "min_dist_to_edge_large_m": {
