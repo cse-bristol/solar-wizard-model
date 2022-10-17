@@ -13,12 +13,15 @@ import math
 from albion_models.solar_pv.pvgis.pvmaps import PVMaps, CSI, OUT_DIRECT_RAD_BASENAME, OUT_DIFFUSE_RAD_BASENAME, \
     HORIZON090_BASENAME, SLOPE_ADJUSTED, ASPECT_GRASS_ADJUSTED, OUT_PV_POWER_WIND_SPECTRAL_BASENAME
 
+RESOURCES_DIR: str = os.path.realpath("../../../../resources")
+TEST_DATA_DIR: str = os.path.realpath("../../../../testdata/pvmaps")
+GRASS_DBASE: str = f"{TEST_DATA_DIR}/grass_dbase"
 
 class TestPVMaps:
     instance: PVMaps
     INPUT_DIR: str
     DATA_INPUT_DIR: str
-    PV_MODEL_COEFF_FILE_DIR: str
+    PV_MODEL_COEFF_FILE_DIR: str = RESOURCES_DIR
 
     ELEVATION_RASTER_FILENAME: str
     MASK_RASTER_FILENAME: str
@@ -37,10 +40,10 @@ class TestPVMaps:
 
         print("Set up (first time this takes a couple of minutes)")
         cls.instance: PVMaps = PVMaps(
-            grass_dbase_dir=os.path.realpath("./test_data/grass_dbase"),
+            grass_dbase_dir=os.path.realpath(GRASS_DBASE),
             input_dir=cls.INPUT_DIR,
-            output_dir=os.path.realpath("./test_data/outputs"),
-            pvgis_data_tar_file=os.path.realpath("./test_data/pvgis_data_tar/pvgis_data.tar"),
+            output_dir=os.path.realpath(f"{TEST_DATA_DIR}/outputs"),
+            pvgis_data_tar_file=os.path.realpath(f"{TEST_DATA_DIR}/pvgis_data_tar/pvgis_data.tar"),
             pv_model_coeff_file_dir=cls.PV_MODEL_COEFF_FILE_DIR,
             keep_temp_mapset=True,
             num_processes=os.cpu_count(),
@@ -59,7 +62,7 @@ class TestPVMaps:
 
         test_mapset = None
         num_test_mapsets = 0
-        mapsets = os.listdir("./test_data/grass_dbase/grassdata")
+        mapsets = os.listdir(f"{GRASS_DBASE}/grassdata")
         for mapset in mapsets:
             if mapset.startswith("pvmaps."):
                 test_mapset = mapset
@@ -84,10 +87,10 @@ class TestPVMaps:
 
     @staticmethod
     def _clean_test_mapsets():
-        mapsets = os.listdir("./test_data/grass_dbase/grassdata")
+        mapsets = os.listdir(f"{GRASS_DBASE}/grassdata")
         for mapset in mapsets:
             if mapset.startswith("pvmaps."):
-                shutil.rmtree(f"./test_data/grass_dbase/grassdata/{mapset}")
+                shutil.rmtree(f"{GRASS_DBASE}/grassdata/{mapset}")
 
     def _get_raster_val(self, raster: str, lon_east: float, lat_north: float):
         val: float = 0.0
@@ -216,9 +219,10 @@ class TestPVMaps:
         api_results = None
 
         if os.path.exists(f"{self.DATA_INPUT_DIR}/{cached_data_filename}.pkl"):
-            api_results = pickle.load(open(f"{self.DATA_INPUT_DIR}/{cached_data_filename}.pkl", "rb"))
-            if len(api_results) != len(test_locns):
-                api_results = None
+            with(open(f"{self.DATA_INPUT_DIR}/{cached_data_filename}.pkl", "rb") as pkl_in):
+                api_results = pickle.load(pkl_in)
+                if len(api_results) != len(test_locns):
+                    api_results = None
 
         if not api_results:
             api_results = self._create_cached_api_pv_data(test_locns, cached_data_filename)

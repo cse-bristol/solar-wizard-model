@@ -11,16 +11,17 @@ from typing import List, Optional, Tuple
 from osgeo import gdal
 import numpy as np
 
-from albion_models.test.solar_pv.pvgis.test_pvmaps import TestPVMaps
+from albion_models.solar_pv.pvgis.test_pvmaps.test_pvmaps import TestPVMaps, TEST_DATA_DIR
+
 
 # Run pytest with this to see results while running and see logging outputs
 # --capture=no --log-cli-level=INFO
 
 
 class TestPVMapsTestData(TestPVMaps):
-    DATA_INPUT_DIR = os.path.realpath("./test_data/test_pvmaps_test_data/inputs")
-    INPUT_DIR: str = os.path.realpath("./test_data/test_pvmaps_test_data/generated_test_inputs")
-    PV_MODEL_COEFF_FILE_DIR = os.path.realpath("./test_data/inputs")
+    DATA_INPUT_DIR = os.path.realpath(f"{TEST_DATA_DIR}/test_pvmaps_test_data/inputs")
+    INPUT_DIR: str = os.path.realpath(
+        f"{TEST_DATA_DIR}/test_pvmaps_test_data/generated_test_inputs")
 
     ELEVATION_RASTER_FILENAME: str = "elevation.tif"
     MASK_RASTER_FILENAME: str = "mask.tif"

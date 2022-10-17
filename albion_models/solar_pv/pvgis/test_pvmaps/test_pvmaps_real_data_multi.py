@@ -12,15 +12,14 @@ from osgeo import gdal
 
 from albion_models.solar_pv.pvgis.pvmaps import SLOPE, \
     FLAT_ROOF_ASPECT_COMPASS, ASPECT_GRASS_ADJUSTED
-from albion_models.test.solar_pv.pvgis.test_pvmaps import TestPVMaps
+from albion_models.solar_pv.pvgis.test_pvmaps.test_pvmaps import TestPVMaps, TEST_DATA_DIR
+
 
 # Run pytest with this to see results while running and see logging outputs
 # --capture=no --log-cli-level=INFO
 
 
 class TestPVMapsRealDataMulti(TestPVMaps):
-    PV_MODEL_COEFF_FILE_DIR = os.path.realpath("./test_data/inputs")
-
     ELEVATION_RASTER_FILENAME: str = "elevation_4326.tif"
     MASK_RASTER_FILENAME: str = "mask_4326.tif"
 
@@ -30,9 +29,9 @@ class TestPVMapsRealDataMulti(TestPVMaps):
 
     @classmethod
     def init_dirs(cls, name: str):
-        cls.DATA_INPUT_DIR = os.path.realpath(f"test_data/test_pvmaps_real_data_{name}/inputs")
+        cls.DATA_INPUT_DIR = os.path.realpath(f"{TEST_DATA_DIR}/test_pvmaps_real_data_{name}/inputs")
         cls.INPUT_DIR = cls.DATA_INPUT_DIR
-        cls.DATA_OUTPUT_DIR = os.path.realpath(f"test_data/test_pvmaps_real_data_{name}/outputs")
+        cls.DATA_OUTPUT_DIR = os.path.realpath(f"{TEST_DATA_DIR}/test_pvmaps_real_data_{name}/outputs")
         if os.path.exists(os.path.join(cls.DATA_INPUT_DIR, "flat_roof_aspect_4326.tif")):
             cls.FLAT_ROOF_RASTER_FILENAME = "flat_roof_aspect_4326.tif"
         else:
@@ -77,7 +76,8 @@ class TestPVMapsRealDataMulti(TestPVMaps):
         cached_data_filename: str = "loc_real_pv_sample_locns"
         sampled_locns: List[Tuple[int, int, float, float]]
         if os.path.exists(f"{self.DATA_INPUT_DIR}/{cached_data_filename}.pkl"):
-            sampled_locns = pickle.load(open(f"{self.DATA_INPUT_DIR}/{cached_data_filename}.pkl", "rb"))
+            with (open(f"{self.DATA_INPUT_DIR}/{cached_data_filename}.pkl", "rb") as pkl_in):
+                sampled_locns = pickle.load(pkl_in)
         else:
             # Get available test points from either flat roof mask (if there is one) or full mask - flat roof area is
             # always inside the full mask area

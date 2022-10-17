@@ -9,20 +9,20 @@ import numpy as np
 import pytest
 from osgeo import gdal
 
-from albion_models.solar_pv.pvgis.pvmaps import SLOPE, ASPECT_GRASS, HORIZON090_BASENAME, PI_HALF
-from albion_models.test.solar_pv.pvgis.test_pvmaps import TestPVMaps
+from albion_models.solar_pv.pvgis.pvmaps import SLOPE, ASPECT_GRASS
+from albion_models.solar_pv.pvgis.test_pvmaps.test_pvmaps import TestPVMaps, TEST_DATA_DIR
+
 
 # Run pytest with this to see results while running and see logging outputs
 # --capture=no --log-cli-level=INFO
 
 
 class TestPVMapsRealData(TestPVMaps):
-    INPUT_DIR = os.path.realpath("test_data/test_pvmaps_real_data/inputs")
-    DATA_INPUT_DIR = os.path.realpath("test_data/test_pvmaps_real_data/inputs")
-    DATA_OUTPUT_DIR = os.path.realpath("test_data/test_pvmaps_real_data/outputs")
-    PV_MODEL_COEFF_FILE_DIR = os.path.realpath("./test_data/inputs")
+    INPUT_DIR = os.path.realpath(f"{TEST_DATA_DIR}/test_pvmaps_real_data/inputs")
+    DATA_INPUT_DIR = os.path.realpath(f"{TEST_DATA_DIR}/test_pvmaps_real_data/inputs")
+    DATA_OUTPUT_DIR = os.path.realpath(f"{TEST_DATA_DIR}/test_pvmaps_real_data/outputs")
 
-    EXPECTED_DIR = os.path.realpath("test_data/test_pvmaps_real_data/expected")
+    EXPECTED_DIR = os.path.realpath(f"{TEST_DATA_DIR}/test_pvmaps_real_data/expected")
 
     ELEVATION_RASTER_FILENAME: str = "elevation_4326.tif"
     MASK_RASTER_FILENAME: str = "mask_4326.tif"
@@ -116,7 +116,8 @@ class TestPVMapsRealData(TestPVMaps):
         cached_data_filename: str = "loc_real_pv_sample_locns"
         sampled_locns: List[Tuple[int, int, float, float]]
         if os.path.exists(f"{self.DATA_INPUT_DIR}/{cached_data_filename}.pkl"):
-            sampled_locns = pickle.load(open(f"{self.DATA_INPUT_DIR}/{cached_data_filename}.pkl", "rb"))
+            with(open(f"{self.DATA_INPUT_DIR}/{cached_data_filename}.pkl", "rb") as pkl_in):
+                sampled_locns = pickle.load(pkl_in)
         else:
             mask_ds: Optional[gdal.Dataset] = gdal.Open(f"{self.DATA_INPUT_DIR}/mask_4326.tif")
             gt = mask_ds.GetGeoTransform()
