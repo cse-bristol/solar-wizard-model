@@ -2,15 +2,17 @@ from collections import defaultdict
 from typing import List, Dict
 
 import math
-from psycopg2.sql import Identifier
+from psycopg2.sql import Identifier, SQL
 import psycopg2.extras
 from shapely import wkt, affinity, ops
 from shapely.geometry import LineString, Polygon, CAP_STYLE, JOIN_STYLE
 from shapely.validation import make_valid
 
 import albion_models.solar_pv.tables as tables
-from albion_models.db_funcs import connection, sql_command
+from albion_models import gdal_helpers
+from albion_models.db_funcs import connection, sql_command, connect
 from albion_models.geos import azimuth, square, largest_polygon
+from albion_models.solar_pv import tables as tables
 
 
 def create_roof_polygons(pg_uri: str,
@@ -161,6 +163,39 @@ def _building_orientations(building_geom):
             (most_common_az + 90) % 360,
             (most_common_az + 180) % 360,
             (most_common_az + 270) % 360)
+
+
+def has_flat_roof(pg_uri: str, job_id: int) -> bool:
+    """
+    :return: true if there is one or more flat roof in the job
+    """
+    pg_conn = connect(pg_uri)
+    try:
+        return sql_command(
+            pg_conn,
+            "SELECT COUNT(*) != 0 FROM {roof_polygons} WHERE is_flat = true",
+            roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE),
+            result_extractor=lambda rows: rows[0][0]
+        )
+    finally:
+        pg_conn.close()
+
+
+def get_flat_roof_aspect_sql(pg_uri: str, job_id: int) -> str:
+    with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
+        return SQL(
+            "SELECT ST_Force3D(roof_geom_27700, aspect) FROM {roof_polygons} WHERE is_flat = true"
+        ).format(
+            roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE)
+        ).as_string(pg_conn)
+
+
+def create_flat_roof_aspect(mask_sql: str,
+                mask_out: str,
+                pg_uri: str,
+                res: float,
+                srid: int):
+    gdal_helpers.rasterize_3d(pg_uri, mask_sql, mask_out, res, srid)
 
 
 if __name__ == '__main__':
