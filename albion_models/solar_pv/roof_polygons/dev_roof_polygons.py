@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import time
 from os.path import join
 from typing import List
 
@@ -56,7 +57,8 @@ def make_job_roof_polygons(pg_uri: str, job_id: int,
             all_planes.extend(planes)
 
         if write_test_data:
-            _write_outputs(f"{job_id}_planes", all_planes, out_dir)
+            t = int(time.time())
+            _write_outputs(f"{job_id}_planes_{t}", all_planes, out_dir)
 
 
 def make_roof_polygons_all(pg_uri: str, job_id: int, toids: List[str],
