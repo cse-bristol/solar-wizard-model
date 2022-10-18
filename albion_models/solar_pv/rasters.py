@@ -11,7 +11,7 @@ from albion_models import gdal_helpers
 from albion_models.db_funcs import sql_script, copy_csv, count, connection
 from albion_models.postgis import get_merged_lidar
 from albion_models.solar_pv import mask
-from albion_models.solar_pv.roof_polygons import get_flat_roof_aspect_sql, create_flat_roof_aspect, has_flat_roof
+from albion_models.solar_pv.roof_polygons.roof_polygons import get_flat_roof_aspect_sql, create_flat_roof_aspect, has_flat_roof
 from albion_models.transformations import _7_PARAM_SHIFT
 
 
