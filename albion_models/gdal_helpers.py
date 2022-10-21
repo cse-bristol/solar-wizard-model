@@ -8,7 +8,9 @@ import os
 import subprocess
 import textwrap
 from osgeo import gdal
-from typing import List, Tuple
+from typing import List, Tuple, Union
+
+from albion_models.util import esc_double_quotes
 
 
 def create_vrt(tiles: List[str], vrt_file: str):
@@ -53,6 +55,14 @@ def get_res(filename: str) -> float:
     else:
         raise ValueError(f"Albion does not currently support non-equal x- and y- resolutions."
                          f"File {filename} had xres {abs(xres)}, yres {abs(yres)}")
+
+
+def get_xres_yres(filename: str) -> (float, float):
+    gdal.UseExceptions()
+
+    f = gdal.Open(filename)
+    _, xres, _, _, _, yres = f.GetGeoTransform()
+    return xres, yres
 
 
 def get_res_unchecked(filename: str) -> float:
@@ -110,16 +120,67 @@ def rasterize(pg_uri: str, mask_sql: str, mask_file: str, res: float, srid: int)
         raise ValueError(res.stderr)
 
 
-def rasterize_3d(pg_uri: str, mask_sql: str, mask_file: str, res: float, srid: int):
-    """Use the Z value for the burn value for each polygon & nan outside of polygons"""
+def rasterize_3d(pg_uri: str,
+                 mask_sql: str,
+                 mask_file: str,
+                 res: Union[float, Tuple[float, float]],
+                 srid: int,
+                 output_type: str = "Float64"):
+    """
+    Creates a new raster using the Z value for the burn value for each polygon & nan outside of polygons
+    """
+    if isinstance(res, float):
+        xres = res
+        yres = res
+    else:
+        xres = res[0]
+        yres = res[1]
+
     res = subprocess.run(f"""
         gdal_rasterize
-        -sql '{mask_sql}'
-        -3d -tr {res} {res}
-        -init {math.nan} -ot Float64
+        -sql "{esc_double_quotes(mask_sql)}"
+        -3d -tr {xres} {yres}
+        -init {math.nan} -ot {output_type}
         -of GTiff -a_srs EPSG:{srid}
         "PG:{pg_uri}"
         {mask_file}
+        """.replace("\n", " "), capture_output=True, text=True, shell=True)
+    print(res.stdout)
+    print(res.stderr)
+    if res.returncode != 0:
+        raise ValueError(res.stderr)
+
+
+def rasterize_3d_update(pg_uri: str, mask_sql: str, raster_to_update_filename: str):
+    """
+    Updates a raster. Uses the Z value for the burn value for each polygon inplace into raster_to_update_filename
+    """
+    res = subprocess.run(f"""
+        gdal_rasterize
+        -sql "{esc_double_quotes(mask_sql)}"
+        -3d 
+        "PG:{pg_uri}"
+        {raster_to_update_filename}
+        """.replace("\n", " "), capture_output=True, text=True, shell=True)
+    print(res.stdout)
+    print(res.stderr)
+    if res.returncode != 0:
+        raise ValueError(res.stderr)
+
+
+def calc(raster_a: str, raster_b: str, expression: str, raster_out: str):
+    """Create a new raster from 2 others merged using an expression
+    """
+    res = subprocess.run(f"""
+        gdal_calc.py
+        --calc="{expression}"
+        -A "{raster_a}"
+        -B "{raster_b}"
+        --outfile="{raster_out}"
+        --type=Float32
+        --format=GTiff
+        --extent=union
+        --projectionCheck
         """.replace("\n", " "), capture_output=True, text=True, shell=True)
     print(res.stdout)
     print(res.stderr)

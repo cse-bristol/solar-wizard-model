@@ -200,7 +200,7 @@ def has_flat_roof(pg_uri: str, job_id: int) -> bool:
     try:
         return sql_command(
             pg_conn,
-            "SELECT COUNT(*) != 0 FROM {roof_polygons} WHERE is_flat = true",
+            "SELECT COUNT(*) > 0 FROM {roof_polygons} WHERE is_flat = true",
             roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE),
             result_extractor=lambda rows: rows[0][0]
         )
@@ -223,6 +223,39 @@ def create_flat_roof_aspect(mask_sql: str,
                 res: float,
                 srid: int):
     gdal_helpers.rasterize_3d(pg_uri, mask_sql, mask_out, res, srid)
+
+
+def has_outdated_lidar(pg_uri: str, job_id: int) -> bool:
+    """
+    :return: true if there is one or more buildings that aren't seen in the LiDAR
+    """
+    pg_conn = connect(pg_uri)
+    try:
+        return sql_command(
+            pg_conn,
+            "SELECT COUNT(*) > 0 FROM {buildings} "
+            "WHERE exclusion_reason = 'OUTDATED_LIDAR_COVERAGE'::models.pv_exclusion_reason",
+            buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
+            result_extractor=lambda rows: rows[0][0]
+        )
+    finally:
+        pg_conn.close()
+
+
+def get_outdated_lidar_building_h_sql_4326(pg_uri: str, job_id: int) -> str:
+    """
+    A query to get the heights of buildings with outdated lidar as the Z value of their 4326 polygons
+    """
+    with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
+        return SQL(
+            "select ST_Force3D(m.geom_4326, h.abs_hmax) " 
+            "from {buildings} e "
+            "join mastermap.building m using (toid) "
+            "join mastermap.height h using (toid) "
+            "where e.exclusion_reason = 'OUTDATED_LIDAR_COVERAGE'::models.pv_exclusion_reason"
+        ).format(
+            buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE)
+        ).as_string(pg_conn)
 
 
 if __name__ == '__main__':

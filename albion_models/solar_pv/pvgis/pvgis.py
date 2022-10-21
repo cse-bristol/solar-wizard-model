@@ -62,10 +62,10 @@ def pvgis(pg_uri: str,
                         f"a horizon_slices value that is a factor of 360.")
 
     pvm = pvmaps.PVMaps(
-        grass_dbase_dir=os.environ.get("PVGIS_GRASS_DBASE", None),
+        grass_dbase_dir=os.environ.get("PVGIS_GRASS_DBASE_DIR", None),
         input_dir=solar_dir,
         output_dir=pvmaps_dir,
-        pvgis_data_tar_file=join(os.environ.get("PVGIS_DATA_DIR", None), "pvgis_data.tar"),
+        pvgis_data_tar_file=join(os.environ.get("PVGIS_DATA_TAR_FILE_DIR", None), "pvgis_data.tar"),
         pv_model_coeff_file_dir=paths.RESOURCES_DIR,
         keep_temp_mapset=debug_mode,
         num_processes=_pvmaps_cpu_count(),
@@ -241,7 +241,7 @@ def _write_results_to_db(pg_conn,
         panel_kwh=Identifier(schema, "panel_kwh"),
         pixels_in_panels=Identifier(schema, "pixels_in_panels"),
         panel_polygons=Identifier(schema, tables.PANEL_POLYGON_TABLE),
-        building_exclusion_reasons=Identifier(schema, tables.BUILDINGS_TABLE),
+        buildings=Identifier(schema, tables.BUILDINGS_TABLE),
         job_view=Identifier(f"solar_pv_job_{job_id}"),
         res=Literal(resolution_metres),
         system_loss=Literal(SYSTEM_LOSS))

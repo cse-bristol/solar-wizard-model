@@ -29,3 +29,7 @@ def frange(start, end=None, step=None):
 
 def get_cpu_count():
     return len(os.sched_getaffinity(0))
+
+
+def esc_double_quotes(s: str) -> str:
+    return s.replace('"', '\\"')

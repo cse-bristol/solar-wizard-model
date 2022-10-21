@@ -14,7 +14,8 @@ from albion_models.solar_pv.outdated_lidar.outdated_lidar_check import check_lid
 from albion_models.solar_pv.panels.panels import place_panels
 from albion_models.solar_pv.pvgis.pvgis import pvgis
 from albion_models.solar_pv.ransac.run_ransac import run_ransac
-from albion_models.solar_pv.rasters import generate_rasters, generate_flat_roof_aspect_raster_4326
+from albion_models.solar_pv.rasters import generate_rasters, generate_flat_roof_aspect_raster_4326, \
+    adjust_elevation_4326_outdated_lidar
 
 
 def model_solar_pv(pg_uri: str,
@@ -64,6 +65,12 @@ def model_solar_pv(pg_uri: str,
 
     logging.info("Checking for outdated LiDAR and missing LiDAR coverage...")
     check_lidar(pg_uri, job_id, resolution_metres=res)
+
+    logging.info("Burning building heights for buildings missing from LIDAR into elevation raster...")
+    elevation_raster = adjust_elevation_4326_outdated_lidar(pg_uri=pg_uri,
+                                                            job_id=job_id,
+                                                            solar_dir=solar_dir,
+                                                            elevation_raster_4326_filename=elevation_raster)
 
     logging.info("Detecting roof planes...")
     run_ransac(pg_uri, job_id,
