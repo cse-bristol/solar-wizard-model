@@ -22,10 +22,11 @@ CREATE INDEX IF NOT EXISTS bounds_4326_bounds_idx ON {bounds_4326} using gist (b
 CREATE TABLE IF NOT EXISTS {buildings} AS
 SELECT
     toid,
-    ST_SetSrid(
-        ST_Transform(geom_4326, '+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 '
-                                '+ellps=airy +nadgrids=@OSTN15_NTv2_OSGBtoETRS.gsb +units=m +no_defs'
-    ), 27700)::geometry(polygon,27700) as geom_27700,
+    ST_SetSrid(ST_Transform(geom_4326, 27700),27700)::geometry(polygon,27700) as geom_27700,
+--    ST_SetSrid(
+--        ST_Transform(geom_4326, '+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 '
+--                                '+ellps=airy +nadgrids=@OSTN15_NTv2_OSGBtoETRS.gsb +units=m +no_defs'
+--    ), 27700)::geometry(polygon,27700) as geom_27700,
     NULL::models.pv_exclusion_reason AS exclusion_reason,
     NULL::real AS height
 FROM mastermap.building b
