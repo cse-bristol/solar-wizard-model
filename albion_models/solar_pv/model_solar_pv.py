@@ -72,10 +72,11 @@ def model_solar_pv(pg_uri: str,
     #                                                         solar_dir=solar_dir,
     #                                                         elevation_raster_4326_filename=elevation_raster)
     logging.info("Getting building height elevation override raster...")
-    elevation_override_filename: str = create_elevation_override_raster(pg_uri=pg_uri,
-                                                                        job_id=job_id,
-                                                                        solar_dir=solar_dir,
-                                                                        elevation_raster_4326_filename=elevation_raster)
+    elevation_override_filename: Optional[str] = \
+        create_elevation_override_raster(pg_uri=pg_uri,
+                                         job_id=job_id,
+                                         solar_dir=solar_dir,
+                                         elevation_raster_4326_filename=elevation_raster)
 
     logging.info("Detecting roof planes...")
     run_ransac(pg_uri, job_id,

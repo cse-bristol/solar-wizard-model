@@ -13,7 +13,7 @@ from albion_models.postgis import get_merged_lidar
 from albion_models.solar_pv import mask
 from albion_models.solar_pv.raster_names import MASK_4326_TIF, MASK_BUF1_TIF, ELEVATION_4326_TIF
 from albion_models.solar_pv.roof_polygons.roof_polygons import get_flat_roof_aspect_sql, create_flat_roof_aspect, \
-    has_flat_roof, get_outdated_lidar_building_h_sql_4326
+    has_flat_roof, get_outdated_lidar_building_h_sql_4326, has_outdated_lidar
 from albion_models.transformations import _7_PARAM_SHIFT
 
 
@@ -199,12 +199,14 @@ def generate_flat_roof_aspect_raster_4326(pg_uri: str,
 def create_elevation_override_raster(pg_uri: str,
                                      job_id: int,
                                      solar_dir: str,
-                                     elevation_raster_4326_filename: str) -> str:
-    res = gdal_helpers.get_xres_yres(elevation_raster_4326_filename)
-    srid = gdal_helpers.get_srid(elevation_raster_4326_filename)
+                                     elevation_raster_4326_filename: str) -> Optional[str]:
+    if has_outdated_lidar(pg_uri, job_id):
+        res = gdal_helpers.get_xres_yres(elevation_raster_4326_filename)
+        srid = gdal_helpers.get_srid(elevation_raster_4326_filename)
 
-    patch_raster_filename: str = join(solar_dir, 'elevation_override.tif')
-    outdated_lidar_building_h_sql: str = get_outdated_lidar_building_h_sql_4326(pg_uri=pg_uri, job_id=job_id)
-    gdal_helpers.rasterize_3d(pg_uri, outdated_lidar_building_h_sql, patch_raster_filename, res, srid, "Float32")
+        patch_raster_filename: str = join(solar_dir, 'elevation_override.tif')
+        outdated_lidar_building_h_sql: str = get_outdated_lidar_building_h_sql_4326(pg_uri=pg_uri, job_id=job_id)
+        gdal_helpers.rasterize_3d(pg_uri, outdated_lidar_building_h_sql, patch_raster_filename, res, srid, "Float32")
 
-    return patch_raster_filename
+        return patch_raster_filename
+    return None
