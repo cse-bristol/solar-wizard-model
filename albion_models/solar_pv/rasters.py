@@ -11,8 +11,9 @@ from albion_models import gdal_helpers
 from albion_models.db_funcs import sql_script, copy_csv, count, connection
 from albion_models.postgis import get_merged_lidar
 from albion_models.solar_pv import mask
+from albion_models.solar_pv.raster_names import MASK_4326_TIF, MASK_BUF1_TIF, ELEVATION_4326_TIF
 from albion_models.solar_pv.roof_polygons.roof_polygons import get_flat_roof_aspect_sql, create_flat_roof_aspect, \
-    has_flat_roof, get_outdated_lidar_building_h_sql_4326, has_outdated_lidar
+    has_flat_roof, get_outdated_lidar_building_h_sql_4326
 from albion_models.transformations import _7_PARAM_SHIFT
 
 
@@ -33,14 +34,14 @@ def generate_rasters(pg_uri: str,
     elevation_raster = join(solar_dir, 'elevation.tif')
     aspect_raster = join(solar_dir, 'aspect.tif')
     slope_raster = join(solar_dir, 'slope.tif')
-    mask_raster_buf1 = join(solar_dir, 'mask_buf1.tif')
+    mask_raster_buf1 = join(solar_dir, MASK_BUF1_TIF)
     mask_raster_buf3 = join(solar_dir, 'mask_buf3.tif')
 
     if count(pg_uri, tables.schema(job_id), tables.LIDAR_PIXEL_TABLE) > 0:
         logging.info("Not creating rasters, raster data already loaded.")
         res = gdal_helpers.get_res(elevation_raster)
-        return (join(solar_dir, 'elevation_4326.tif'),
-                join(solar_dir, 'mask_4326.tif'), res)
+        return (join(solar_dir, ELEVATION_4326_TIF),
+                join(solar_dir, MASK_4326_TIF), res)
 
     with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
         get_merged_lidar(pg_conn, job_id, elevation_raster)
@@ -96,8 +97,8 @@ def _generate_4326_rasters(solar_dir: str,
                            srid: int,
                            elevation_raster: str,
                            mask_raster: str):
-    elevation_raster_4326 = join(solar_dir, 'elevation_4326.tif')
-    mask_raster_4326 = join(solar_dir, 'mask_4326.tif')
+    elevation_raster_4326 = join(solar_dir, ELEVATION_4326_TIF)
+    mask_raster_4326 = join(solar_dir, MASK_4326_TIF)
 
     src_srs: str = _get_srs_for_reproject_to_4326(srid)
 
@@ -177,7 +178,7 @@ def generate_flat_roof_aspect_raster_4326(pg_uri: str,
                                           job_id: int,
                                           solar_dir: str) -> Optional[str]:
     if has_flat_roof(pg_uri, job_id):
-        mask_raster = join(solar_dir, 'mask.tif')
+        mask_raster = join(solar_dir, MASK_BUF1_TIF)
         srid = gdal_helpers.get_srid(mask_raster, fallback=27700)
         res = gdal_helpers.get_res(mask_raster)
 
@@ -207,37 +208,3 @@ def create_elevation_override_raster(pg_uri: str,
     gdal_helpers.rasterize_3d(pg_uri, outdated_lidar_building_h_sql, patch_raster_filename, res, srid, "Float32")
 
     return patch_raster_filename
-
-
-# def adjust_elevation_4326_outdated_lidar(pg_uri: str,
-#                                          job_id: int,
-#                                          solar_dir: str,
-#                                          elevation_raster_4326_filename: str) -> str:
-#     """Burn building heights into elevation raster where they are missing
-#     """
-#     if has_outdated_lidar(pg_uri, job_id):
-#         # Option 1
-#         # Replace regions in elevation raster with max heights from building table
-#         outdated_lidar_building_h_sql: str = get_outdated_lidar_building_h_sql_4326(pg_uri=pg_uri, job_id=job_id)
-#         gdal_helpers.rasterize_3d_update(pg_uri, outdated_lidar_building_h_sql, elevation_raster_4326_filename)
-#
-#         # Option 2
-#         # Below supports merging using an expression, but unnecessary unless issues with simple approach above found
-#         # res = gdal_helpers.get_xres_yres(elevation_raster_4326_filename)
-#         # srid = gdal_helpers.get_srid(elevation_raster_4326_filename)
-#         #
-#         # # Create raster to patch elevation raster with
-#         # patch_raster_filename: str = join(solar_dir, 'elevation_building_height_patch.tif')
-#         # outdated_lidar_building_h_sql: str = get_outdated_lidar_building_h_sql_4326(pg_uri=pg_uri, job_id=job_id)
-#         # gdal_helpers.rasterize_3d(pg_uri, outdated_lidar_building_h_sql, patch_raster_filename, res, srid, "Float32")
-#         #
-#         # # Patch / create new raster
-#         # elevation_patched_4326_filename: str = join(solar_dir, 'elevation_patched_4326.tif')
-#         # gdal_helpers.calc(elevation_raster_4326_filename,
-#         #                   patch_raster_filename,
-#         #                   "A*logical_or(isnan(B),B==0)+numpy.nan_to_num(B)",
-#         #                   elevation_patched_4326_filename)
-#         #
-#         # return elevation_patched_4326_filename
-#
-#     return elevation_raster_4326_filename
