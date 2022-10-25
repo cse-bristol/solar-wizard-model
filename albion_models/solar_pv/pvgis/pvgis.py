@@ -33,6 +33,7 @@ def pvgis(pg_uri: str,
           peak_power_per_m2: float,
           flat_roof_degrees: int,
           elevation_raster: str,
+          elevation_override_raster: Optional[str],
           mask_raster: str,
           flat_roof_aspect_raster: Optional[str],
           debug_mode: bool):
@@ -79,7 +80,8 @@ def pvgis(pg_uri: str,
     pvm.create_pvmap(
         elevation_filename=os.path.basename(elevation_raster),
         mask_filename=os.path.basename(mask_raster),
-        flat_roof_aspect_filename=os.path.basename(flat_roof_aspect_raster) if flat_roof_aspect_raster else None
+        flat_roof_aspect_filename=os.path.basename(flat_roof_aspect_raster) if flat_roof_aspect_raster else None,
+        elevation_override_filename=os.path.basename(elevation_override_raster) if elevation_override_raster else None
     )
 
     yearly_kwh_raster = pvm.yearly_kwh_raster

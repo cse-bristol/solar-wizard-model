@@ -15,7 +15,7 @@ from albion_models.solar_pv.panels.panels import place_panels
 from albion_models.solar_pv.pvgis.pvgis import pvgis
 from albion_models.solar_pv.ransac.run_ransac import run_ransac
 from albion_models.solar_pv.rasters import generate_rasters, generate_flat_roof_aspect_raster_4326, \
-    adjust_elevation_4326_outdated_lidar
+    create_elevation_override_raster
 
 
 def model_solar_pv(pg_uri: str,
@@ -66,11 +66,16 @@ def model_solar_pv(pg_uri: str,
     logging.info("Checking for outdated LiDAR and missing LiDAR coverage...")
     check_lidar(pg_uri, job_id, resolution_metres=res)
 
-    logging.info("Burning building heights for buildings missing from LIDAR into elevation raster...")
-    elevation_raster = adjust_elevation_4326_outdated_lidar(pg_uri=pg_uri,
-                                                            job_id=job_id,
-                                                            solar_dir=solar_dir,
-                                                            elevation_raster_4326_filename=elevation_raster)
+    # logging.info("Burning building heights for buildings missing from LIDAR into elevation raster...")
+    # elevation_raster = adjust_elevation_4326_outdated_lidar(pg_uri=pg_uri,
+    #                                                         job_id=job_id,
+    #                                                         solar_dir=solar_dir,
+    #                                                         elevation_raster_4326_filename=elevation_raster)
+    logging.info("Getting building height elevation override raster...")
+    elevation_override_filename: str = create_elevation_override_raster(pg_uri=pg_uri,
+                                                                        job_id=job_id,
+                                                                        solar_dir=solar_dir,
+                                                                        elevation_raster_4326_filename=elevation_raster)
 
     logging.info("Detecting roof planes...")
     run_ransac(pg_uri, job_id,
@@ -108,6 +113,7 @@ def model_solar_pv(pg_uri: str,
           peak_power_per_m2=peak_power_per_m2,
           flat_roof_degrees=flat_roof_degrees,
           elevation_raster=elevation_raster,
+          elevation_override_raster=elevation_override_filename,
           mask_raster=mask_raster,
           flat_roof_aspect_raster=flat_roof_aspect_raster_4326,
           debug_mode=debug_mode)
