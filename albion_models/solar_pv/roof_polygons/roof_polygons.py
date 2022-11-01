@@ -248,11 +248,11 @@ def get_outdated_lidar_building_h_sql_4326(pg_uri: str, job_id: int) -> str:
     """
     with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
         return SQL(
-            "select ST_Force3D(m.geom_4326, h.abs_hmax) " 
-            "from {buildings} e "
-            "join mastermap.building m using (toid) "
-            "join mastermap.height h using (toid) "
-            "where e.exclusion_reason = 'OUTDATED_LIDAR_COVERAGE'::models.pv_exclusion_reason"
+            "SELECT ST_Force3D(m.geom_4326, (h.abs_hmax + h.abs_h2) / 2) " 
+            "FROM {buildings} e "
+            "JOIN mastermap.building m USING (toid) "
+            "JOIN mastermap.height h USING (toid) "
+            "WHERE e.exclusion_reason = 'OUTDATED_LIDAR_COVERAGE'::models.pv_exclusion_reason"
         ).format(
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE)
         ).as_string(pg_conn)

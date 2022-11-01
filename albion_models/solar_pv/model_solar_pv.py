@@ -66,11 +66,6 @@ def model_solar_pv(pg_uri: str,
     logging.info("Checking for outdated LiDAR and missing LiDAR coverage...")
     check_lidar(pg_uri, job_id, resolution_metres=res)
 
-    # logging.info("Burning building heights for buildings missing from LIDAR into elevation raster...")
-    # elevation_raster = adjust_elevation_4326_outdated_lidar(pg_uri=pg_uri,
-    #                                                         job_id=job_id,
-    #                                                         solar_dir=solar_dir,
-    #                                                         elevation_raster_4326_filename=elevation_raster)
     logging.info("Getting building height elevation override raster...")
     elevation_override_filename: Optional[str] = \
         create_elevation_override_raster(pg_uri=pg_uri,
