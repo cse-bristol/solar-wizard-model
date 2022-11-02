@@ -19,6 +19,9 @@ from albion_models.solar_pv.pvgis.test_pvmaps.test_pvmaps import TestPVMaps, TES
 
 
 class TestPVMapsTestData(TestPVMaps):
+    """
+    Runs complete PVMaps process and then checks the data in the Grass DB - for generated range of aspects & slopes
+    """
     DATA_INPUT_DIR = os.path.realpath(f"{TEST_DATA_DIR}/test_pvmaps_test_data/inputs")
     INPUT_DIR: str = os.path.realpath(
         f"{TEST_DATA_DIR}/test_pvmaps_test_data/generated_test_inputs")

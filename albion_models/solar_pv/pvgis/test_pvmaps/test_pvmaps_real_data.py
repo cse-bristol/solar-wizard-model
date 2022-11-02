@@ -18,6 +18,9 @@ from albion_models.solar_pv.pvgis.test_pvmaps.test_pvmaps import TestPVMaps, TES
 
 
 class TestPVMapsRealData(TestPVMaps):
+    """
+    Runs complete PVMaps process and then checks the data in the Grass DB
+    """
     INPUT_DIR = os.path.realpath(f"{TEST_DATA_DIR}/test_pvmaps_real_data/inputs")
     DATA_INPUT_DIR = os.path.realpath(f"{TEST_DATA_DIR}/test_pvmaps_real_data/inputs")
     DATA_OUTPUT_DIR = os.path.realpath(f"{TEST_DATA_DIR}/test_pvmaps_real_data/outputs")
@@ -153,4 +156,3 @@ class TestPVMapsRealData(TestPVMaps):
 
             pickle.dump(sampled_locns, open(f"{self.DATA_INPUT_DIR}/{cached_data_filename}.pkl", "wb"))
         return sampled_locns
-
