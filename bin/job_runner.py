@@ -1,23 +1,22 @@
 import logging
 import os
 import textwrap
-
 import time
+from builtins import Exception
 from typing import Optional, List
 
 import psycopg2
 import psycopg2.extras
 
-from albion_models import gdal_helpers
-from albion_models.lidar.bulk_lidar_client import load_from_bulk
-from albion_models.lidar.defra_lidar_api_client import get_all_lidar
-from albion_models.lidar.lidar_coverage import calculate_lidar_coverage
+from albion_models.db_funcs import process_pg_uri
 from albion_models.hard_soft_dig.model_hard_soft_dig import model_hard_soft_dig
 from albion_models.heat_demand.model_heat_demand import model_heat_demand, \
     model_insulation_measure_costs
-from albion_models.solar_pv.model_solar_pv import model_solar_pv
+from albion_models.lidar.bulk_lidar_client import load_from_bulk
+from albion_models.lidar.defra_lidar_api_client import get_all_lidar
+from albion_models.lidar.lidar_coverage import calculate_lidar_coverage
 from albion_models.solar_pv.cost_benefit.model_cost_benefit import model_cost_benefit
-from albion_models.db_funcs import process_pg_uri
+from albion_models.solar_pv.model_solar_pv import model_solar_pv
 
 
 def main_loop():
@@ -30,6 +29,7 @@ def main_loop():
     logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
     pg_uri = os.environ.get("PG_URI")
     pg_conn = _connect(pg_uri)
+    _check_proj_datumgrid_ok(pg_conn)
     while True:
         job = _get_next_job(pg_conn)
         if job is not None:
@@ -343,6 +343,22 @@ def _send_email(from_email: str, to_email: List[str], password: str, subject: st
             mailserver.send_message(msg)
     except smtplib.SMTPException:
         logging.exception("Failed to send email")
+
+
+def _check_proj_datumgrid_ok(conn):
+    """Check the proj-datumgrid is installed and setup for the postgis instance correctly
+    """
+    with conn.cursor() as curs:
+        curs.execute(
+            "SELECT (ABS(ST_X(p) - 292184.870542716) + ABS(ST_Y(p) - 168003.465539408)) > 1E-9 from ( "
+                "SELECT ST_Transform( "
+                    "'POINT(-3.55128349240 51.40078220140)', "
+                    "'+proj=longlat +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +no_defs', "
+                    "'+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 +ellps=airy +nadgrids=@OSTN15_NTv2_OSGBtoETRS.gsb +units=m +no_defs'"
+                ") p) a")
+        fail = curs.fetchone()[0]
+    if fail:
+        raise EnvironmentError("Proj datumgrid isn't working correctly in Postgres - is it installed and env var set?")
 
 
 if __name__ == "__main__":
