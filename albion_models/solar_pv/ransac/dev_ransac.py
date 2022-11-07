@@ -62,8 +62,8 @@ def _write_tiff(filepath: str, res: float, building, planes):
     lrx = max(building, key=lambda p: p['easting'])['easting']
     lry = min(building, key=lambda p: p['northing'])['northing']
 
-    xmax = int((lrx - ulx) * res) + 1
-    ymax = int((uly - lry) * res) + 1
+    xmax = int((lrx - ulx) / res) + 1
+    ymax = int((uly - lry) / res) + 1
     # print(f"xmax {xmax} ymax {ymax}")
 
     driver = gdal.GetDriverByName('GTiff')

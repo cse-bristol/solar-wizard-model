@@ -78,8 +78,8 @@ Each model also needs some bits of Albion at least partially loaded:
   * wales
 * `HEAT_DEMAND_DIR` - dir to store intermediate stages of heat demand modelling. Final outputs are in the database.
 * `SOLAR_DIR` - dir to store outputs and intermediate stages of solar PV modelling. Final outputs are in the database.
-* `PVGIS_DATA_DIR` - The directory containing the `pvgis_data.tar` file
-* `PVGIS_GRASS_DBASE` - where to create the GRASS dbase for PVMAPS
+* `PVGIS_DATA_TAR_FILE_DIR` - The directory containing the `pvgis_data.tar` file
+* `PVGIS_GRASS_DBASE_DIR` - where to create the GRASS dbase for PVMAPS
 * `SMTP_FROM` - (optional) email to send notifications from
 * `SMTP_PASS` - (optional) password for email to send notifications from
 * `EMAIL_TO_NOTIFY_ON_FAILURE` - (optional) email to notify if jobs or result extraction fails
