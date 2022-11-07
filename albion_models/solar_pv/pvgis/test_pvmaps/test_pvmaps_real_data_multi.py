@@ -20,6 +20,9 @@ from albion_models.solar_pv.pvgis.test_pvmaps.test_pvmaps import TestPVMaps, TES
 
 
 class TestPVMapsRealDataMulti(TestPVMaps):
+    """
+    Runs complete PVMaps process and then checks the data in the Grass DB - for multiple locations
+    """
     ELEVATION_RASTER_FILENAME: str = "elevation_4326.tif"
     MASK_RASTER_FILENAME: str = "mask_4326.tif"
 

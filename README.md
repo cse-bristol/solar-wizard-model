@@ -44,7 +44,7 @@ SELECT  ST_AsText(
 
 If the `proj` being used by postGIS doesn't have the datum grids, the result will be way off. It will only be correct if the file `OSTN15_NTv2_OSGBtoETRS.gsb` is in the directory indicated by the environment variable `PROJ_LIB` (or its default location of `/usr/share/proj` or `/usr/local/share/proj`, depending on distro, if `PROJ_LIB` is unset). If your proj version is < 7, this file is found in the project [proj-datumgrid](https://github.com/OSGeo/proj-datumgrid). If it is >=7, it is found in the project [proj-data](https://github.com/OSGeo/PROJ-data). Run `SELECT PostGIS_PROJ_Version();` To get the proj version.
 
-It seems that the postGIS in my distro package manager (debian-based) does include the datum grids by default; however the nixpkgs postGIS does not. See [shared-pg](https://github.com/cse-bristol/shared-pg/blob/master/machine-configuration.nix#L10-L14) for an example of how to get a nixpkgs postGIS to detect the datum grids. I don't know if the docker postGIS includes them or not.
+It seems that the postGIS in my distro package manager (debian-based) does include the datum grids by default; however the nixpkgs postGIS does not. See [shared-pg](https://github.com/cse-bristol/shared-pg/blob/master/machine-configuration.nix#L10-L14) for an example of how to get a nixpkgs postGIS to detect the datum grids. Also, [dev-db-shell.nix](https://github.com/cse-bristol/320-albion/blob/master/dev/db-shell.nix) will setup a shell which includes this, see [dev-notes](https://github.com/cse-bristol/320-albion/blob/master/dev/dev-notes.md) for more info. I don't know if the docker postGIS includes them or not.
 
 ### Albion dependencies
 

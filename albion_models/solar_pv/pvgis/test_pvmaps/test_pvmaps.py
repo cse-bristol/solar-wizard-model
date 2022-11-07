@@ -17,6 +17,7 @@ RESOURCES_DIR: str = os.path.realpath("../../../../resources")
 TEST_DATA_DIR: str = os.path.realpath("../../../../testdata/pvmaps")
 GRASS_DBASE: str = f"{TEST_DATA_DIR}/grass_dbase"
 
+
 class TestPVMaps:
     instance: PVMaps
     INPUT_DIR: str

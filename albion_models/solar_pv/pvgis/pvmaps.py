@@ -22,6 +22,8 @@ from typing import List, Tuple, Optional
 ##
 # Raster names used in grass db
 ELEVATION = "elevation"
+ELEVATION_OVERRIDE = "elevation_override"
+ELEVATION_PATCHED = "elevation_patched"
 MASK = "mask"
 FLAT_ROOF_ASPECT_COMPASS = "flat_roof_aspect_compass"
 FLAT_ROOF_ASPECT_GRASS = "flat_roof_aspect_grass"
@@ -175,13 +177,17 @@ class PVMaps:
         self.monthly_kwh_rasters = None
         self.horizons = []
 
+        self.elevation = ELEVATION
+
     def __del__(self):
         if self._executor:
             self._executor.shutdown()
         if self._gisrc_filename is not None and os.path.exists(self._gisrc_filename):
             os.remove(self._gisrc_filename)
 
-    def create_pvmap(self, elevation_filename: str, mask_filename: str, flat_roof_aspect_filename: Optional[str],
+    def create_pvmap(self, elevation_filename: str, mask_filename: str,
+                     flat_roof_aspect_filename: Optional[str],
+                     elevation_override_filename: Optional[str],
                      forced_slope_filename: Optional[str] = None,
                      forced_aspect_filename: Optional[str] = None,
                      forced_horizon_basefilename: Optional[str] = None) -> None:
@@ -190,6 +196,8 @@ class PVMaps:
         Creates output rasters in the dir setup in the constructor.
         :param flat_roof_aspect_filename: Values to use for the aspects of arrays installed on flat roofs, None if
         there are no flat roofs
+        :param elevation_override_filename: Heights from different sources to the LiDAR that should be used instead of
+        the heights in the elevation raster
         :param elevation_filename: Just the filename of the elevation raster
         :param mask_filename:  Just the filename of the mask raster
         :param forced_slope_filename: (mainly for testing) None - calculate slope from elevation raster; filename - use
@@ -201,28 +209,40 @@ class PVMaps:
         degrees, east = 0, CCW) - so e.g. horizon.tif becomes horizon_045.tif etc
         """
         use_flat_roof_aspects: bool = flat_roof_aspect_filename is not None
+        use_elevation_override: bool = elevation_override_filename is not None
         self.yearly_kwh_raster = None
         self.monthly_kwh_rasters = None
         self.horizons = []
+        self.elevation = ELEVATION
 
         self._create_temp_mapset()
-        self._import_rasters(elevation_filename, mask_filename, flat_roof_aspect_filename,
+        self._import_rasters(elevation_filename, mask_filename, flat_roof_aspect_filename, elevation_override_filename,
                              forced_slope_filename, forced_aspect_filename, forced_horizon_basefilename)
+
+        if use_elevation_override and not forced_horizon_basefilename:
+            self._set_region_to_and_zoom(ELEVATION)
+            self.elevation = self._create_patched_elevation()
+
         self._mask_fix_nulls()
-        self._set_region_to_mask_and_zoom()
+        self._set_region_to_and_zoom(MASK)
+
         if not forced_horizon_basefilename:
             self._calc_horizons_p()
         self._ensure_horizon_ranges_p()
+
         self._set_mask()
         if not (forced_slope_filename and forced_aspect_filename):
             self._calc_slope_aspect()
         self._conv_flat_panel_aspects(use_flat_roof_aspects)
         self._flat_panel_correction(use_flat_roof_aspects)
+
         self._pv_calcs_p()
         self._apply_wind_corrections_p()
         self._apply_spectral_corrections_p()
         self._get_annual_rasters_p()
+
         self._export_rasters()
+
         self._remove_temp_mapset_if_reqd()
 
     def _calc_solar_declinations(self):
@@ -433,7 +453,9 @@ class PVMaps:
 
         self._run_cmd_via_method_p(self._import_raster, rasters_to_import)
 
-    def _import_rasters(self, elevation_filename: str, mask_filename: str, flat_roof_aspect_filename: str,
+    def _import_rasters(self, elevation_filename: str, mask_filename: str,
+                        flat_roof_aspect_filename: Optional[str],
+                        elevation_override_filename: Optional[str],
                         forced_slope_filename: Optional[str],
                         forced_aspect_filename: Optional[str],
                         forced_horizon_basefilename: Optional[str]):
@@ -444,6 +466,9 @@ class PVMaps:
 
         if flat_roof_aspect_filename:
             rasters_to_import.append((flat_roof_aspect_filename, FLAT_ROOF_ASPECT_COMPASS))
+
+        if elevation_override_filename:
+            rasters_to_import.append((elevation_override_filename, ELEVATION_OVERRIDE))
 
         ###
         if forced_slope_filename and forced_aspect_filename:
@@ -469,10 +494,10 @@ class PVMaps:
         logging.info("_set_mask")
         self._run_cmd(f"r.mask raster={MASK}")
 
-    def _set_region_to_mask_and_zoom(self):
-        """Zooms to the non-null central rectangle part of the mask"""
-        logging.info("_set_region_to_mask_and_zoom")
-        self._run_cmd(f"g.region raster={MASK} zoom={MASK}")
+    def _set_region_to_and_zoom(self, raster_name: str):
+        """Zooms to the non-null central rectangle part of raster_name"""
+        logging.info("_set_region_to_and_zoom")
+        self._run_cmd(f"g.region raster={raster_name} zoom={raster_name}")
 
     def _horizon_directions(self) -> List[Tuple[int]]:
         return [(a,) for a in range(0, 360, self._horizon_step)]
@@ -483,11 +508,11 @@ class PVMaps:
         # Their heights are in radians unless "-d" is used
         # Looks like should be the default (radians) going by the North Carolina example
         # in https://grass.osgeo.org/grass80/manuals/r.sun.html
-        self._run_cmd(f"r.horizonmask elevation={ELEVATION} mask={MASK} direction={direction:03d} "
+        self._run_cmd(f"r.horizonmask elevation={self.elevation} mask={MASK} direction={direction:03d} "
                       f"output={HORIZON_BASENAME} maxdistance={self._horizon_search_distance}")
 
     def _calc_horizons_p(self):
-        directions: List[Tuple[float]] = self._horizon_directions()
+        directions: List[Tuple[int]] = self._horizon_directions()
         logging.info(f"_calc_horizons {directions}")
         self._run_cmd_via_method_p(self._calc_horizon, directions)
 
@@ -505,7 +530,7 @@ class PVMaps:
 
     def _calc_slope_aspect(self):
         logging.info("_calc_slope_aspect")
-        self._run_cmd(f"r.slope.aspect elevation={ELEVATION} slope={SLOPE} aspect={ASPECT_GRASS}")
+        self._run_cmd(f"r.slope.aspect elevation={self.elevation} slope={SLOPE} aspect={ASPECT_GRASS}")
 
     def _conv_flat_panel_aspects(self, use_flat_roof_aspects: bool):
         if use_flat_roof_aspects:
@@ -538,6 +563,15 @@ class PVMaps:
             (aspect_cmd,)
         ])
 
+    def _create_patched_elevation(self) -> str:
+        self._run_cmd(f'r.mapcalc '
+                      f'expression='
+                      f'"{ELEVATION_PATCHED}='
+                      f'if (isnull({ELEVATION_OVERRIDE}), {ELEVATION}, '
+                      f'if (isnull({ELEVATION}), {ELEVATION_OVERRIDE}, '
+                      f'max({ELEVATION_OVERRIDE}, {ELEVATION})))"')
+        return ELEVATION_PATCHED
+
     def _pv_calc(self, ix: int, day: int, mon: int, _: int):
         """Settings based on totpv_incl.sh"""
         mon_str: str = f"{mon:02d}"
@@ -547,7 +581,7 @@ class PVMaps:
         # -i Do you want to use clear-sky irradiance for calculating efficiency (y/n) ... i.e. ignore clouds etc
         # Albedo value of 0.2 confirmed as being value used by pvgis api - see email from JRC-PVGIS@ec.europa.eu 6/9/22
         cmd: str = f"r.pv -a -s --quiet " \
-                   f"elevation={ELEVATION} " \
+                   f"elevation={self.elevation} " \
                    f"aspect={ASPECT_GRASS_ADJUSTED} " \
                    f"slope={SLOPE_ADJUSTED} " \
                    f"horizon_basename={HORIZON090_BASENAME} horizon_step={self._horizon_step} " \

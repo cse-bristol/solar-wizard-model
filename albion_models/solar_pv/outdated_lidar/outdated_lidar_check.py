@@ -87,7 +87,7 @@ def _write_exclusions(pg_conn, job_id: int, to_exclude: List[Tuple[str, str, flo
                 UPDATE {buildings}
                 SET 
                     exclusion_reason = data.exclusion_reason::models.pv_exclusion_reason,
-                    height = data.height
+                    height = data.height::real
                 FROM (VALUES %s) AS data (toid, exclusion_reason, height)
                 WHERE {buildings}.toid = data.toid;
             """).format(
