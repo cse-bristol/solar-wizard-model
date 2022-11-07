@@ -1,6 +1,7 @@
 """
 Developed in https://github.com/cse-bristol/710-pvmaps-nix, see there for more details
 """
+import time
 from os.path import join
 
 import argparse
@@ -429,7 +430,7 @@ class PVMaps:
     def _create_temp_mapset(self):
         """Set & create mapset - used for temp rasters etc"""
         # do equivalent of e.g "g.mapset -c mapset=nsd_4326"
-        self._g_temp_mapset = f"pvmaps.{os.getpid()}"
+        self._g_temp_mapset = f"pvmaps.{os.getpid()}.{int(time.time())}"
         logging.info(f"_create_temp_mapset {self._g_temp_mapset}")
 
         # Create temp mapset

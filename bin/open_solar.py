@@ -11,7 +11,7 @@ from typing import List, Optional
 
 from albion_models import paths
 from albion_models.db_funcs import sql_command, sql_script, connect, command_to_gpkg
-from albion_models.geos import get_grid_cells, from_geojson_file
+from albion_models.geos import get_grid_cells, from_geojson_file, from_geojson
 
 model_params = {
     "horizon_search_radius": {
@@ -75,7 +75,7 @@ model_params = {
 }
 
 
-def create_run(pg_conn, name: str, cell_size: int, cell_ids: Optional[List[int]], params: dict) -> int:
+def create_run(pg_conn, name: str, cell_size: int, cell_ids: Optional[List[int]], run_boundary_27770_json: Optional[str], params: dict) -> int:
     with pg_conn.cursor() as cursor:
         os_run_id = sql_command(
             cursor,
@@ -83,7 +83,12 @@ def create_run(pg_conn, name: str, cell_size: int, cell_ids: Optional[List[int]]
             name=Literal(name),
             result_extractor=lambda res: res[0][0])
 
-        cells = get_grid_cells(from_geojson_file(join(paths.RESOURCES_DIR, "gb.geojson")), cell_size, cell_size)
+        if run_boundary_27770_json:
+            run_boundary_27770 = from_geojson(run_boundary_27770_json)
+        else:
+            run_boundary_27770 = from_geojson_file(join(paths.RESOURCES_DIR, "gb.geojson"))
+
+        cells = get_grid_cells(run_boundary_27770, cell_size, cell_size)
         if cell_ids is not None:
             cells = [cells[cid] for cid in cell_ids]
 
@@ -232,6 +237,24 @@ def _print_table(data: List[dict], sep: str = ","):
         print(sep.join([str(cell) for cell in row]))
 
 
+def _get_boundary_27700_from_boundary_4326(pg_conn, boundary_4326: str) -> Optional[str]:
+    if boundary_4326:
+        json.loads(boundary_4326)  # Check for valid JSON before sending to DB
+        boundary_27700 = sql_command(pg_conn,
+                                    "SELECT "
+                                    "ST_AsGeoJSON("
+                                    "ST_Transform("
+                                    "ST_Multi("
+                                    "ST_SetSRID("
+                                    "ST_GeomFromGeoJSON(%(geojson_4326)s)"
+                                    ", 4326))"
+                                    ", 27700), 0, 0)",
+                                    result_extractor=lambda res: res[0][0],
+                                    bindings={"geojson_4326": boundary_4326})
+        return boundary_27700
+    return None
+
+
 def parse_cli_args():
     desc = "Open Solar CLI tool"
     parser = argparse.ArgumentParser(description=desc)
@@ -255,8 +278,11 @@ def parse_cli_args():
                                help="Edge length of individual job bound squares in metres. (default: %(default)s)")
     create_parser.add_argument('--cell_ids',
                                help="Comma-separated list of cell ids (numbers). "
-                                    "Only create these cells, With 0 being SW-most cell"
+                                    "Only create these cells, With 0 being SW-most cell "
                                     "and counting in rows East and then North")
+    create_parser.add_argument('--run_boundary',
+                               help="GeoJSON as used in Albion job boundary. Restrict the run area using this"
+                                    "instead of the GB boundary.")
 
     for param, data in model_params.items():
         create_parser.add_argument(f"--{param}", **data)
@@ -301,10 +327,12 @@ def open_solar_cli():
             del params['name']
             del params['cell_size']
             del params['cell_ids']
+            del params['run_boundary']
             del params['pg_uri']
             del params['op']
             cell_ids = [int(c.strip()) for c in args.cell_ids.split(",")] if args.cell_ids else None
-            create_run(pg_conn, args.name, args.cell_size, cell_ids, params)
+            create_run(pg_conn, args.name, int(args.cell_size), cell_ids,
+                       _get_boundary_27700_from_boundary_4326(pg_conn, args.run_boundary), params)
         elif args.op == "list":
             _print_table(list_runs(pg_conn))
         elif args.op == "cancel":
