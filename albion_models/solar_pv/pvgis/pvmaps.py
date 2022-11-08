@@ -72,7 +72,8 @@ class PVMaps:
                  flat_roof_degrees: float,
                  flat_roof_degrees_threshold: float,
                  panel_type: str,
-                 num_pv_calcs_per_year: Optional[int] = None):
+                 num_pv_calcs_per_year: Optional[int] = None,
+                 job_id: Optional[int] = None):
         """
         Create pv maps object with settings shared by all elevation / mask raster runs
         :param grass_dbase_dir: Dir where grass database is to be created or has been created
@@ -90,6 +91,7 @@ class PVMaps:
         :param panel_type: Use constants CSI & CDTE
         :param num_pv_calcs_per_year: None to use monthly PV calcs, or number to do per year, divides year into
         approx equal buckets of days
+        :param job_id optional id used where dirs etc need to be created for a job, uses process id and time if not set
         """
         self._executor: Optional[ThreadPoolExecutor] = None
         self._gisrc_filename: Optional[str] = None
@@ -156,13 +158,18 @@ class PVMaps:
                 raise ValueError(f"Num PV calcs per year must be between 1 and 365")
             else:
                 self._pv_time_steps = self._calc_pv_time_steps(num_pv_calcs_per_year)
+
+        if job_id:
+            self.uid = f"job_{job_id}"
+        else:
+            self.uid = f"{os.getpid()}.{int(time.time())}"
         ###
 
         self._g_location: str = "grassdata"
 
         self._g_temp_mapset: str = ""
 
-        self._gisrc_filename = join(tempfile.gettempdir(), f"pvmaps.{os.getpid()}.rc")
+        self._gisrc_filename = join(tempfile.gettempdir(), f"pvmaps.{self.uid}.rc")
 
         self.solar_decl: List[float] = self._calc_solar_declinations()
 
@@ -430,7 +437,7 @@ class PVMaps:
     def _create_temp_mapset(self):
         """Set & create mapset - used for temp rasters etc"""
         # do equivalent of e.g "g.mapset -c mapset=nsd_4326"
-        self._g_temp_mapset = f"pvmaps.{os.getpid()}.{int(time.time())}"
+        self._g_temp_mapset = f"pvmaps.{self.uid}"
         logging.info(f"_create_temp_mapset {self._g_temp_mapset}")
 
         # Create temp mapset

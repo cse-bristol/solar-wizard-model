@@ -76,6 +76,7 @@ def pvgis(pg_uri: str,
         flat_roof_degrees=flat_roof_degrees,
         flat_roof_degrees_threshold=FLAT_ROOF_DEGREES_THRESHOLD,
         panel_type=panel_type,
+        job_id=job_id
     )
     pvm.create_pvmap(
         elevation_filename=os.path.basename(elevation_raster),
