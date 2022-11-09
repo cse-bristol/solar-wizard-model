@@ -516,11 +516,10 @@ class PVMaps:
 
         # Enforce minimum raster size of 10 by 10
         for info in g_region_info.split(" "):
-            if info.find("=") == -1:
-                continue
-            k, v = info.split("=")
-            if k in ("rows", "cols") and int(v) < 10:
-                raise ValueError(f"Minimum raster size supported by Grass is 10 by 10 (number of {k} is {v})")
+            if "=" in info:     # Filter the pid value
+                k, v = info.split("=")
+                if k in ("rows", "cols") and int(v) < 10:
+                    raise ValueError(f"Minimum raster size supported by Grass is 10 by 10 (number of {k} is {v})")
 
     def _horizon_directions(self) -> List[Tuple[int]]:
         return [(a,) for a in range(0, 360, self._horizon_step)]
