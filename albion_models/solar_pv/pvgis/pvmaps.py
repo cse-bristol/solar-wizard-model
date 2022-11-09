@@ -391,10 +391,15 @@ class PVMaps:
         if exc_str:
             raise Exception(f"Exception(s) raised\n{exc_str}")
 
-    def _run_cmd(self, cmd_line: str, exp_returncode: int = 0) -> None:
-        args: List[str] = shlex.split(cmd_line)
+    def _run_cmd(self, cmd_line: str, exp_returncode: int = 0) -> str:
+        """ Run command, check outputs.
+        :param cmd_line: Command to run
+        :param exp_returncode: Raises exception if return is not this value
+        :return: process output text with control codes removed and prefixed with the pid
+        """
+        arguments: List[str] = shlex.split(cmd_line)
 
-        process = Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=self._grass_env)
+        process = Popen(arguments, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=self._grass_env)
         process_output: str = ""
         with process.stdout:
             line_s = process.stdout.read().decode("utf-8").replace("\n", " ").strip()
@@ -408,6 +413,8 @@ class PVMaps:
         if rtn_code != exp_returncode:
             logging.error(process_output)
             raise Exception(f"Command {cmd_line} returned error code {rtn_code}")
+
+        return process_output
 
     def _init_grass_db_pvmaps_data(self):
         location = join(self._g_dbase, self._g_location)
@@ -505,7 +512,15 @@ class PVMaps:
     def _set_region_to_and_zoom(self, raster_name: str):
         """Zooms to the non-null central rectangle part of raster_name"""
         logging.info("_set_region_to_and_zoom")
-        self._run_cmd(f"g.region raster={raster_name} zoom={raster_name}")
+        g_region_info: str = self._run_cmd(f"g.region raster={raster_name} zoom={raster_name} -g")
+
+        # Enforce minimum raster size of 10 by 10
+        for info in g_region_info.split(" "):
+            if info.find("=") == -1:
+                continue
+            k, v = info.split("=")
+            if k in ("rows", "cols") and int(v) < 10:
+                raise ValueError(f"Minimum raster size supported by Grass is 10 by 10 (number of {k} is {v})")
 
     def _horizon_directions(self) -> List[Tuple[int]]:
         return [(a,) for a in range(0, 360, self._horizon_step)]
@@ -777,7 +792,7 @@ if __name__ == '__main__':
             args.flat_roof_degrees_threshold,
             args.panel_type,
             args.num_pv_calcs_per_year)
-        pvmaps.create_pvmap(args.elevation_filename, args.mask_filename, None)
+        pvmaps.create_pvmap(args.elevation_filename, args.mask_filename, None, None)
     except Exception as e:
         logging.error(e)
         sys.exit(1)
