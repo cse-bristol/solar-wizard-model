@@ -66,12 +66,12 @@ def command_to_gpkg(pg_conn,
                     pg_uri: str,
                     filename: str,
                     table_name: str,
-                    command: str,
+                    command: Union[str, SQL],
                     src_srs: int,
                     dst_srs: int,
                     **kwargs) -> Optional[str]:
     logging.info(f"Loading {table_name} into {filename}")
-    path = join(os.environ.get("GPKG_DIR"), filename)
+    path = join(os.environ.get("GPKG_DIR", ""), filename)  # If env var is not set just use filename
     exists = os.path.exists(path)
 
     if len(kwargs) != 0:

@@ -241,16 +241,16 @@ def _get_boundary_27700_from_boundary_4326(pg_conn, boundary_4326: str) -> Optio
     if boundary_4326:
         json.loads(boundary_4326)  # Check for valid JSON before sending to DB
         boundary_27700 = sql_command(pg_conn,
-                                    "SELECT "
-                                    "ST_AsGeoJSON("
-                                    "ST_Transform("
-                                    "ST_Multi("
-                                    "ST_SetSRID("
-                                    "ST_GeomFromGeoJSON(%(geojson_4326)s)"
-                                    ", 4326))"
-                                    ", 27700), 0, 0)",
-                                    result_extractor=lambda res: res[0][0],
-                                    bindings={"geojson_4326": boundary_4326})
+                                     "SELECT "
+                                     "ST_AsGeoJSON("
+                                     "ST_Transform("
+                                     "ST_Multi("
+                                     "ST_SetSRID("
+                                     "ST_GeomFromGeoJSON(%(geojson_4326)s)"
+                                     ", 4326))"
+                                     ", 27700), 0, 0)",
+                                     result_extractor=lambda res: res[0][0],
+                                     bindings={"geojson_4326": boundary_4326})
         return boundary_27700
     return None
 
