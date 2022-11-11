@@ -12,9 +12,9 @@ import math
 
 from albion_models.solar_pv.pvgis.pvmaps import PVMaps, CSI, OUT_DIRECT_RAD_BASENAME, OUT_DIFFUSE_RAD_BASENAME, \
     HORIZON090_BASENAME, SLOPE_ADJUSTED, ASPECT_GRASS_ADJUSTED, OUT_PV_POWER_WIND_SPECTRAL_BASENAME
+from albion_models.paths import RESOURCES_DIR, TEST_DATA
 
-RESOURCES_DIR: str = os.path.realpath("../../../../resources")
-TEST_DATA_DIR: str = os.path.realpath("../../../../testdata/pvmaps")
+TEST_DATA_DIR: str = f"{TEST_DATA}/pvmaps"
 GRASS_DBASE: str = f"{TEST_DATA_DIR}/grass_dbase"
 
 
@@ -220,7 +220,7 @@ class TestPVMaps:
         api_results = None
 
         if os.path.exists(f"{self.DATA_INPUT_DIR}/{cached_data_filename}.pkl"):
-            with(open(f"{self.DATA_INPUT_DIR}/{cached_data_filename}.pkl", "rb") as pkl_in):
+            with open(f"{self.DATA_INPUT_DIR}/{cached_data_filename}.pkl", "rb") as pkl_in:
                 api_results = pickle.load(pkl_in)
                 if len(api_results) != len(test_locns):
                     api_results = None

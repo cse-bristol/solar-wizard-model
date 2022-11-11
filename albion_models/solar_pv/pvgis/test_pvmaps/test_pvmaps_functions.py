@@ -4,9 +4,9 @@ import unittest
 from os.path import join
 
 from albion_models.solar_pv.pvgis.pvmaps import PVMaps, CSI, ELEVATION_OVERRIDE, ELEVATION, ELEVATION_PATCHED
+from albion_models.paths import RESOURCES_DIR, TEST_DATA
 
-RESOURCES_DIR: str = os.path.realpath("../../../../resources")
-TEST_DATA_DIR: str = os.path.realpath("../../../../testdata/pvmaps")
+TEST_DATA_DIR: str = f"{TEST_DATA}/pvmaps"
 GRASS_DBASE: str = f"{TEST_DATA_DIR}/grass_dbase"
 
 

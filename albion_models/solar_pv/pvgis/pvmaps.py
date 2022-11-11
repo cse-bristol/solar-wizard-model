@@ -1,6 +1,7 @@
 """
 Developed in https://github.com/cse-bristol/710-pvmaps-nix, see there for more details
 """
+import time
 from os.path import join
 
 import argparse
@@ -174,7 +175,7 @@ class PVMaps:
         os.makedirs(self._output_dir, exist_ok=True)
 
         self.yearly_kwh_raster = None
-        self.monthly_kwh_rasters = None
+        self.monthly_wh_rasters = None
         self.horizons = []
 
         self.elevation = ELEVATION
@@ -186,8 +187,8 @@ class PVMaps:
             os.remove(self._gisrc_filename)
 
     def create_pvmap(self, elevation_filename: str, mask_filename: str,
-                     flat_roof_aspect_filename: Optional[str],
-                     elevation_override_filename: Optional[str],
+                     flat_roof_aspect_filename: Optional[str] = None,
+                     elevation_override_filename: Optional[str] = None,
                      forced_slope_filename: Optional[str] = None,
                      forced_aspect_filename: Optional[str] = None,
                      forced_horizon_basefilename: Optional[str] = None) -> None:
@@ -211,7 +212,7 @@ class PVMaps:
         use_flat_roof_aspects: bool = flat_roof_aspect_filename is not None
         use_elevation_override: bool = elevation_override_filename is not None
         self.yearly_kwh_raster = None
-        self.monthly_kwh_rasters = None
+        self.monthly_wh_rasters = None
         self.horizons = []
         self.elevation = ELEVATION
 
@@ -652,7 +653,7 @@ class PVMaps:
     def _export_rasters(self):
         logging.info("_export_rasters")
         exports: List[(str, str)] = []
-        monthly_kwh_rasters = []
+        monthly_wh_rasters = []
         for _, day, month, _ in self._pv_time_steps:
             if self._output_direct_diffuse:
                 exports.append((f"{OUT_DIRECT_RAD_BASENAME}{day}",
@@ -661,7 +662,7 @@ class PVMaps:
                                 join(self._output_dir, f"{OUT_DIFFUSE_RAD_BASENAME}{day}_{month}.tif")))
             monthly_kwh_raster = join(self._output_dir, f"{OUT_PV_POWER_WIND_SPECTRAL_BASENAME}{day}_{month}.tif")
             exports.append((f"{OUT_PV_POWER_WIND_SPECTRAL_BASENAME}{day}", monthly_kwh_raster))
-            monthly_kwh_rasters.append(monthly_kwh_raster)
+            monthly_wh_rasters.append(monthly_kwh_raster)
 
         if self._output_direct_diffuse:
             exports.append((f"{OUT_DIRECT_RAD_BASENAME}year",
@@ -680,7 +681,7 @@ class PVMaps:
 
         self._run_cmd_via_method_p(self._export_raster, exports)
         self.yearly_kwh_raster = yearly_kwh_raster
-        self.monthly_kwh_rasters = monthly_kwh_rasters
+        self.monthly_wh_rasters = monthly_wh_rasters
         self.horizons = horizons
 
     def _find_grass_locn(self):

@@ -14,6 +14,8 @@ from psycopg2.extras import DictCursor, execute_values
 from psycopg2.sql import SQL, Identifier
 import numpy as np
 
+from albion_models.solar_pv.constants import RANSAC_LARGE_BUILDING, \
+    RANSAC_BASE_MAX_TRIALS
 from albion_models.solar_pv.ransac.ransac import RANSACRegressorForLIDAR, _aspect, \
     _slope, RANSACValueError
 from albion_models.solar_pv.roof_polygons.roof_polygons import create_roof_polygons
@@ -89,8 +91,8 @@ def _ransac_building(pixels_in_building: List[dict],
     aspect = np.array([pixel["aspect"] for pixel in pixels_in_building])
     pixel_ids = np.array([pixel["pixel_id"] for pixel in pixels_in_building])
 
-    if len(pixels_in_building) > 1000:
-        max_trials = len(pixels_in_building) + 1000
+    if len(pixels_in_building) > RANSAC_LARGE_BUILDING / resolution_metres:
+        max_trials = RANSAC_BASE_MAX_TRIALS + len(pixels_in_building) / resolution_metres
         # Disables checks that forbid planes that cover multiple discontinuous groups
         # of pixels, as large buildings often have separate roof areas that are on the
         # same plane. Only the largest group will be used each time anyway, so this
@@ -98,7 +100,7 @@ def _ransac_building(pixels_in_building: List[dict],
         # eventually.
         include_group_checks = False
     else:
-        max_trials = 1000
+        max_trials = RANSAC_BASE_MAX_TRIALS
         include_group_checks = True
 
     planes = []

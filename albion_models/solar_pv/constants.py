@@ -18,3 +18,11 @@ FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD = 45
 # See section 5.2.5 here:
 # https://joint-research-centre.ec.europa.eu/pvgis-photovoltaic-geographical-information-system/getting-started-pvgis/pvgis-data-sources-calculation-methods_en#ref-5-calculation-of-pv-power-output
 SYSTEM_LOSS = 0.14
+
+# Area in m2 of a building to consider large for RANSAC purposes
+# (which has the effect of allowing planes that cover multiple discontinuous groups
+# of pixels, as large buildings often have separate roof areas that are on the
+# same plane):
+RANSAC_LARGE_BUILDING = 1000
+
+RANSAC_BASE_MAX_TRIALS = 1000
