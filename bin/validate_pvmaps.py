@@ -15,6 +15,7 @@ import numpy as np
 
 from albion_models import paths, gdal_helpers, geos
 from albion_models.db_funcs import connection, sql_command
+from albion_models.geos import project_geom, from_geojson
 from albion_models.lidar.bulk_lidar_client import LidarSource
 from albion_models.lidar.en_to_grid_ref import en_to_grid_ref
 from albion_models.lidar.lidar import LidarTile, Resolution, zip_to_geotiffs, \
@@ -100,22 +101,6 @@ def _get_1m_lidar(pg_conn, wkt: str, buffer: int, output_file: str):
 
     with open(output_file, 'wb') as f:
         f.write(raster)
-
-
-def _lon_lat_to_easting_northing(lon, lat):
-    from osgeo import ogr
-    from osgeo import osr
-
-    InSR = osr.SpatialReference()
-    InSR.ImportFromEPSG(4326)
-    OutSR = osr.SpatialReference()
-    OutSR.ImportFromEPSG(27700)
-
-    Point = ogr.Geometry(ogr.wkbPoint)
-    Point.AddPoint(float(lat), float(lon))
-    Point.AssignSpatialReference(InSR)
-    Point.TransformTo(OutSR)
-    return Point.GetX(), Point.GetY()
 
 
 def _gen_rasters(pg_uri: str, solar_dir: str, wkt: str, horizon_search_radius: int):
@@ -241,10 +226,8 @@ def model(project_name: str, kwp: float, wkt: str):
 def _geojson_to_wkt(geojson) -> str:
     """Helper function to migrate from old validation setup
     (took geojson in long/lat) to new validation setup (WKT in EN)"""
-    from shapely.geometry import shape
-    from shapely.ops import transform
-    ll = shape(geojson)
-    en = transform(_lon_lat_to_easting_northing, ll)
+    ll = from_geojson(geojson)
+    en = project_geom(ll, 4326, 27700)
     print(en.wkt)
     return en.wkt
 
