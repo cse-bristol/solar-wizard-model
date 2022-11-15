@@ -16,6 +16,7 @@ def export(pg_conn, pg_uri: str, gpkg: str, os_run_id: int, job_id: int):
     command_to_gpkg(
         pg_conn, pg_uri, gpkg, "panels",
         src_srs=4326, dst_srs=4326,
+        overwrite=True,
         command=f"""
         SELECT 
             {os_run_id} AS run_id,
@@ -49,6 +50,8 @@ def export(pg_conn, pg_uri: str, gpkg: str, os_run_id: int, job_id: int):
             ST_AsGeoJSON(pv.roof_geom_4326) AS geom_str        
         FROM models.solar_pv pv
         WHERE pv.job_id = {job_id}
+        AND pv.kwh_year <> double precision 'NaN'
+        AND pv.kwh_year IS NOT NULL
         """,
         os_run_id=Literal(os_run_id),
         job_id=Literal(job_id)

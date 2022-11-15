@@ -7,7 +7,7 @@ from typing import List, Tuple
 from psycopg2.extras import DictCursor
 
 from albion_models.db_funcs import sql_command, connect
-from albion_models.solar_pv.open_solar import export_panelarray
+from albion_models.solar_pv.open_solar import export_panelarray, export_building
 
 
 def _get_jobs_to_export(pg_conn, os_run_id: int) -> List[int]:
@@ -44,8 +44,11 @@ def _is_all_complete(pg_conn, os_run_id: int) -> bool:
     return complete
 
 
-def _export(pg_conn, pg_uri: str, gpkg_filename: str, os_run_id: int, job_id: int):
-    export_panelarray.export(pg_conn, pg_uri, gpkg_filename, os_run_id, job_id)
+def _export(pg_uri: str, gpkg_filename: str, os_run_id: int, job_id: int):
+    logging.info(f"Exporting {job_id}")
+    with connect(pg_uri, cursor_factory=DictCursor) as pg_conn:  # Use a separate connection per call / thread
+        export_panelarray.export(pg_conn, pg_uri, gpkg_filename, os_run_id, job_id)
+        export_building.export(pg_conn, pg_uri, gpkg_filename, os_run_id, job_id)
 
 
 def export(pg_uri: str, os_run_id: int, gpkg_filename: str):
@@ -59,11 +62,15 @@ def export(pg_uri: str, os_run_id: int, gpkg_filename: str):
 
         gpkg_fname_stem, gpkg_fname_extn = os.path.splitext(gpkg_filename)
 
+        # Do serially
+        # for job_id in job_ids:
+        #     _export(pg_uri, f"{gpkg_fname_stem}.{job_id}{gpkg_fname_extn}", os_run_id, job_id)
+
         # Run threads that start sub-processes to do the extracts
         executor = ThreadPoolExecutor(max_workers=os.cpu_count())
         futures: List[Tuple[int, Future]] = []
         for job_id in job_ids:
-            future = executor.submit(_export, pg_conn, pg_uri,
+            future = executor.submit(_export, pg_uri,
                                      f"{gpkg_fname_stem}.{job_id}{gpkg_fname_extn}", os_run_id, job_id)
             futures.append((job_id, future))
 
@@ -80,6 +87,7 @@ def export(pg_uri: str, os_run_id: int, gpkg_filename: str):
 
 
 if __name__ == "__main__":
-    export("postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion",
-           14,
+    logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.DEBUG)
+    export("postgresql://albion_ddl:albion320@localhost:5432/albion",
+           22,
            "/tmp/test.gpkg")

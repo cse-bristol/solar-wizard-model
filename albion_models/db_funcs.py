@@ -69,10 +69,14 @@ def command_to_gpkg(pg_conn,
                     command: Union[str, SQL],
                     src_srs: int,
                     dst_srs: int,
+                    overwrite: bool = False,
+                    append: bool = False,
                     **kwargs) -> Optional[str]:
     logging.info(f"Loading {table_name} into {filename}")
     path = join(os.environ.get("GPKG_DIR", ""), filename)  # If env var is not set just use filename
     exists = os.path.exists(path)
+    if overwrite and append:
+        overwrite = False
 
     if len(kwargs) != 0:
         if isinstance(command, str):
@@ -87,6 +91,8 @@ def command_to_gpkg(pg_conn,
         -gt 65536
         -nln {table_name}
         {"-update" if exists else ""}
+        {"-overwrite" if overwrite else ""}
+        {"-append" if append else ""}
         -s_srs EPSG:{src_srs}
         -t_srs EPSG:{dst_srs}
         "PG:{process_pg_uri(pg_uri)}"
