@@ -26,7 +26,7 @@ def export(pg_conn, pg_uri: str, gpkg: str, os_run_id: int, job_id: int):
         Identifier("mb", "geom_4326"),
         {"job_id": job_id})
 
-    command_to_gpkg(
+    if command_to_gpkg(
         pg_conn, pg_uri, gpkg, "buildings",
         src_srs=4326, dst_srs=4326,
         overwrite=True,
@@ -64,4 +64,5 @@ def export(pg_conn, pg_uri: str, gpkg: str, os_run_id: int, job_id: int):
         os_run_id=Literal(os_run_id),
         temp_table=Identifier(tables.schema(job_id), tables.SIMPLIFIED_BUILDING_GEOM_TABLE),
         job_id2=Literal(job_id),
-    )
+    ) is not None:
+        raise RuntimeError(f"Error running ogr2ogr")

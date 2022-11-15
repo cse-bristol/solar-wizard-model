@@ -13,7 +13,7 @@ def export(pg_conn, pg_uri: str, gpkg: str, os_run_id: int, job_id: int):
     :param os_run_id: Run to export from (no check is done that that job_id is from this run, just used in the o/p)
     :param job_id: Job to export from
     """
-    command_to_gpkg(
+    if command_to_gpkg(
         pg_conn, pg_uri, gpkg, "panels",
         src_srs=4326, dst_srs=4326,
         overwrite=True,
@@ -55,4 +55,5 @@ def export(pg_conn, pg_uri: str, gpkg: str, os_run_id: int, job_id: int):
         """,
         os_run_id=Literal(os_run_id),
         job_id=Literal(job_id)
-        )
+    ) is not None:
+        raise RuntimeError(f"Error running ogr2ogr")

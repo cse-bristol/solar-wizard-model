@@ -57,8 +57,8 @@ def _ms_simplify(geojson: str) -> str:
     if p.returncode == 0:
         return str(p.stdout)
     else:
-        raise Exception(f"Error running mapshaper:\nreturncode = {p.returncode}\n"
-                        f"stdout = {p.stdout}\nstderr = {p.stderr}")
+        raise RuntimeError(f"Error running mapshaper:\nreturncode = {p.returncode}\n"
+                           f"stdout = {p.stdout}\nstderr = {p.stderr}")
 
 
 def _parse_geojson(geojson: str) -> List[Tuple[str, str]]:
@@ -94,15 +94,3 @@ def _create_output_table(pg_conn, to_table: Identifier, geo_by_id: List[Tuple[st
         )
 
     pg_conn.commit()
-
-
-def print_temp_table(pg_conn, job_id):
-    contents = sql_command(
-        pg_conn,
-        "SELECT id, ST_AsText(ST_GeomFromGeoJSON(geojson)) "
-        "FROM {geom_simplified}",
-        geom_simplified=Identifier(tables.schema(job_id), tables.SIMPLIFIED_BUILDING_GEOM_TABLE),
-        result_extractor=lambda rows: [dict(row) for row in rows]
-    )
-    for c in contents:
-        print(c)
