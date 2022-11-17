@@ -12,6 +12,7 @@ from typing import List, Optional
 from albion_models import paths
 from albion_models.db_funcs import sql_command, sql_script, connect, command_to_gpkg
 from albion_models.geos import get_grid_cells, from_geojson_file, from_geojson
+from albion_models.solar_pv.open_solar import open_solar_export
 
 model_params = {
     "horizon_search_radius": {
@@ -169,61 +170,63 @@ def run_progress_geojson(pg_conn, os_run_id: int):
                        "features": geojson}, default=str)
 
 
-def extract_run_data(pg_conn, pg_uri: str, os_run_id: int, gpkg: str):
-    # TODO will doing this in a single query work with such large amount of data?
-    #  could always convert it into a loop, one query per model job
-    try:
-        os.remove(gpkg)
-    except OSError:
-        pass
-
-    command_to_gpkg(
-        pg_conn, pg_uri, gpkg, "panels",
-        src_srs=4326, dst_srs=4326,
-        command="""
-        SELECT pv.*
-        FROM
-            models.job_queue q
-            LEFT JOIN models.open_solar_jobs osj ON osj.job_id = q.job_id
-            LEFT JOIN models.solar_pv pv ON pv.job_id = osj.job_id
-        WHERE osj.os_run_id = %(os_run_id)s
-        """,
-        os_run_id=os_run_id)
-
-    # TODO: add EPC data, maybe other things?
-    command_to_gpkg(
-        pg_conn, pg_uri, gpkg, "buildings",
-        src_srs=4326, dst_srs=4326,
-        command="""
-        SELECT 
-            b.toid, 
-            b.postcode,
-            b.addresses,
-            pvb.exclusion_reason,
-            pvb.height,
-            b.is_residential,
-            b.heating_fuel,
-            b.heating_system,
-            b.has_rooftop_pv,
-            b.pv_roof_area_pct,
-            b.pv_peak_power,
-            b.listed_building_grade,
-            b.msoa_2011,  
-            b.lsoa_2011,  
-            b.oa_2011, 
-            b.ward, 
-            b.ward_name,
-            b.la,
-            b.la_name,
-            b.geom_4326
-        FROM
-            models.job_queue q
-            LEFT JOIN models.open_solar_jobs osj ON osj.job_id = q.job_id
-            LEFT JOIN models.pv_building bpv ON bpv.job_id = osj.job_id
-            LEFT JOIN aggregates.building b ON b.toid = pvb.toid
-        WHERE osj.os_run_id = %(os_run_id)s
-        """,
-        os_run_id=os_run_id)
+# def extract_run_data(pg_conn, pg_uri: str, os_run_id: Optional[int], gpkg_dir: Optional[str],
+#                              extract_job_info: bool, extract_base_info: bool,
+#                              start_job_id: Optional[int], end_job_id: Optional[int]):
+    # # TODO will doing this in a single query work with such large amount of data?
+    # #  could always convert it into a loop, one query per model job
+    # try:
+    #     os.remove(gpkg)
+    # except OSError:
+    #     pass
+    #
+    # command_to_gpkg(
+    #     pg_conn, pg_uri, gpkg, "panels",
+    #     src_srs=4326, dst_srs=4326,
+    #     command="""
+    #     SELECT pv.*
+    #     FROM
+    #         models.job_queue q
+    #         LEFT JOIN models.open_solar_jobs osj ON osj.job_id = q.job_id
+    #         LEFT JOIN models.solar_pv pv ON pv.job_id = osj.job_id
+    #     WHERE osj.os_run_id = %(os_run_id)s
+    #     """,
+    #     os_run_id=os_run_id)
+    #
+    # # TODO: add EPC data, maybe other things?
+    # command_to_gpkg(
+    #     pg_conn, pg_uri, gpkg, "buildings",
+    #     src_srs=4326, dst_srs=4326,
+    #     command="""
+    #     SELECT
+    #         b.toid,
+    #         b.postcode,
+    #         b.addresses,
+    #         pvb.exclusion_reason,
+    #         pvb.height,
+    #         b.is_residential,
+    #         b.heating_fuel,
+    #         b.heating_system,
+    #         b.has_rooftop_pv,
+    #         b.pv_roof_area_pct,
+    #         b.pv_peak_power,
+    #         b.listed_building_grade,
+    #         b.msoa_2011,
+    #         b.lsoa_2011,
+    #         b.oa_2011,
+    #         b.ward,
+    #         b.ward_name,
+    #         b.la,
+    #         b.la_name,
+    #         b.geom_4326
+    #     FROM
+    #         models.job_queue q
+    #         LEFT JOIN models.open_solar_jobs osj ON osj.job_id = q.job_id
+    #         LEFT JOIN models.pv_building bpv ON bpv.job_id = osj.job_id
+    #         LEFT JOIN aggregates.building b ON b.toid = pvb.toid
+    #     WHERE osj.os_run_id = %(os_run_id)s
+    #     """,
+    #     os_run_id=os_run_id)
 
 
 def _print_table(data: List[dict], sep: str = ","):
@@ -307,9 +310,17 @@ def parse_cli_args():
     extract_parser = subparsers.add_parser('extract',
                                            help="Extract Open Solar job outputs to GPKG",
                                            description="Extract Open Solar job outputs to GPKG")
-    extract_parser.add_argument('id', help="Open Solar run ID")
-    extract_parser.add_argument('--gpkg', help="Geopackage output file location")
+    extract_parser.add_argument('id', help="Open Solar run ID", nargs="?")
+    extract_parser.add_argument('--gpkg_dir', help="Geopackage output file location (dir / folder)")
     extract_parser.add_argument("--pg_uri", **pg_uri_arg)
+    extract_parser.add_argument("--extract_job_info", help="Extract job information (Open Solar run ID needed)",
+                                action='store_false', default=False)
+    extract_parser.add_argument("--extract_base_info", help="Extract base information (e.g. LSOAs, LAs)",
+                                action='store_true', default=False)
+    extract_parser.add_argument("--start_job_id", help="Minimum job id to export (inclusive)")
+    extract_parser.add_argument("--end_job_id", help="Maximum job id to export (inclusive)")
+    extract_parser.add_argument("--regenerate", help="Create outputs even if they exist already",
+                                action='store_true', default=False)
 
     return parser.parse_args()
 
@@ -341,8 +352,10 @@ def open_solar_cli():
             geojson = run_progress_geojson(pg_conn, args.id)
             print(geojson)
         elif args.op == "extract":
-            extract_run_data(pg_conn, args.pg_uri, args.id, args.gpkg)
-
+            open_solar_export.export(args.pg_uri, args.id, args.gpkg_dir,
+                                     args.extract_job_info, args.extract_base_info,
+                                     args.start_job_id, args.end_job_id,
+                                     args.regenerate)
     except Exception as e:
         pg_conn.rollback()
         raise e
