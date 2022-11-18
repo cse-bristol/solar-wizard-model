@@ -1,7 +1,6 @@
 import argparse
 import json
 import logging
-import os
 from os.path import join
 
 import sys
@@ -168,65 +167,6 @@ def run_progress_geojson(pg_conn, os_run_id: int):
 
     return json.dumps({"type": "FeatureCollection",
                        "features": geojson}, default=str)
-
-
-# def extract_run_data(pg_conn, pg_uri: str, os_run_id: Optional[int], gpkg_dir: Optional[str],
-#                              extract_job_info: bool, extract_base_info: bool,
-#                              start_job_id: Optional[int], end_job_id: Optional[int]):
-    # # TODO will doing this in a single query work with such large amount of data?
-    # #  could always convert it into a loop, one query per model job
-    # try:
-    #     os.remove(gpkg)
-    # except OSError:
-    #     pass
-    #
-    # command_to_gpkg(
-    #     pg_conn, pg_uri, gpkg, "panels",
-    #     src_srs=4326, dst_srs=4326,
-    #     command="""
-    #     SELECT pv.*
-    #     FROM
-    #         models.job_queue q
-    #         LEFT JOIN models.open_solar_jobs osj ON osj.job_id = q.job_id
-    #         LEFT JOIN models.solar_pv pv ON pv.job_id = osj.job_id
-    #     WHERE osj.os_run_id = %(os_run_id)s
-    #     """,
-    #     os_run_id=os_run_id)
-    #
-    # # TODO: add EPC data, maybe other things?
-    # command_to_gpkg(
-    #     pg_conn, pg_uri, gpkg, "buildings",
-    #     src_srs=4326, dst_srs=4326,
-    #     command="""
-    #     SELECT
-    #         b.toid,
-    #         b.postcode,
-    #         b.addresses,
-    #         pvb.exclusion_reason,
-    #         pvb.height,
-    #         b.is_residential,
-    #         b.heating_fuel,
-    #         b.heating_system,
-    #         b.has_rooftop_pv,
-    #         b.pv_roof_area_pct,
-    #         b.pv_peak_power,
-    #         b.listed_building_grade,
-    #         b.msoa_2011,
-    #         b.lsoa_2011,
-    #         b.oa_2011,
-    #         b.ward,
-    #         b.ward_name,
-    #         b.la,
-    #         b.la_name,
-    #         b.geom_4326
-    #     FROM
-    #         models.job_queue q
-    #         LEFT JOIN models.open_solar_jobs osj ON osj.job_id = q.job_id
-    #         LEFT JOIN models.pv_building bpv ON bpv.job_id = osj.job_id
-    #         LEFT JOIN aggregates.building b ON b.toid = pvb.toid
-    #     WHERE osj.os_run_id = %(os_run_id)s
-    #     """,
-    #     os_run_id=os_run_id)
 
 
 def _print_table(data: List[dict], sep: str = ","):
