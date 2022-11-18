@@ -75,7 +75,7 @@ model_params = {
 }
 
 
-def create_run(pg_conn, name: str, cell_size: int, cell_ids: Optional[List[int]], run_boundary_27770_json: Optional[str], params: dict) -> int:
+def create_run(pg_conn, name: str, cell_size: int, cell_ids: Optional[List[int]], run_boundary_27700_json: Optional[str], params: dict) -> int:
     with pg_conn.cursor() as cursor:
         os_run_id = sql_command(
             cursor,
@@ -83,12 +83,12 @@ def create_run(pg_conn, name: str, cell_size: int, cell_ids: Optional[List[int]]
             name=Literal(name),
             result_extractor=lambda res: res[0][0])
 
-        if run_boundary_27770_json:
-            run_boundary_27770 = from_geojson(run_boundary_27770_json)
+        if run_boundary_27700_json:
+            run_boundary_27700 = from_geojson(run_boundary_27700_json)
         else:
-            run_boundary_27770 = from_geojson_file(join(paths.RESOURCES_DIR, "gb.geojson"))
+            run_boundary_27700 = from_geojson_file(join(paths.RESOURCES_DIR, "gb.geojson"))
 
-        cells = get_grid_cells(run_boundary_27770, cell_size, cell_size)
+        cells = get_grid_cells(run_boundary_27700, cell_size, cell_size)
         if cell_ids is not None:
             cells = [cells[cid] for cid in cell_ids]
 
