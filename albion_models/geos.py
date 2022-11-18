@@ -4,7 +4,7 @@ from typing import List, Tuple, Union, cast
 import math
 from shapely.geometry.base import BaseGeometry
 from shapely.strtree import STRtree
-from shapely.geometry import Polygon, shape, MultiPolygon
+from shapely.geometry import Polygon, shape, MultiPolygon, mapping
 from shapely import wkt, ops
 
 from albion_models.db_funcs import sql_command
@@ -30,6 +30,14 @@ def from_geojson(geojson):
     if isinstance(geojson, str):
         geojson = json.loads(geojson)
     return shape(geojson)
+
+
+def to_geojson(geom):
+    if isinstance(geom, BaseGeometry):
+        geom_dict = mapping(geom)
+        geojson = json.dumps(geom_dict)
+        return geojson
+    return None
 
 
 def from_geojson_file(geojson_file: str):

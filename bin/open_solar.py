@@ -9,8 +9,8 @@ from psycopg2.sql import Literal
 from typing import List, Optional
 
 from albion_models import paths
-from albion_models.db_funcs import sql_command, sql_script, connect, command_to_gpkg
-from albion_models.geos import get_grid_cells, from_geojson_file, from_geojson
+from albion_models.db_funcs import sql_command, sql_script, connect
+from albion_models.geos import get_grid_cells, from_geojson_file, from_geojson, project_geom, to_geojson
 from albion_models.solar_pv.open_solar import open_solar_export
 
 model_params = {
@@ -180,20 +180,9 @@ def _print_table(data: List[dict], sep: str = ","):
         print(sep.join([str(cell) for cell in row]))
 
 
-def _get_boundary_27700_from_boundary_4326(pg_conn, boundary_4326: str) -> Optional[str]:
+def _get_boundary_27700_from_boundary_4326(boundary_4326: str) -> Optional[str]:
     if boundary_4326:
-        json.loads(boundary_4326)  # Check for valid JSON before sending to DB
-        boundary_27700 = sql_command(pg_conn,
-                                     "SELECT "
-                                     "ST_AsGeoJSON("
-                                     "ST_Transform("
-                                     "ST_Multi("
-                                     "ST_SetSRID("
-                                     "ST_GeomFromGeoJSON(%(geojson_4326)s)"
-                                     ", 4326))"
-                                     ", 27700), 0, 0)",
-                                     result_extractor=lambda res: res[0][0],
-                                     bindings={"geojson_4326": boundary_4326})
+        boundary_27700 = to_geojson(project_geom(from_geojson(boundary_4326), 4326, 27700))
         return boundary_27700
     return None
 
@@ -283,7 +272,7 @@ def open_solar_cli():
             del params['op']
             cell_ids = [int(c.strip()) for c in args.cell_ids.split(",")] if args.cell_ids else None
             create_run(pg_conn, args.name, int(args.cell_size), cell_ids,
-                       _get_boundary_27700_from_boundary_4326(pg_conn, args.run_boundary), params)
+                       _get_boundary_27700_from_boundary_4326(args.run_boundary), params)
         elif args.op == "list":
             _print_table(list_runs(pg_conn))
         elif args.op == "cancel":
