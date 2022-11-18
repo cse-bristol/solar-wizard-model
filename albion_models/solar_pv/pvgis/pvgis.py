@@ -86,7 +86,7 @@ def pvgis(pg_uri: str,
     )
 
     yearly_kwh_raster = pvm.yearly_kwh_raster
-    monthly_wh_rasters = pvm.monthly_kwh_rasters
+    monthly_wh_rasters = pvm.monthly_wh_rasters
     # horizons are CCW from East
     horizon_rasters = pvm.horizons
 

@@ -1,14 +1,14 @@
-import math
-import shlex
-
 import json
 import logging
-import numpy as np
 import os
+import shlex
 import subprocess
 import textwrap
-from osgeo import gdal
 from typing import List, Tuple, Union
+
+import math
+import numpy as np
+from osgeo import gdal
 
 from albion_models.util import esc_double_quotes
 
@@ -105,15 +105,17 @@ def get_srid(filename: str, fallback: int = None) -> int:
 
 
 def rasterize(pg_uri: str, mask_sql: str, mask_file: str, res: float, srid: int):
-    res = subprocess.run(f"""
+    cmd = shlex.split(f"""
         gdal_rasterize
-        -sql '{mask_sql}'
+        -sql "{mask_sql}"
         -burn 1 -tr {res} {res}
         -init 0 -ot Int16
         -of GTiff -a_srs EPSG:{srid}
         "PG:{pg_uri}"
         {mask_file}
-        """.replace("\n", " "), capture_output=True, text=True, shell=True)
+        """)
+    res = subprocess.run(cmd, capture_output=True, text=True)
+
     print(res.stdout)
     print(res.stderr)
     if res.returncode != 0:

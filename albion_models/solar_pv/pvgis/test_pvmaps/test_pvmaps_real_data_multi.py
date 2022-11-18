@@ -79,7 +79,7 @@ class TestPVMapsRealDataMulti(TestPVMaps):
         cached_data_filename: str = "loc_real_pv_sample_locns"
         sampled_locns: List[Tuple[int, int, float, float]]
         if os.path.exists(f"{self.DATA_INPUT_DIR}/{cached_data_filename}.pkl"):
-            with (open(f"{self.DATA_INPUT_DIR}/{cached_data_filename}.pkl", "rb") as pkl_in):
+            with open(f"{self.DATA_INPUT_DIR}/{cached_data_filename}.pkl", "rb") as pkl_in:
                 sampled_locns = pickle.load(pkl_in)
         else:
             # Get available test points from either flat roof mask (if there is one) or full mask - flat roof area is

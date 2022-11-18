@@ -22,23 +22,20 @@ CREATE INDEX IF NOT EXISTS bounds_4326_bounds_idx ON {bounds_4326} using gist (b
 CREATE TABLE IF NOT EXISTS {buildings} AS
 SELECT
     toid,
-    ST_SetSrid(
-        ST_Transform(geom_4326, '+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 '
-                                '+ellps=airy +nadgrids=@OSTN15_NTv2_OSGBtoETRS.gsb +units=m +no_defs'
-    ), 27700)::geometry(polygon,27700) as geom_27700,
+    geom_27700,
     NULL::models.pv_exclusion_reason AS exclusion_reason,
     NULL::real AS height
-FROM mastermap.building b
-LEFT JOIN {bounds_4326} q ON ST_Intersects(b.geom_4326, q.bounds)
+FROM mastermap.building_27700 b
+LEFT JOIN models.job_queue q ON ST_Intersects(b.geom_27700, q.bounds)
 WHERE q.job_id=%(job_id)s
 -- Only take buildings where the centroid is within the bounds
 -- or, if the centroid touches the bounds, the bbox cannot overlap the bounds
 -- above or to the left, so that buildings that overlap multiple tiles for
 -- open solar runs don't get run twice:
-AND ST_Intersects(ST_Centroid(b.geom_4326), q.bounds)
-AND (NOT ST_Touches(ST_Centroid(b.geom_4326), q.bounds)
-     OR b.geom_4326 &<| q.bounds
-     OR b.geom_4326 &>  q.bounds);
+AND ST_Intersects(ST_Centroid(b.geom_27700), q.bounds)
+AND (NOT ST_Touches(ST_Centroid(b.geom_27700), q.bounds)
+     OR b.geom_27700 &<| q.bounds
+     OR b.geom_27700 &>  q.bounds);
 
 CREATE UNIQUE INDEX IF NOT EXISTS buildings_toid_idx ON {buildings} (toid);
 CREATE INDEX IF NOT EXISTS buildings_geom_27700_idx ON {buildings} USING GIST (geom_27700);

@@ -2,9 +2,10 @@ import json
 from typing import List, Tuple, Union, cast
 
 import math
+from shapely.geometry.base import BaseGeometry
 from shapely.strtree import STRtree
 from shapely.geometry import Polygon, shape, MultiPolygon
-from shapely import wkt
+from shapely import wkt, ops
 
 from albion_models.db_funcs import sql_command
 
@@ -108,3 +109,27 @@ def largest_polygon(multi: Union[MultiPolygon, Polygon]):
 def azimuth(p1: Tuple[float, float], p2: Tuple[float, float]) -> float:
     angle = math.atan2(p2[0] - p1[0], p2[1] - p1[1])
     return math.degrees(angle) if angle > 0 else math.degrees(angle) + 180
+
+
+def project(x: float, y: float, src_srs: int, dst_srs: int) -> Tuple[float, float]:
+    from osgeo import ogr
+    from osgeo import osr
+
+    in_sr = osr.SpatialReference()
+    in_sr.ImportFromEPSG(src_srs)
+    # Force gdal to use x,y ordering for coords:
+    # https://gdal.org/tutorials/osr_api_tut.html#crs-and-axis-order
+    in_sr.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+    out_sr = osr.SpatialReference()
+    out_sr.ImportFromEPSG(dst_srs)
+    out_sr.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+
+    Point = ogr.Geometry(ogr.wkbPoint)
+    Point.AddPoint(x=float(x), y=float(y))
+    Point.AssignSpatialReference(in_sr)
+    Point.TransformTo(out_sr)
+    return Point.GetX(), Point.GetY()
+
+
+def project_geom(geom: BaseGeometry, src_srs: int, dst_srs: int):
+    return ops.transform(lambda x, y: project(x, y, src_srs, dst_srs), geom)
