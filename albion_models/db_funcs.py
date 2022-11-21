@@ -66,13 +66,17 @@ def command_to_gpkg(pg_conn,
                     pg_uri: str,
                     filename: str,
                     table_name: str,
-                    command: str,
+                    command: Union[str, SQL],
                     src_srs: int,
                     dst_srs: int,
+                    overwrite: bool = False,
+                    append: bool = False,
                     **kwargs) -> Optional[str]:
     logging.info(f"Loading {table_name} into {filename}")
-    path = join(os.environ.get("GPKG_DIR"), filename)
+    path = join(os.environ.get("GPKG_DIR", ""), filename)  # If env var is not set just use filename
     exists = os.path.exists(path)
+    if overwrite and append:
+        overwrite = False
 
     if len(kwargs) != 0:
         if isinstance(command, str):
@@ -87,11 +91,23 @@ def command_to_gpkg(pg_conn,
         -gt 65536
         -nln {table_name}
         {"-update" if exists else ""}
+        {"-overwrite" if overwrite else ""}
+        {"-append" if append else ""}
         -s_srs EPSG:{src_srs}
         -t_srs EPSG:{dst_srs}
         "PG:{process_pg_uri(pg_uri)}"
         """),
         capture_output=True, text=True)
+
+    # TODO consider:
+    # Re message from Neil Nov 22: I wonder if some of the performance hints mentioned here:
+    # https://gdal.org/drivers/vector/gpkg.html#performance-hints might be worth trying? They sound like they wouldn't
+    # be compatible with concurrent writes but it sounds like that hasn't been working anyway. We saw quite good
+    # performance increases in HNZP when writing geopackages with the following:
+    # (.setJournalMode SQLiteConfig$JournalMode/WAL)
+    # (.setPragma SQLiteConfig$Pragma/SYNCHRONOUS "OFF")
+    # (.setTransactionMode SQLiteConfig$TransactionMode/DEFERRED)
+    # (.setReadUncommited true)
 
     if res.stdout:
         logging.info(res.stdout)

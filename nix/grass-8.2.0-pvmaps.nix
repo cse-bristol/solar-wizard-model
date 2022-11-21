@@ -28,8 +28,10 @@ stdenv.mkDerivation rec {
         libLAS zstd wrapGAppsHook cairo pdal wxGTK31 glibcLocales
         (with python3Packages; [ python python-dateutil numpy wxPython_4_1 ])
   ];
-  
+
+  # See https://grasswiki.osgeo.org/wiki/Compile_and_Install for configure flag info
   configureFlags = [
+    # "--enable-debug"  # Include to build with debugging symbol info
     "--with-proj-share=${proj_4_9_3}/share/proj"
     "--with-proj-includes=${proj_4_9_3.dev}/include"
     "--with-proj-libs=${proj_4_9_3}/lib"

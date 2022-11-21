@@ -18,6 +18,9 @@ BOUNDS_TABLE = 'bounds_4326'
 BUILDINGS_TABLE = 'buildings'
 """All the buildings inside the job bounds, transformed to 27700"""
 
+SIMPLIFIED_BUILDING_GEOM_TABLE = 'simple_building_geoms'
+"""Building geometries simplified for export to open_solar"""
+
 
 def schema(job_id: int) -> str:
     """Get the solar PV schema given a job_id."""

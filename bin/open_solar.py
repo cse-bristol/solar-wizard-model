@@ -1,7 +1,11 @@
+"""
+!!! Use via the "open_solar" script (in same dir as this file)!!!
+- this will use the "open_solar.nix" script to setup a suitable nix shell
+"""
+
 import argparse
 import json
 import logging
-import os
 from os.path import join
 
 import sys
@@ -10,8 +14,9 @@ from psycopg2.sql import Literal
 from typing import List, Optional
 
 from albion_models import paths
-from albion_models.db_funcs import sql_command, sql_script, connect, command_to_gpkg
-from albion_models.geos import get_grid_cells, from_geojson_file
+from albion_models.db_funcs import sql_command, sql_script, connect
+from albion_models.geos import get_grid_cells, from_geojson_file, from_geojson, project_geom, to_geojson
+from albion_models.solar_pv.open_solar import open_solar_export
 
 model_params = {
     "horizon_search_radius": {
@@ -75,7 +80,7 @@ model_params = {
 }
 
 
-def create_run(pg_conn, name: str, cell_size: int, cell_ids: Optional[List[int]], params: dict) -> int:
+def create_run(pg_conn, name: str, cell_size: int, cell_ids: Optional[List[int]], run_boundary_27700_json: Optional[str], params: dict) -> int:
     with pg_conn.cursor() as cursor:
         os_run_id = sql_command(
             cursor,
@@ -83,7 +88,12 @@ def create_run(pg_conn, name: str, cell_size: int, cell_ids: Optional[List[int]]
             name=Literal(name),
             result_extractor=lambda res: res[0][0])
 
-        cells = get_grid_cells(from_geojson_file(join(paths.RESOURCES_DIR, "gb.geojson")), cell_size, cell_size)
+        if run_boundary_27700_json:
+            run_boundary_27700 = from_geojson(run_boundary_27700_json)
+        else:
+            run_boundary_27700 = from_geojson_file(join(paths.RESOURCES_DIR, "gb.geojson"))
+
+        cells = get_grid_cells(run_boundary_27700, cell_size, cell_size)
         if cell_ids is not None:
             cells = [cells[cid] for cid in cell_ids]
 
@@ -164,63 +174,6 @@ def run_progress_geojson(pg_conn, os_run_id: int):
                        "features": geojson}, default=str)
 
 
-def extract_run_data(pg_conn, pg_uri: str, os_run_id: int, gpkg: str):
-    # TODO will doing this in a single query work with such large amount of data?
-    #  could always convert it into a loop, one query per model job
-    try:
-        os.remove(gpkg)
-    except OSError:
-        pass
-
-    command_to_gpkg(
-        pg_conn, pg_uri, gpkg, "panels",
-        src_srs=4326, dst_srs=4326,
-        command="""
-        SELECT pv.*
-        FROM
-            models.job_queue q
-            LEFT JOIN models.open_solar_jobs osj ON osj.job_id = q.job_id
-            LEFT JOIN models.solar_pv pv ON pv.job_id = osj.job_id
-        WHERE osj.os_run_id = %(os_run_id)s
-        """,
-        os_run_id=os_run_id)
-
-    # TODO: add EPC data, maybe other things?
-    command_to_gpkg(
-        pg_conn, pg_uri, gpkg, "buildings",
-        src_srs=4326, dst_srs=4326,
-        command="""
-        SELECT 
-            b.toid, 
-            b.postcode,
-            b.addresses,
-            pvb.exclusion_reason,
-            pvb.height,
-            b.is_residential,
-            b.heating_fuel,
-            b.heating_system,
-            b.has_rooftop_pv,
-            b.pv_roof_area_pct,
-            b.pv_peak_power,
-            b.listed_building_grade,
-            b.msoa_2011,  
-            b.lsoa_2011,  
-            b.oa_2011, 
-            b.ward, 
-            b.ward_name,
-            b.la,
-            b.la_name,
-            b.geom_4326
-        FROM
-            models.job_queue q
-            LEFT JOIN models.open_solar_jobs osj ON osj.job_id = q.job_id
-            LEFT JOIN models.pv_building bpv ON bpv.job_id = osj.job_id
-            LEFT JOIN aggregates.building b ON b.toid = pvb.toid
-        WHERE osj.os_run_id = %(os_run_id)s
-        """,
-        os_run_id=os_run_id)
-
-
 def _print_table(data: List[dict], sep: str = ","):
     if len(data) == 0:
         print("No data")
@@ -230,6 +183,13 @@ def _print_table(data: List[dict], sep: str = ","):
     print(sep.join(header))
     for row in data:
         print(sep.join([str(cell) for cell in row]))
+
+
+def _get_boundary_27700_from_boundary_4326(boundary_4326: str) -> Optional[str]:
+    if boundary_4326:
+        boundary_27700 = to_geojson(project_geom(from_geojson(boundary_4326), 4326, 27700))
+        return boundary_27700
+    return None
 
 
 def parse_cli_args():
@@ -255,8 +215,11 @@ def parse_cli_args():
                                help="Edge length of individual job bound squares in metres. (default: %(default)s)")
     create_parser.add_argument('--cell_ids',
                                help="Comma-separated list of cell ids (numbers). "
-                                    "Only create these cells, With 0 being SW-most cell"
+                                    "Only create these cells, With 0 being SW-most cell "
                                     "and counting in rows East and then North")
+    create_parser.add_argument('--run_boundary',
+                               help="GeoJSON as used in Albion job boundary. Restrict the run area using this"
+                                    "instead of the GB boundary.")
 
     for param, data in model_params.items():
         create_parser.add_argument(f"--{param}", **data)
@@ -281,9 +244,17 @@ def parse_cli_args():
     extract_parser = subparsers.add_parser('extract',
                                            help="Extract Open Solar job outputs to GPKG",
                                            description="Extract Open Solar job outputs to GPKG")
-    extract_parser.add_argument('id', help="Open Solar run ID")
-    extract_parser.add_argument('--gpkg', help="Geopackage output file location")
+    extract_parser.add_argument('id', help="Open Solar run ID", nargs="?")
+    extract_parser.add_argument('--gpkg_dir', help="Geopackage output file location (dir / folder)")
     extract_parser.add_argument("--pg_uri", **pg_uri_arg)
+    extract_parser.add_argument("--extract_job_info", help="Extract job information (Open Solar run ID needed)",
+                                action='store_false', default=False)
+    extract_parser.add_argument("--extract_base_info", help="Extract base information (e.g. LSOAs, LAs)",
+                                action='store_true', default=False)
+    extract_parser.add_argument("--start_job_id", help="Minimum job id to export (inclusive)")
+    extract_parser.add_argument("--end_job_id", help="Maximum job id to export (inclusive)")
+    extract_parser.add_argument("--regenerate", help="Create outputs even if they exist already",
+                                action='store_true', default=False)
 
     return parser.parse_args()
 
@@ -301,10 +272,12 @@ def open_solar_cli():
             del params['name']
             del params['cell_size']
             del params['cell_ids']
+            del params['run_boundary']
             del params['pg_uri']
             del params['op']
             cell_ids = [int(c.strip()) for c in args.cell_ids.split(",")] if args.cell_ids else None
-            create_run(pg_conn, args.name, args.cell_size, cell_ids, params)
+            create_run(pg_conn, args.name, int(args.cell_size), cell_ids,
+                       _get_boundary_27700_from_boundary_4326(args.run_boundary), params)
         elif args.op == "list":
             _print_table(list_runs(pg_conn))
         elif args.op == "cancel":
@@ -313,8 +286,10 @@ def open_solar_cli():
             geojson = run_progress_geojson(pg_conn, args.id)
             print(geojson)
         elif args.op == "extract":
-            extract_run_data(pg_conn, args.pg_uri, args.id, args.gpkg)
-
+            open_solar_export.export(args.pg_uri, args.id, args.gpkg_dir,
+                                     args.extract_job_info, args.extract_base_info,
+                                     args.start_job_id, args.end_job_id,
+                                     args.regenerate)
     except Exception as e:
         pg_conn.rollback()
         raise e

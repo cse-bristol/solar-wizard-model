@@ -72,7 +72,8 @@ class PVMaps:
                  flat_roof_degrees: float,
                  flat_roof_degrees_threshold: float,
                  panel_type: str,
-                 num_pv_calcs_per_year: Optional[int] = None):
+                 num_pv_calcs_per_year: Optional[int] = None,
+                 job_id: Optional[int] = None):
         """
         Create pv maps object with settings shared by all elevation / mask raster runs
         :param grass_dbase_dir: Dir where grass database is to be created or has been created
@@ -90,6 +91,7 @@ class PVMaps:
         :param panel_type: Use constants CSI & CDTE
         :param num_pv_calcs_per_year: None to use monthly PV calcs, or number to do per year, divides year into
         approx equal buckets of days
+        :param job_id optional id used where dirs etc need to be created for a job, uses process id and time if not set
         """
         self._executor: Optional[ThreadPoolExecutor] = None
         self._gisrc_filename: Optional[str] = None
@@ -156,13 +158,18 @@ class PVMaps:
                 raise ValueError(f"Num PV calcs per year must be between 1 and 365")
             else:
                 self._pv_time_steps = self._calc_pv_time_steps(num_pv_calcs_per_year)
+
+        if job_id:
+            self.uid = f"job_{job_id}"
+        else:
+            self.uid = f"{os.getpid()}.{int(time.time())}"
         ###
 
         self._g_location: str = "grassdata"
 
         self._g_temp_mapset: str = ""
 
-        self._gisrc_filename = join(tempfile.gettempdir(), f"pvmaps.{os.getpid()}.rc")
+        self._gisrc_filename = join(tempfile.gettempdir(), f"pvmaps.{self.uid}.rc")
 
         self.solar_decl: List[float] = self._calc_solar_declinations()
 
@@ -384,10 +391,15 @@ class PVMaps:
         if exc_str:
             raise Exception(f"Exception(s) raised\n{exc_str}")
 
-    def _run_cmd(self, cmd_line: str, exp_returncode: int = 0) -> None:
-        args: List[str] = shlex.split(cmd_line)
+    def _run_cmd(self, cmd_line: str, exp_returncode: int = 0) -> str:
+        """ Run command, check outputs.
+        :param cmd_line: Command to run
+        :param exp_returncode: Raises exception if return is not this value
+        :return: process output text with control codes removed and prefixed with the pid
+        """
+        arguments: List[str] = shlex.split(cmd_line)
 
-        process = Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=self._grass_env)
+        process = Popen(arguments, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=self._grass_env)
         process_output: str = ""
         with process.stdout:
             line_s = process.stdout.read().decode("utf-8").replace("\n", " ").strip()
@@ -401,6 +413,8 @@ class PVMaps:
         if rtn_code != exp_returncode:
             logging.error(process_output)
             raise Exception(f"Command {cmd_line} returned error code {rtn_code}")
+
+        return process_output
 
     def _init_grass_db_pvmaps_data(self):
         location = join(self._g_dbase, self._g_location)
@@ -430,7 +444,7 @@ class PVMaps:
     def _create_temp_mapset(self):
         """Set & create mapset - used for temp rasters etc"""
         # do equivalent of e.g "g.mapset -c mapset=nsd_4326"
-        self._g_temp_mapset = f"pvmaps.{os.getpid()}"
+        self._g_temp_mapset = f"pvmaps.{self.uid}"
         logging.info(f"_create_temp_mapset {self._g_temp_mapset}")
 
         # Create temp mapset
@@ -498,7 +512,14 @@ class PVMaps:
     def _set_region_to_and_zoom(self, raster_name: str):
         """Zooms to the non-null central rectangle part of raster_name"""
         logging.info("_set_region_to_and_zoom")
-        self._run_cmd(f"g.region raster={raster_name} zoom={raster_name}")
+        g_region_info: str = self._run_cmd(f"g.region raster={raster_name} zoom={raster_name} -g")
+
+        # Enforce minimum raster size of 10 by 10
+        for info in g_region_info.split(" "):
+            if "=" in info:     # Filter the pid value
+                k, v = info.split("=")
+                if k in ("rows", "cols") and int(v) < 10:
+                    raise ValueError(f"Minimum raster size supported by Grass is 10 by 10 (number of {k} is {v})")
 
     def _horizon_directions(self) -> List[Tuple[int]]:
         return [(a,) for a in range(0, 360, self._horizon_step)]
@@ -770,7 +791,7 @@ if __name__ == '__main__':
             args.flat_roof_degrees_threshold,
             args.panel_type,
             args.num_pv_calcs_per_year)
-        pvmaps.create_pvmap(args.elevation_filename, args.mask_filename, None)
+        pvmaps.create_pvmap(args.elevation_filename, args.mask_filename, None, None)
     except Exception as e:
         logging.error(e)
         sys.exit(1)
