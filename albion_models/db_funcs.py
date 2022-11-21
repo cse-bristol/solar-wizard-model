@@ -99,6 +99,16 @@ def command_to_gpkg(pg_conn,
         """),
         capture_output=True, text=True)
 
+    # TODO consider:
+    # Re message from Neil Nov 22: I wonder if some of the performance hints mentioned here:
+    # https://gdal.org/drivers/vector/gpkg.html#performance-hints might be worth trying? They sound like they wouldn't
+    # be compatible with concurrent writes but it sounds like that hasn't been working anyway. We saw quite good
+    # performance increases in HNZP when writing geopackages with the following:
+    # (.setJournalMode SQLiteConfig$JournalMode/WAL)
+    # (.setPragma SQLiteConfig$Pragma/SYNCHRONOUS "OFF")
+    # (.setTransactionMode SQLiteConfig$TransactionMode/DEFERRED)
+    # (.setReadUncommited true)
+
     if res.stdout:
         logging.info(res.stdout)
     if res.returncode != 0:

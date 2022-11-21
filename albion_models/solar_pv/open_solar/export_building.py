@@ -38,7 +38,7 @@ def export(pg_conn, pg_uri: str, gpkg_fname: str, os_run_id: int, job_id: int, r
             overwrite=True,
             command=
             "WITH cte AS (SELECT toid, SUM(kwp) AS kwp, SUM(kwh_year) AS kwh "
-            " FROM models.solar_pv WHERE job_id = {job_id1} GROUP BY toid) "
+            " FROM models.solar_pv WHERE job_id = {job_id} GROUP BY toid) "
             "SELECT "
             " {os_run_id} AS run_id, "
             " mp.job_id AS job_id, "
@@ -65,11 +65,10 @@ def export(pg_conn, pg_uri: str, gpkg_fname: str, os_run_id: int, job_id: int, r
             "JOIN models.pv_building mp USING (toid) "
             "JOIN cte USING (toid) "
             "JOIN {temp_table} tt ON (tt.id = toid) "
-            "WHERE mp.job_id = {job_id2} ",
-            job_id1=Literal(job_id),
+            "WHERE mp.job_id = {job_id} ",
+            job_id=Literal(job_id),
             os_run_id=Literal(os_run_id),
             temp_table=Identifier(tables.schema(job_id), tables.SIMPLIFIED_BUILDING_GEOM_TABLE),
-            job_id2=Literal(job_id),
         ) is not None:
             raise RuntimeError(f"Error running ogr2ogr")
     else:

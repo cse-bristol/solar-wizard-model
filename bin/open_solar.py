@@ -1,3 +1,8 @@
+"""
+!!! Use via the "open_solar" script (in same dir as this file)!!!
+- this will use the "open_solar.nix" script to setup a suitable nix shell
+"""
+
 import argparse
 import json
 import logging

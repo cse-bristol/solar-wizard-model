@@ -1,6 +1,12 @@
+# For use with bin/open_solar.py via bin/open_solar
+
 let
   pkgs = (import (fetchTarball "https://github.com/NixOS/nixpkgs/archive/22.05.tar.gz") {});
-  grass_pvmaps = pkgs.callPackage ./nix/grass-8.2.0-pvmaps.nix {};
+  r_with_packages = pkgs.rWrapper.override {
+    packages = with pkgs.rPackages; [
+      rmapshaper
+    ];
+  };
 in
 pkgs.stdenv.mkDerivation rec {
   name = "albion-models";
@@ -11,14 +17,11 @@ pkgs.stdenv.mkDerivation rec {
       pps.psycopg2
       pps.requests
       pps.gdal
-      pps.numpy
-      pps.scikitlearn
-      pps.scikitimage
       pps.shapely
     ]))
+    pkgs.tippecanoe
     pkgs.postgis
-    pkgs.py-spy  # for profiling
-    grass_pvmaps
+    r_with_packages
   ];
 
   env = pkgs.buildEnv {

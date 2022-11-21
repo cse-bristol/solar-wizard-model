@@ -7,7 +7,7 @@ from typing import List, Tuple, Optional
 
 from psycopg2.extras import DictCursor
 
-from albion_models.db_funcs import sql_command, connect
+from albion_models.db_funcs import sql_command, connection
 from albion_models.solar_pv.open_solar import export_panelarray, export_building, export_lsoa, export_la, \
     export_conservation_area
 
@@ -62,7 +62,7 @@ def _export_job(pg_uri: str, gpkg_dir: str, os_run_id: int, job_id: int, regener
     """
     logging.info(f"Exporting job {job_id}")
     gpkg_filename: str = join(gpkg_dir, f"{_JOB_GPKG_STEM}.{job_id}{_GPKG_FNAME_EXTN}")
-    with connect(pg_uri, cursor_factory=DictCursor) as pg_conn:  # Use a separate connection per call / thread
+    with connection(pg_uri, cursor_factory=DictCursor) as pg_conn:  # Use a separate connection per call / thread
         export_panelarray.export(pg_conn, pg_uri, gpkg_filename, os_run_id, job_id, regenerate)
         export_building.export(pg_conn, pg_uri, gpkg_filename, os_run_id, job_id, regenerate)
 
@@ -72,7 +72,7 @@ def _export_base_lsoa(pg_uri: str, gpkg_dir: str, regenerate: bool):
     and so that extracts can be run concurrently """
     logging.info(f"Exporting base LSOA info")
     gpkg_filename: str = join(gpkg_dir, f"{_BASE_GPKG_STEM}.lsoa{_GPKG_FNAME_EXTN}")
-    with connect(pg_uri, cursor_factory=DictCursor) as pg_conn:  # Use a separate connection per call / thread
+    with connection(pg_uri, cursor_factory=DictCursor) as pg_conn:  # Use a separate connection per call / thread
         export_lsoa.export(pg_conn, pg_uri, gpkg_filename, regenerate)
 
 
@@ -81,7 +81,7 @@ def _export_base_la(pg_uri: str, gpkg_dir: str, regenerate: bool):
     and so that extracts can be run concurrently """
     logging.info(f"Exporting base LA info")
     gpkg_filename: str = join(gpkg_dir, f"{_BASE_GPKG_STEM}.LA{_GPKG_FNAME_EXTN}")
-    with connect(pg_uri, cursor_factory=DictCursor) as pg_conn:  # Use a separate connection per call / thread
+    with connection(pg_uri, cursor_factory=DictCursor) as pg_conn:  # Use a separate connection per call / thread
         export_la.export(pg_conn, pg_uri, gpkg_filename, regenerate)
 
 
@@ -90,7 +90,7 @@ def _export_base_cons_area(pg_uri: str, gpkg_dir: str, regenerate: bool):
     and so that extracts can be run concurrently """
     logging.info(f"Exporting base conservation area info")
     gpkg_filename: str = join(gpkg_dir, f"{_BASE_GPKG_STEM}.conservation-areas{_GPKG_FNAME_EXTN}")
-    with connect(pg_uri, cursor_factory=DictCursor) as pg_conn:  # Use a separate connection per call / thread
+    with connection(pg_uri, cursor_factory=DictCursor) as pg_conn:  # Use a separate connection per call / thread
         export_conservation_area.export(pg_conn, pg_uri, gpkg_filename, regenerate)
 
 
@@ -104,11 +104,12 @@ def export(pg_uri: str, os_run_id: int, gpkg_dir: str,
 
     if extract_job_info and os_run_id is None:
         extract_job_info = False
+        logging.warning("No run id specified so not exporting job information")
 
     if gpkg_dir is None:
         gpkg_dir = "."
 
-    with connect(pg_uri, cursor_factory=DictCursor) as pg_conn:
+    with connection(pg_uri, cursor_factory=DictCursor) as pg_conn:
         executor = ThreadPoolExecutor(max_workers=os.cpu_count())
         futures: List[Tuple[Optional[int], Future]] = []
 
