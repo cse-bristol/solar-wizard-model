@@ -37,11 +37,6 @@ def pvgis(pg_uri: str,
           mask_raster: str,
           flat_roof_aspect_raster: Optional[str],
           debug_mode: bool):
-    """
-    TODO:
-     * usual check to see if stage of model has already happened
-     * 14% loss param
-    """
 
     if pv_tech == "crystSi":
         panel_type = pvmaps.CSI
@@ -243,6 +238,9 @@ def _write_results_to_db(pg_conn,
         panel_kwh=Identifier(schema, "panel_kwh"),
         pixels_in_panels=Identifier(schema, "pixels_in_panels"),
         panel_polygons=Identifier(schema, tables.PANEL_POLYGON_TABLE),
+        pixels_in_roofs=Identifier(schema, "pixels_in_roofs"),
+        roof_horizons=Identifier(schema, "roof_horizons"),
+        roof_polygons=Identifier(schema, tables.ROOF_POLYGON_TABLE),
         buildings=Identifier(schema, tables.BUILDINGS_TABLE),
         job_view=Identifier(f"solar_pv_job_{job_id}"),
         res=Literal(resolution_metres),

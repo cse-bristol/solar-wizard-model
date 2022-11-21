@@ -1,11 +1,10 @@
-from os.path import join
-
 import logging
 import os
+import shutil
+from os.path import join
 from typing import Optional
 
 import psycopg2.extras
-import shutil
 from psycopg2.sql import Identifier
 
 import albion_models.solar_pv.tables as tables
@@ -14,7 +13,8 @@ from albion_models.solar_pv.outdated_lidar.outdated_lidar_check import check_lid
 from albion_models.solar_pv.panels.panels import place_panels
 from albion_models.solar_pv.pvgis.pvgis import pvgis
 from albion_models.solar_pv.ransac.run_ransac import run_ransac
-from albion_models.solar_pv.rasters import generate_rasters, generate_flat_roof_aspect_raster_4326, \
+from albion_models.solar_pv.rasters import generate_rasters, \
+    generate_flat_roof_aspect_raster_4326, \
     create_elevation_override_raster
 
 
@@ -67,11 +67,11 @@ def model_solar_pv(pg_uri: str,
     check_lidar(pg_uri, job_id, resolution_metres=res)
 
     logging.info("Getting building height elevation override raster...")
-    elevation_override_filename: Optional[str] = \
-        create_elevation_override_raster(pg_uri=pg_uri,
-                                         job_id=job_id,
-                                         solar_dir=solar_dir,
-                                         elevation_raster_4326_filename=elevation_raster)
+    elevation_override_filename: Optional[str] = create_elevation_override_raster(
+        pg_uri=pg_uri,
+        job_id=job_id,
+        solar_dir=solar_dir,
+        elevation_raster_4326_filename=elevation_raster)
 
     logging.info("Detecting roof planes...")
     run_ransac(pg_uri, job_id,
@@ -94,9 +94,10 @@ def model_solar_pv(pg_uri: str,
         panel_spacing_m=panel_spacing_m)
 
     logging.info("Generating flat roof raster")
-    flat_roof_aspect_raster_4326: Optional[str] = generate_flat_roof_aspect_raster_4326(pg_uri=pg_uri,
-                                                                                        job_id=job_id,
-                                                                                        solar_dir=solar_dir)
+    flat_roof_aspect_raster_4326: Optional[str] = generate_flat_roof_aspect_raster_4326(
+        pg_uri=pg_uri,
+        job_id=job_id,
+        solar_dir=solar_dir)
 
     logging.info("Running PV-GIS...")
     pvgis(pg_uri=pg_uri,
@@ -131,7 +132,8 @@ def _init_schema(pg_uri: str, job_id: int):
             schema=Identifier(tables.schema(job_id)),
             bounds_4326=Identifier(tables.schema(job_id), tables.BOUNDS_TABLE),
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
-            roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE)
+            roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE),
+            panel_polygons=Identifier(tables.schema(job_id), tables.PANEL_POLYGON_TABLE),
         )
     finally:
         pg_conn.close()
