@@ -1,5 +1,6 @@
 import logging
 import os
+from typing import cast
 
 from psycopg2.sql import Identifier, SQL
 
@@ -39,7 +40,7 @@ def export(pg_conn, pg_uri: str, gpkg_fname: str, regenerate: bool):
             pg_conn, pg_uri, gpkg_fname, _CONS_AREAS,
             src_srs=4326, dst_srs=4326,
             overwrite=True,
-            command=_EXPORT_SELECT.as_string(pg_conn),
+            command=cast(str, _EXPORT_SELECT.as_string(pg_conn)),
         ) is not None:
             raise RuntimeError(f"Error running ogr2ogr")
     else:
