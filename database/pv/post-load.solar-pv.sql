@@ -13,6 +13,8 @@ ALTER TABLE {pixel_kwh} ADD COLUMN pixel geometry(Polygon, 27700);
 UPDATE {pixel_kwh} p SET pixel = ST_Buffer(p.en, {res} / 2.0, 'endcap=square');
 CREATE INDEX ON {pixel_kwh} USING GIST (pixel);
 
+DELETE FROM {pixel_kwh} WHERE kwh IS NULL;
+
 COMMIT;
 START TRANSACTION;
 
