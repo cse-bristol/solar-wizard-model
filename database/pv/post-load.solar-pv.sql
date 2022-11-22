@@ -98,7 +98,8 @@ SELECT
     pv.y
 FROM
     {roof_polygons} rp
-    LEFT JOIN {pixel_kwh} pv ON ST_Intersects(pixel, rp.roof_geom_27700);
+    LEFT JOIN {pixel_kwh} pv ON ST_Intersects(pixel, rp.roof_geom_27700)
+WHERE rp.usable;
 
 CREATE INDEX ON {pixels_in_roofs} (roof_plane_id);
 CREATE INDEX ON {pixels_in_roofs} (x, y);
@@ -138,7 +139,7 @@ SELECT
                    '+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 '
                    '+y_0=-100000 +datum=OSGB36 +nadgrids=@OSTN15_NTv2_OSGBtoETRS.gsb +units=m +no_defs',
                    4326
-    ), 4326)::geometry(polygon, 4326) AS panel_geom_4326, -- TODO 3857?
+    ), 4326)::geometry(polygon, 4326) AS panel_geom_4326,
     kwh.kwh_m01,
     kwh.kwh_m02,
     kwh.kwh_m03,
@@ -174,7 +175,8 @@ SELECT
     rp.intercept,
     rp.is_flat
 FROM {roof_polygons} rp
-LEFT JOIN {roof_horizons} rh ON rp.roof_plane_id = rh.roof_plane_id;
+LEFT JOIN {roof_horizons} rh ON rp.roof_plane_id = rh.roof_plane_id
+WHERE rp.usable;
 
 DROP TABLE {panel_kwh};
 DROP TABLE {pixel_kwh};
