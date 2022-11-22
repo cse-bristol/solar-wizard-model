@@ -1,10 +1,10 @@
 import json
-from typing import List, Tuple, Union
+from typing import List, Tuple, Union, cast
 
 import math
 from shapely.geometry.base import BaseGeometry
 from shapely.strtree import STRtree
-from shapely.geometry import Polygon, shape, MultiPolygon
+from shapely.geometry import Polygon, shape, MultiPolygon, mapping
 from shapely import wkt, ops
 
 from albion_models.db_funcs import sql_command
@@ -30,6 +30,14 @@ def from_geojson(geojson):
     if isinstance(geojson, str):
         geojson = json.loads(geojson)
     return shape(geojson)
+
+
+def to_geojson(geom):
+    if isinstance(geom, BaseGeometry):
+        geom_dict = mapping(geom)
+        geojson = json.dumps(geom_dict)
+        return geojson
+    return None
 
 
 def from_geojson_file(geojson_file: str):
@@ -84,7 +92,7 @@ def get_grid_cells(poly, cell_w, cell_h, spacing_w=0, spacing_h=0, grid_start: s
         for y in frange(ymin, ymax, cell_h + spacing_h):
             cells.append(rect(x, y, cell_w, cell_h))
     rtree = STRtree(cells)
-    return [p for p in rtree.query(poly) if p.intersects(poly)]
+    return [cast(Polygon, p) for p in rtree.query(poly) if p.intersects(poly)]
 
 
 def get_grid_refs(poly, cell_size: int) -> List[str]:

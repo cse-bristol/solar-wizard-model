@@ -1,4 +1,5 @@
-#!/usr/bin/env bash
+#! /usr/bin/env nix-shell
+#! nix-shell --pure ../open_solar.nix -i bash
 
 cd "$(dirname "$0")" || exit 1
 
