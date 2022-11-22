@@ -17,7 +17,7 @@ def export(pg_conn, pg_uri: str, gpkg_fname: str, regenerate: bool):
             "SELECT "
             " la_code, "
             " name, "
-            " geom_4326, "
+            " geom_4326 AS geom, "
             " ST_AsGeoJSON(geom_4326) as geom_str "
             "FROM boundaryline.local_authority"
         ) is not None:
