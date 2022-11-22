@@ -12,7 +12,7 @@ from albion_models.db_funcs import sql_command
 
 _MAPSHAPER_R: str = join(os.path.realpath(os.path.dirname(__file__)), "mapshaper.R")
 
-_GET_GEOJSON_SQL: SQL = SQL("""
+_GET_GEOJSON_SQL: str = """
 SELECT json_build_object( 
 'type', 'FeatureCollection', 
 'features', json_agg( 
@@ -22,7 +22,7 @@ json_build_object(
  'geometry', ST_AsGeoJSON({geom_col})::jsonb 
 )::json) 
 )::text {from_sql}
-""".replace("\n", " "))
+""".replace("\n", " ")
 
 
 def ms_simplify(pg_conn,
@@ -45,11 +45,13 @@ def ms_simplify(pg_conn,
 
 
 def _get_geojson(pg_conn, from_sql: str, id_sql: str, geom_col: Identifier, bindings: dict = None):
-    select = _GET_GEOJSON_SQL.format(id_sql=SQL(id_sql), from_sql=SQL(from_sql), geom_col=geom_col)
     geojson = sql_command(pg_conn,
-                          select,
+                          _GET_GEOJSON_SQL,
                           bindings=bindings,
-                          result_extractor=lambda res: res[0][0]
+                          result_extractor=lambda res: res[0][0],
+                          id_sql=SQL(id_sql),
+                          from_sql=SQL(from_sql),
+                          geom_col=geom_col
                           )
     return geojson
 

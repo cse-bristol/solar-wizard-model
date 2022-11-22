@@ -11,7 +11,7 @@ _CONS_AREAS = "conservation_areas"
 
 _UID_SQL = " SUBSTR(country::text, 1, 1) || ':' || uid "
 
-_EXPORT_SELECT: SQL = SQL("""
+_EXPORT_SELECT: str = """
 SELECT 
  {_UID_SQL} AS uid, 
  c.name, 
@@ -24,7 +24,7 @@ SELECT
  s.geojson as geom_str_simplified 
 FROM conservation_areas.conservation_areas c 
 JOIN conservation_areas.simple_conservation_areas s ON (s.id = {_UID_SQL})
-""".replace("\n", " ")).format(_UID_SQL=SQL(_UID_SQL))
+""".replace("\n", " ")
 
 
 def export(pg_conn, pg_uri: str, gpkg_fname: str, regenerate: bool):
@@ -40,7 +40,8 @@ def export(pg_conn, pg_uri: str, gpkg_fname: str, regenerate: bool):
             pg_conn, pg_uri, gpkg_fname, _CONS_AREAS,
             src_srs=4326, dst_srs=4326,
             overwrite=True,
-            command=cast(str, _EXPORT_SELECT.as_string(pg_conn)),
+            command=_EXPORT_SELECT,
+            _UID_SQL=SQL(_UID_SQL)
         ) is not None:
             raise RuntimeError(f"Error running ogr2ogr")
     else:
