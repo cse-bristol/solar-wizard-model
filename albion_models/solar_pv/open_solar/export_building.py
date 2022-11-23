@@ -28,7 +28,7 @@ def export(pg_conn, pg_uri: str, gpkg_fname: str, os_run_id: int, job_id: int, r
             "FROM models.pv_building mpb "
             "JOIN mastermap.building mb USING (toid) "
             "WHERE mpb.job_id = %(job_id)s ",
-            Identifier("toid"),
+            "toid",
             Identifier("mb", "geom_4326"),
             {"job_id": job_id})
 
@@ -43,7 +43,7 @@ def export(pg_conn, pg_uri: str, gpkg_fname: str, os_run_id: int, job_id: int, r
             " {os_run_id} AS run_id, "
             " mp.job_id AS job_id, "
             " toid AS toid, "
-            " ab.geom_4326 AS geom_4326, "
+            " ab.geom_4326 AS geom, "
             " ab.is_residential AS is_residential, "                # aggregates.building.is_residential (+3 other tables) Derived from AddressBase class (True if class is one of 'RD', 'RH', 'RI')
             " ab.has_rooftop_pv AS has_rooftop_pv, "                # aggregates.building.has_rooftop_pv (+3 other tables) Derived from EPC and pv_installations dataset
             " ab.pv_roof_area_pct AS pv_rooftop_area_pct, "         # aggregates.building.pv_roof_area_pct (+4 other tables) PV roof area % coverage (derived from photo_supply)
@@ -64,11 +64,11 @@ def export(pg_conn, pg_uri: str, gpkg_fname: str, os_run_id: int, job_id: int, r
             "FROM aggregates.building ab "
             "JOIN models.pv_building mp USING (toid) "
             "JOIN cte USING (toid) "
-            "JOIN {temp_table} tt ON (tt.id = toid) "
+            "JOIN {simp_table} tt ON (tt.id = toid) "
             "WHERE mp.job_id = {job_id} ",
             job_id=Literal(job_id),
             os_run_id=Literal(os_run_id),
-            temp_table=Identifier(tables.schema(job_id), tables.SIMPLIFIED_BUILDING_GEOM_TABLE),
+            simp_table=Identifier(tables.schema(job_id), tables.SIMPLIFIED_BUILDING_GEOM_TABLE),
         ) is not None:
             raise RuntimeError(f"Error running ogr2ogr")
     else:
