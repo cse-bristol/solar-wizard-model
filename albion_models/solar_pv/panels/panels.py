@@ -37,7 +37,7 @@ def place_panels(pg_uri: str,
 
     logging.info(f"Placing panels using {workers} parallel processes...")
 
-    roof_polygon_count = count(pg_uri, schema, tables.ROOF_POLYGON_TABLE)
+    roof_polygon_count = _roof_polygon_count(pg_uri, schema)
     pages = math.ceil(roof_polygon_count / page_size)
     logging.info(f"{roof_polygon_count} roof polygons, in {pages} batches to process")
 
@@ -53,6 +53,14 @@ def place_panels(pg_uri: str,
     logging.info("Finished placing panels")
 
 
+def _roof_polygon_count(pg_uri: str, schema: str) -> int:
+    with connection(pg_uri) as pg_conn:
+        return sql_command(
+            pg_conn, "SELECT COUNT(*) FROM {roof_polygons} rp WHERE rp.usable",
+            roof_polygons=Identifier(schema, tables.ROOF_POLYGON_TABLE),
+            result_extractor=lambda rows: rows[0][0])
+
+
 def _post_load(pg_uri: str, schema: str, min_roof_area_m: float):
     with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
         sql_command(
@@ -61,15 +69,20 @@ def _post_load(pg_uri: str, schema: str, min_roof_area_m: float):
             WITH pp AS (
                 SELECT 
                     roof_plane_id,
-                    SUM(area) AS area, 
-                    SUM(footprint) AS footprint
+                    SUM(area) AS area
                 FROM {panel_polygons}
                 GROUP BY roof_plane_id)
             UPDATE {roof_polygons} rp
             SET usable = CASE WHEN usable THEN pp.area >= %(min_roof_area_m)s ELSE false END  
             FROM pp
             WHERE pp.roof_plane_id = rp.roof_plane_id;
-                        
+            
+            UPDATE {roof_polygons} rp
+            SET usable = false
+            WHERE
+                rp.usable = true
+                AND NOT EXISTS (SELECT FROM {panel_polygons} pp WHERE pp.roof_plane_id = rp.roof_plane_id);
+            
             -- Update building.exclusion_reason for any buildings that have roof planes but no
             -- usable ones:
             UPDATE {buildings} b
@@ -104,7 +117,8 @@ def _place_panel_page(pg_uri: str,
                 aspect, slope, is_flat 
             FROM {roof_polygons}
             -- not really needed as none of them should be null, but oh well:
-            WHERE roof_geom_27700 IS NOT NULL
+            WHERE roof_geom_27700 IS NOT NULL 
+            AND usable
             ORDER BY roof_plane_id
             OFFSET %(offset)s
             LIMIT %(limit)s

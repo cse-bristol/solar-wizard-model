@@ -246,3 +246,14 @@ def _write_results_to_db(pg_conn,
         job_view=Identifier(f"solar_pv_job_{job_id}"),
         res=Literal(resolution_metres),
         system_loss=Literal(SYSTEM_LOSS))
+
+    if not debug_mode:
+        sql_command(
+            pg_conn,
+            """
+            DROP TABLE {panel_kwh};
+            DROP TABLE {pixel_kwh};
+            DROP TABLE {pixels_in_panels};
+            DROP TABLE {roof_horizons};
+            DROP TABLE {pixels_in_roofs};
+            """)

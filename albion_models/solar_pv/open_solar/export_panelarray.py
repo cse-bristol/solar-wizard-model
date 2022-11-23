@@ -21,7 +21,7 @@ def export(pg_conn, pg_uri: str, gpkg_fname: str, os_run_id: int, job_id: int, r
     """
     layer_names = get_layer_names(gpkg_fname)
     if regenerate or _INSTALLATIONS not in layer_names:
-        err = command_to_gpkg(
+        if command_to_gpkg(
             pg_conn, pg_uri, gpkg_fname, _INSTALLATIONS,
             src_srs=4326, dst_srs=4326,
             overwrite=True,
@@ -36,41 +36,40 @@ def export(pg_conn, pg_uri: str, gpkg_fname: str, os_run_id: int, job_id: int, r
             )
             SELECT 
                 {os_run_id} AS run_id,
-                rp.job_id,
-                rp.toid,
-                rp.roof_plane_id,
-                rp.horizon::text,
-                rp.slope,
-                rp.aspect,
-                rp.x_coef,
-                rp.y_coef,
-                rp.intercept,
-                rp.is_flat,
-                kwh_per_kwp.kwh_per_kwp
+                rp.job_id AS job_id,
+                rp.toid AS toid,
+                rp.roof_plane_id AS roof_plane_id,
+                rp.horizon AS horizon,
+                rp.slope AS slope,
+                rp.aspect AS aspect,
+                rp.x_coef AS x_coef,
+                rp.y_coef AS y_coef,
+                rp.intercept AS intercept,
+                rp.is_flat AS is_flat,
+                kwh_per_kwp.kwh_per_kwp AS kwh_per_kwp
             FROM models.pv_roof_plane rp 
             LEFT JOIN kwh_per_kwp 
             ON rp.roof_plane_id = kwh_per_kwp.roof_plane_id 
             WHERE job_id = {job_id}
             """,
             os_run_id=Literal(os_run_id),
-            job_id=Literal(job_id))
-
-        if err is not None:
-            raise RuntimeError(f"Error running ogr2ogr: {err}")
+            job_id=Literal(job_id)
+        ) is not None:
+            raise RuntimeError("Error running ogr2ogr")
 
     if regenerate or _PANELS not in layer_names:
-        err = command_to_gpkg(
+        if command_to_gpkg(
             pg_conn, pg_uri, gpkg_fname, _PANELS,
             src_srs=4326, dst_srs=4326,
             overwrite=True,
             command=f"""
             SELECT 
                 {os_run_id} AS run_id,
-                job_id,
-                toid,
-                roof_plane_id,
-                panel_id,
-                panel_geom_4326,
+                job_id AS job_id,
+                toid AS toid,
+                roof_plane_id AS roof_plane_id,
+                panel_id AS panel_id,
+                panel_geom_4326 AS panel_geom_4326,
                 kwh_jan AS jan_avg_energy_prod_kwh_per_month,
                 kwh_feb AS feb_avg_energy_prod_kwh_per_month,
                 kwh_mar AS mar_avg_energy_prod_kwh_per_month,
@@ -85,31 +84,17 @@ def export(pg_conn, pg_uri: str, gpkg_fname: str, os_run_id: int, job_id: int, r
                 kwh_dec AS dec_avg_energy_prod_kwh_per_month,
                 kwh_year AS total_avg_energy_prod_kwh_per_year,
                 kwp AS peak_power,
-                horizon::text,
-                area,
-                footprint,
+                horizon AS horizon,
+                area AS area,
+                footprint AS footprint,
                 ST_AsGeoJSON(panel_geom_4326) AS geom_str,
                 CASE WHEN kwp = 0 THEN 0 ELSE kwh_year / kwp END AS kwh_per_kwp     
             FROM models.pv_panel
             WHERE job_id = {job_id}
-            AND kwh_year <> double precision 'NaN'
-            AND kwh_year IS NOT NULL
             """,
             os_run_id=Literal(os_run_id),
-            job_id=Literal(job_id))
-
-        if err is not None:
-            raise RuntimeError(f"Error running ogr2ogr: {err}")
+            job_id=Literal(job_id)
+        ) is not None:
+            raise RuntimeError("Error running ogr2ogr")
     else:
         logging.info(f"Not regenerating existing {gpkg_fname}")
-
-
-if __name__ == '__main__':
-    from albion_models.db_funcs import connection
-    with connection("postgresql://albion_ddl@localhost:5432/albion") as pg_conn:
-        export(pg_conn,
-               pg_uri="postgresql://albion_ddl@localhost:5432/albion",
-               gpkg_fname="/home/neil/data/albion-data/os-export-test.gpkg",
-               os_run_id=0,
-               job_id=1627,
-               regenerate=True)

@@ -2,6 +2,8 @@
 -- 1. define IRR bands from 0 - 0.3, size 0.01
 -- 2. (output 2) extract summary data for each (IRR band, tenure, elec_cost), 1 table per tenure (and 1 for across all tenures), see L87-102
 
+DELETE FROM models.pv_cb_report WHERE job_id = %(job_id)s;
+
 INSERT INTO models.pv_cb_report (
     job_id,
     irr_band,

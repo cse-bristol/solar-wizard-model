@@ -1,5 +1,7 @@
 
 
+DELETE FROM models.pv_cost_benefit WHERE job_id = %(job_id)s;
+
 INSERT INTO models.pv_cost_benefit (
     job_id,
     solar_pv_job_id,

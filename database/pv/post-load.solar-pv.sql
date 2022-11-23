@@ -5,6 +5,8 @@
 
 ALTER TABLE {pixel_kwh} RENAME COLUMN val TO kwh;
 
+DELETE FROM {pixel_kwh} WHERE kwh IS NULL OR kwh = 'NaN'::real;
+
 ALTER TABLE {pixel_kwh} ADD COLUMN en geometry(Point, 27700);
 UPDATE {pixel_kwh} p SET en = ST_SetSRID(ST_MakePoint(p.x,p.y), 27700);
 CREATE INDEX ON {pixel_kwh} USING GIST (en);
@@ -12,8 +14,6 @@ CREATE INDEX ON {pixel_kwh} USING GIST (en);
 ALTER TABLE {pixel_kwh} ADD COLUMN pixel geometry(Polygon, 27700);
 UPDATE {pixel_kwh} p SET pixel = ST_Buffer(p.en, {res} / 2.0, 'endcap=square');
 CREATE INDEX ON {pixel_kwh} USING GIST (pixel);
-
-DELETE FROM {pixel_kwh} WHERE kwh IS NULL;
 
 COMMIT;
 START TRANSACTION;
@@ -128,6 +128,10 @@ GROUP BY roof_plane_id;
 COMMIT;
 START TRANSACTION;
 
+DELETE FROM models.pv_panel WHERE job_id = %(job_id)s;
+DELETE FROM models.pv_roof_plane WHERE job_id = %(job_id)s;
+DELETE FROM models.pv_building WHERE job_id = %(job_id)s;
+
 INSERT INTO models.pv_panel
 SELECT
     pp.toid,
@@ -175,14 +179,8 @@ SELECT
     rp.intercept,
     rp.is_flat
 FROM {roof_polygons} rp
-LEFT JOIN {roof_horizons} rh ON rp.roof_plane_id = rh.roof_plane_id
+INNER JOIN {roof_horizons} rh ON rp.roof_plane_id = rh.roof_plane_id
 WHERE rp.usable;
-
-DROP TABLE {panel_kwh};
-DROP TABLE {pixel_kwh};
-DROP TABLE {pixels_in_panels};
-DROP TABLE {roof_horizons};
-DROP TABLE {pixels_in_roofs};
 
 INSERT INTO models.pv_building
 SELECT %(job_id)s, toid, exclusion_reason, height

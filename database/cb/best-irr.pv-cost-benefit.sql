@@ -52,6 +52,8 @@ START TRANSACTION;
 --
 -- Build outputs table:
 --
+DELETE FROM models.pv_cb_best_irr WHERE job_id = %(job_id)s;
+
 INSERT INTO models.pv_cb_best_irr (
     job_id,
     installation_job_id,
