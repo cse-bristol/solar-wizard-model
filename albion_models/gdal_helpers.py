@@ -343,7 +343,6 @@ def raster_to_csv(raster_file: str,
             for x in range(0, r_ds.RasterXSize):
                 if not mask_raster or int(mask_data[x]) == mask_keep:
                     if include_nans or data[x] != np.nan:
-                        # TODO do these 0.5s rely on res==1m?
                         geo_x = ulx + (x + 0.5) * xres + (y + 0.5) * xskew
                         geo_y = uly + (x + 0.5) * yskew + (y + 0.5) * yres
                         f.write(f"{float(geo_x)},{float(geo_y)},{float(data[x]):.2f}\n")

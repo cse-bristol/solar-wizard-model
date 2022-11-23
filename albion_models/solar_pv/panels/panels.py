@@ -36,9 +36,8 @@ def place_panels(pg_uri: str,
         return
 
     logging.info(f"Placing panels using {workers} parallel processes...")
-    _setup(pg_uri, schema)
 
-    roof_polygon_count = count(pg_uri, schema, tables.ROOF_POLYGON_TABLE)
+    roof_polygon_count = _roof_polygon_count(pg_uri, schema)
     pages = math.ceil(roof_polygon_count / page_size)
     logging.info(f"{roof_polygon_count} roof polygons, in {pages} batches to process")
 
@@ -54,25 +53,12 @@ def place_panels(pg_uri: str,
     logging.info("Finished placing panels")
 
 
-def _setup(pg_uri: str, schema: str):
-    with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
-        sql_command(
-            pg_conn,
-            """
-            DROP TABLE IF EXISTS {panel_polygons};
-
-            CREATE TABLE {panel_polygons} AS
-            SELECT
-                null::geometry(MultiPolygon, 27700) AS panel_geom_27700,
-                0.0::double precision AS footprint,
-                0.0::double precision AS area,
-                rh.*
-            FROM {roof_polygons} rh;
-
-            ALTER TABLE {panel_polygons} ADD PRIMARY KEY (roof_plane_id);
-            """,
+def _roof_polygon_count(pg_uri: str, schema: str) -> int:
+    with connection(pg_uri) as pg_conn:
+        return sql_command(
+            pg_conn, "SELECT COUNT(*) FROM {roof_polygons} rp WHERE rp.usable",
             roof_polygons=Identifier(schema, tables.ROOF_POLYGON_TABLE),
-            panel_polygons=Identifier(schema, tables.PANEL_POLYGON_TABLE))
+            result_extractor=lambda rows: rows[0][0])
 
 
 def _post_load(pg_uri: str, schema: str, min_roof_area_m: float):
@@ -80,24 +66,35 @@ def _post_load(pg_uri: str, schema: str, min_roof_area_m: float):
         sql_command(
             pg_conn,
             """
-            UPDATE {panel_polygons} SET usable = false
-            WHERE usable = true AND area < %(min_roof_area_m)s;
+            WITH pp AS (
+                SELECT 
+                    roof_plane_id,
+                    SUM(area) AS area
+                FROM {panel_polygons}
+                GROUP BY roof_plane_id)
+            UPDATE {roof_polygons} rp
+            SET usable = CASE WHEN usable THEN pp.area >= %(min_roof_area_m)s ELSE false END  
+            FROM pp
+            WHERE pp.roof_plane_id = rp.roof_plane_id;
             
-            DELETE FROM {panel_polygons} WHERE panel_geom_27700 IS NULL;
-            
-            CREATE INDEX ON {panel_polygons} USING GIST (panel_geom_27700);
+            UPDATE {roof_polygons} rp
+            SET usable = false
+            WHERE
+                rp.usable = true
+                AND NOT EXISTS (SELECT FROM {panel_polygons} pp WHERE pp.roof_plane_id = rp.roof_plane_id);
             
             -- Update building.exclusion_reason for any buildings that have roof planes but no
             -- usable ones:
             UPDATE {buildings} b
             SET exclusion_reason = 'ALL_ROOF_PLANES_UNUSABLE'
             WHERE
-                NOT EXISTS (SELECT FROM {panel_polygons} pp WHERE pp.usable AND pp.toid = b.toid)
+                NOT EXISTS (SELECT FROM {roof_polygons} rp WHERE rp.usable AND rp.toid = b.toid)
                 AND b.exclusion_reason IS NULL;
             """,
             {"min_roof_area_m": min_roof_area_m},
             buildings=Identifier(schema, tables.BUILDINGS_TABLE),
-            panel_polygons=Identifier(schema, tables.PANEL_POLYGON_TABLE))
+            panel_polygons=Identifier(schema, tables.PANEL_POLYGON_TABLE),
+            roof_polygons=Identifier(schema, tables.ROOF_POLYGON_TABLE))
 
 
 def _place_panel_page(pg_uri: str,
@@ -114,12 +111,14 @@ def _place_panel_page(pg_uri: str,
             pg_conn,
             """
             SELECT 
+                toid,
                 roof_plane_id,
                 st_astext(roof_geom_27700) AS roof, 
                 aspect, slope, is_flat 
             FROM {roof_polygons}
             -- not really needed as none of them should be null, but oh well:
-            WHERE roof_geom_27700 IS NOT NULL
+            WHERE roof_geom_27700 IS NOT NULL 
+            AND usable
             ORDER BY roof_plane_id
             OFFSET %(offset)s
             LIMIT %(limit)s
@@ -147,27 +146,30 @@ def _place_panel_page(pg_uri: str,
 
             if panels:
                 roof_plane_id = roof['roof_plane_id']
-                area = panels.area
-                footprint = area / math.cos(math.radians(roof['slope']))
-                roof_panels.append((roof_plane_id, panels.wkt, area, footprint))
+                toid = roof['toid']
+                for panel in panels:
+                    area = panel.area
+                    footprint = area / math.cos(math.radians(roof['slope']))
+                    roof_panels.append((roof_plane_id,
+                                        toid,
+                                        panel.wkt,
+                                        area,
+                                        footprint))
 
         _write_panels(pg_conn, job_id, roof_panels)
         print(f"Finished panels page {page}")
 
 
-def _write_panels(pg_conn, job_id: int, roofs: List[Tuple[str, str, float, float]]):
+def _write_panels(pg_conn, job_id: int, roofs: List[Tuple[str, str, str, float, float]]):
     schema = tables.schema(job_id)
 
     with pg_conn.cursor() as cursor:
         psycopg2.extras.execute_values(
             cursor,
             SQL("""
-                UPDATE {panel_polygons}
-                SET panel_geom_27700 = st_geomfromtext(data.panel, 27700),
-                    footprint = data.footprint,
-                    area = data.area
-                FROM (VALUES %s) AS data (roof_plane_id, panel, area, footprint)
-                WHERE {panel_polygons}.roof_plane_id = data.roof_plane_id;
+                INSERT INTO {panel_polygons}
+                (roof_plane_id, toid, panel_geom_27700, area, footprint)
+                VALUES %s
             """).format(
                 panel_polygons=Identifier(schema, tables.PANEL_POLYGON_TABLE),
             ), argslist=roofs)
@@ -256,7 +258,7 @@ def _roof_panels(roof: MultiPolygon,
             best_var = lg_var
 
     if best_var:
-        return affinity.rotate(MultiPolygon(best_var), -aspect, origin=centroid)
+        return affinity.rotate(MultiPolygon(best_var), -aspect, origin=centroid).geoms
     else:
         return None
 

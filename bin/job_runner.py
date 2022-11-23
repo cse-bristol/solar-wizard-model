@@ -349,13 +349,14 @@ def _check_proj_datumgrid_ok(conn):
     """Check the proj-datumgrid is installed and setup for the postgis instance correctly
     """
     with conn.cursor() as curs:
-        curs.execute(
-            "SELECT (ABS(ST_X(p) - 292184.870542716) + ABS(ST_Y(p) - 168003.465539408)) > 1E-9 from ( "
-                "SELECT ST_Transform( "
-                    "'POINT(-3.55128349240 51.40078220140)', "
-                    "'+proj=longlat +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +no_defs', "
-                    "'+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 +ellps=airy +nadgrids=@OSTN15_NTv2_OSGBtoETRS.gsb +units=m +no_defs'"
-                ") p) a")
+        curs.execute("""
+            SELECT (ABS(ST_X(p) - 292184.870542716) + ABS(ST_Y(p) - 168003.465539408)) > 1E-3 from ( 
+                SELECT ST_Transform( 
+                    'POINT(-3.55128349240 51.40078220140)', 
+                    '+proj=longlat +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +no_defs', 
+                    '+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 +ellps=airy +nadgrids=@OSTN15_NTv2_OSGBtoETRS.gsb +units=m +no_defs'
+                ) p) a
+                """)
         fail = curs.fetchone()[0]
     if fail:
         raise EnvironmentError("Proj datumgrid isn't working correctly in Postgres - is it installed and env var set?")
