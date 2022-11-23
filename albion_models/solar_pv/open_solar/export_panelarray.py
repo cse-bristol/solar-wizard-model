@@ -29,7 +29,7 @@ def export(pg_conn, pg_uri: str, gpkg_fname: str, os_run_id: int, job_id: int, r
                 pv.job_id AS job_id,
                 pv.toid AS toid,
                 pv.roof_plane_id AS roof_plane_id,
-                pv.roof_geom_4326 AS roof_geom_4326,
+                pv.roof_geom_4326 AS geom,
                 pv.kwh_jan AS jan_avg_energy_prod_kwh_per_month,
                 pv.kwh_feb AS feb_avg_energy_prod_kwh_per_month,
                 pv.kwh_mar AS mar_avg_energy_prod_kwh_per_month,
