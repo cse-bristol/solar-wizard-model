@@ -160,7 +160,7 @@ class PVMaps:
                 self._pv_time_steps = self._calc_pv_time_steps(num_pv_calcs_per_year)
 
         if job_id:
-            self.uid = f"job_{job_id}.{os.getpid()}.{int(time.time())}"
+            self.uid = f"job_{job_id}"
         else:
             self.uid = f"{os.getpid()}.{int(time.time())}"
         ###
