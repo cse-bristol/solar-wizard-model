@@ -22,34 +22,59 @@ CREATE INDEX IF NOT EXISTS bounds_4326_bounds_idx ON {bounds_4326} using gist (b
 CREATE TABLE IF NOT EXISTS {buildings} AS
 SELECT
     toid,
-    ST_SetSrid(ST_Transform(geom_4326, 27700),27700)::geometry(polygon,27700) as geom_27700
-FROM mastermap.building b
-LEFT JOIN {bounds_4326} q ON ST_Intersects(b.geom_4326, q.bounds)
-WHERE q.job_id=%(job_id)s;
+    geom_27700,
+    NULL::models.pv_exclusion_reason AS exclusion_reason,
+    NULL::real AS height
+FROM mastermap.building_27700 b
+LEFT JOIN models.job_queue q ON ST_Intersects(b.geom_27700, q.bounds)
+WHERE q.job_id=%(job_id)s
+-- Only take buildings where the centroid is within the bounds
+-- or, if the centroid touches the bounds, the bbox cannot overlap the bounds
+-- above or to the left, so that buildings that overlap multiple tiles for
+-- open solar runs don't get run twice:
+AND ST_Intersects(ST_Centroid(b.geom_27700), q.bounds)
+AND (NOT ST_Touches(ST_Centroid(b.geom_27700), q.bounds)
+     OR b.geom_27700 &<| q.bounds
+     OR b.geom_27700 &>  q.bounds);
 
+CREATE UNIQUE INDEX IF NOT EXISTS buildings_toid_idx ON {buildings} (toid);
 CREATE INDEX IF NOT EXISTS buildings_geom_27700_idx ON {buildings} USING GIST (geom_27700);
-
---
--- Building exclusion reasons table:
---
-CREATE TABLE IF NOT EXISTS {building_exclusion_reasons} AS
-SELECT
-    toid,
-    NULL::models.pv_exclusion_reason AS exclusion_reason
-FROM {buildings};
-
-CREATE UNIQUE INDEX IF NOT EXISTS building_exclusions_toid ON {building_exclusion_reasons} (toid);
 
 --
 -- Create the table for storing roof planes:
 --
-CREATE TABLE IF NOT EXISTS {roof_planes} (
+CREATE TABLE IF NOT EXISTS {roof_polygons} (
     roof_plane_id SERIAL PRIMARY KEY,
-    toid text,
-    x_coef double precision,
-    y_coef double precision,
-    intercept double precision,
-    slope double precision,
-    aspect double precision,
-    sd double precision
+    toid text NOT NULL,
+    roof_geom_27700 geometry(polygon, 27700) NOT NULL,
+    x_coef double precision NOT NULL,
+    y_coef double precision NOT NULL,
+    intercept double precision NOT NULL,
+    slope double precision NOT NULL,
+    aspect double precision NOT NULL,
+    sd double precision NOT NULL,
+    is_flat bool NOT NULL,
+    usable bool NOT NULL,
+    easting double precision NOT NULL,
+    northing double precision NOT NULL,
+    raw_footprint double precision NOT NULL,
+    raw_area double precision NOT NULL
 );
+
+CREATE INDEX ON {roof_polygons} (toid);
+CREATE INDEX ON {roof_polygons} USING GIST (roof_geom_27700);
+
+--
+-- Create the table for storing individual panel polygons:
+--
+CREATE TABLE IF NOT EXISTS {panel_polygons} (
+    panel_id SERIAL PRIMARY KEY,
+    roof_plane_id bigint NOT NULL REFERENCES {roof_polygons} (roof_plane_id),
+    toid text NOT NULL,
+    panel_geom_27700 geometry(polygon, 27700) NOT NULL,
+    footprint double precision NOT NULL,
+    area double precision NOT NULL
+);
+
+CREATE INDEX ON {panel_polygons} (roof_plane_id);
+CREATE INDEX ON {panel_polygons} USING GIST (panel_geom_27700);

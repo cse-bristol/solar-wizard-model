@@ -4,10 +4,13 @@ import os
 import shlex
 import subprocess
 import textwrap
-from typing import List, Tuple
+from typing import List, Tuple, Union
 
-import gdal
-from osgeo import ogr
+import math
+import numpy as np
+from osgeo import gdal
+
+from albion_models.util import esc_double_quotes
 
 
 def create_vrt(tiles: List[str], vrt_file: str):
@@ -54,6 +57,26 @@ def get_res(filename: str) -> float:
                          f"File {filename} had xres {abs(xres)}, yres {abs(yres)}")
 
 
+def get_xres_yres(filename: str) -> (float, float):
+    gdal.UseExceptions()
+
+    f = gdal.Open(filename)
+    _, xres, _, _, _, yres = f.GetGeoTransform()
+    return xres, yres
+
+
+def get_res_unchecked(filename: str) -> float:
+    """
+    Get the resolution of the raster, and do not raise an error
+    if the x and y resolutions differ - return the x res.
+    """
+    gdal.UseExceptions()
+
+    f = gdal.Open(filename)
+    _, xres, _, _, _, yres = f.GetGeoTransform()
+    return abs(xres)
+
+
 def get_srs_units(filename: str) -> Tuple[float, str]:
     gdal.UseExceptions()
 
@@ -82,14 +105,84 @@ def get_srid(filename: str, fallback: int = None) -> int:
 
 
 def rasterize(pg_uri: str, mask_sql: str, mask_file: str, res: float, srid: int):
-    res = subprocess.run(f"""
+    cmd = shlex.split(f"""
         gdal_rasterize
-        -sql '{mask_sql}'
+        -sql "{mask_sql}"
         -burn 1 -tr {res} {res}
         -init 0 -ot Int16
         -of GTiff -a_srs EPSG:{srid}
         "PG:{pg_uri}"
         {mask_file}
+        """)
+    res = subprocess.run(cmd, capture_output=True, text=True)
+
+    print(res.stdout)
+    print(res.stderr)
+    if res.returncode != 0:
+        raise ValueError(res.stderr)
+
+
+def rasterize_3d(pg_uri: str,
+                 mask_sql: str,
+                 mask_file: str,
+                 res: Union[float, Tuple[float, float]],
+                 srid: int,
+                 output_type: str = "Float64"):
+    """
+    Creates a new raster using the Z value for the burn value for each polygon & nan outside of polygons
+    """
+    if isinstance(res, float):
+        xres = res
+        yres = res
+    else:
+        xres = res[0]
+        yres = res[1]
+
+    res = subprocess.run(f"""
+        gdal_rasterize
+        -sql "{esc_double_quotes(mask_sql)}"
+        -3d -tr {xres} {yres}
+        -init {math.nan} -ot {output_type}
+        -of GTiff -a_srs EPSG:{srid}
+        "PG:{pg_uri}"
+        {mask_file}
+        """.replace("\n", " "), capture_output=True, text=True, shell=True)
+    print(res.stdout)
+    print(res.stderr)
+    if res.returncode != 0:
+        raise ValueError(res.stderr)
+
+
+def rasterize_3d_update(pg_uri: str, mask_sql: str, raster_to_update_filename: str):
+    """
+    Updates a raster. Uses the Z value for the burn value for each polygon inplace into raster_to_update_filename
+    """
+    res = subprocess.run(f"""
+        gdal_rasterize
+        -sql "{esc_double_quotes(mask_sql)}"
+        -3d 
+        "PG:{pg_uri}"
+        {raster_to_update_filename}
+        """.replace("\n", " "), capture_output=True, text=True, shell=True)
+    print(res.stdout)
+    print(res.stderr)
+    if res.returncode != 0:
+        raise ValueError(res.stderr)
+
+
+def calc(raster_a: str, raster_b: str, expression: str, raster_out: str):
+    """Create a new raster from 2 others merged using an expression
+    """
+    res = subprocess.run(f"""
+        gdal_calc.py
+        --calc="{expression}"
+        -A "{raster_a}"
+        -B "{raster_b}"
+        --outfile="{raster_out}"
+        --type=Float32
+        --format=GTiff
+        --extent=union
+        --projectionCheck
         """.replace("\n", " "), capture_output=True, text=True, shell=True)
     print(res.stdout)
     print(res.stderr)
@@ -115,9 +208,46 @@ def crop_or_expand(file_to_crop: str,
     lrx = ulx + (ref.RasterXSize * xres)
     lry = uly + (ref.RasterYSize * yres)
     if adjust_resolution:
-        gdal.Warp(out_tiff, to_crop, outputBounds=(ulx, lry, lrx, uly), xRes=xres, yRes=yres)
+        gdal.Warp(out_tiff, to_crop, outputBounds=(ulx, lry, lrx, uly), xRes=xres, yRes=yres,
+                  creationOptions=['TILED=YES', 'COMPRESS=PACKBITS'])
     else:
-        gdal.Warp(out_tiff, to_crop, outputBounds=(ulx, lry, lrx, uly))
+        gdal.Warp(out_tiff, to_crop, outputBounds=(ulx, lry, lrx, uly),
+                  creationOptions=['TILED=YES', 'COMPRESS=PACKBITS'])
+
+
+def expand(raster_in: str, raster_out: str, buffer: int):
+    """Assumes buffer is in same unit as SRS"""
+    gdal.UseExceptions()
+
+    ref = gdal.Open(raster_in)
+    ulx, xres, xskew, uly, yskew, yres = ref.GetGeoTransform()
+
+    # negative xres or yres indicates that values increase going W or N respectively
+    # e.g. for 27700, xres is +ve and yres is -ve
+    x_buffer = buffer if xres >= 0 else -buffer
+    y_buffer = buffer if yres >= 0 else -buffer
+
+    lrx = ulx + (ref.RasterXSize * xres) + x_buffer
+    lry = uly + (ref.RasterYSize * yres) + y_buffer
+    gdal.Warp(raster_out, raster_in,
+              outputBounds=(ulx - x_buffer, lry, lrx, uly - y_buffer),
+              creationOptions=['TILED=YES', 'COMPRESS=PACKBITS'])
+
+
+def reproject(raster_in: str, raster_out: str, src_srs: str, dst_srs: str):
+    """
+    Reproject a raster. Will keep the same number of pixels as before.
+    """
+    ref = gdal.Open(raster_in)
+    ulx, xres, xskew, uly, yskew, yres = ref.GetGeoTransform()
+    lrx = ulx + (ref.RasterXSize * xres)
+    lry = uly + (ref.RasterYSize * yres)
+
+    gdal.Warp(raster_out, raster_in, dstSRS=dst_srs, srcSRS=src_srs,
+              width=ref.RasterXSize, height=ref.RasterYSize,
+              # resampleAlg="bilinear",
+              outputBounds=(ulx, lry, lrx, uly), outputBoundsSRS=src_srs,
+              creationOptions=['TILED=YES', 'COMPRESS=PACKBITS'])
 
 
 def set_resolution(in_tiff: str,
@@ -129,12 +259,17 @@ def set_resolution(in_tiff: str,
     gdal.UseExceptions()
     in_f = gdal.Open(in_tiff)
     _, xres, _, _, _, yres = in_f.GetGeoTransform()
-    gdal.Warp(out_tiff, in_f, xRes=res, yRes=res)
+    gdal.Warp(out_tiff, in_f, xRes=res, yRes=res,
+              creationOptions=['TILED=YES', 'COMPRESS=PACKBITS'])
     return out_tiff
 
 
 def aspect(cropped_lidar: str, aspect_file: str):
-    run(f"gdaldem aspect {cropped_lidar} {aspect_file} -of GTiff -b 1 -zero_for_flat")
+    run(f"gdaldem aspect {cropped_lidar} {aspect_file} -of GTiff -b 1 -zero_for_flat -co \"COMPRESS=PACKBITS\" -co \"TILED=YES\"")
+
+
+def slope(cropped_lidar: str, slope_file: str):
+    run(f"gdaldem slope {cropped_lidar} {slope_file} -of GTiff -b 1  -co \"COMPRESS=PACKBITS\" -co \"TILED=YES\"")
 
 
 def merge(files: List[str], output_file: str, res: float, nodata: int):
@@ -168,49 +303,6 @@ def count_raster_pixels_pct(tiff: str, value, band: int = 1) -> float:
     return (a == value).sum() / a.size
 
 
-def create_resolution_raster(in_tiff: str, out_tiff: str, res: float, nodata: int) -> str:
-    run(f'''
-        gdal_calc.py
-        -A {in_tiff}
-        --outfile={out_tiff}
-        --quiet
-        --NoDataValue={nodata}
-        --calc="numpy.where(A!={nodata}, {res}, {nodata})"
-    ''')
-    return out_tiff
-
-
-def polygonize(in_tiff: str, out_gpkg: str, out_layer: str, out_field: str, connectedness_8: bool = True):
-    """
-    Polygonize a raster. See `gdal_polygonize.py` in GDAL.
-
-    This uses `FPolygonize` rather than `Polygonize`, so it doesn't cast float rasters
-    to ints before running.
-
-    :param in_tiff: raster to polygonize
-    :param out_gpkg: out geopackage (should not exist)
-    :param out_layer: name of table in geopackage
-    :param out_field: name of field to write pixel values to
-    :param connectedness_8: if True, use 8-connectedness to detect polygons. Otherwise
-    uses 4-connectedness.
-    :return: the name of the geopackage.
-    """
-    in_file = gdal.Open(in_tiff)
-    band = in_file.GetRasterBand(1)
-
-    drv = ogr.GetDriverByName("GPKG")
-    dst_ds = drv.CreateDataSource(out_gpkg)
-    srs = in_file.GetSpatialRef()
-    dst_layer = dst_ds.CreateLayer(out_layer, geom_type=ogr.wkbPolygon, srs=srs)
-
-    fd = ogr.FieldDefn(out_field, ogr.OFTReal)
-    dst_layer.CreateField(fd)
-    options = ['8CONNECTED=8'] if connectedness_8 else []
-
-    gdal.FPolygonize(band, band.GetMaskBand(), dst_layer, 0, options, callback=None)
-    return out_gpkg
-
-
 def run(command: str):
     command = textwrap.dedent(command).replace("\n", " ").strip()
     res = subprocess.run(command, capture_output=True, text=True, shell=True)
@@ -218,3 +310,47 @@ def run(command: str):
     if res.returncode != 0:
         print(res.stderr.strip())
         raise ValueError(res.stderr)
+
+
+def raster_to_csv(raster_file: str,
+                  csv_out: str,
+                  mask_raster: str = None,
+                  band: int = 1,
+                  mask_band: int = 1,
+                  mask_keep: int = 1,
+                  include_nans: bool = True):
+    """
+    Adapted from https://github.com/postmates/gdal/blob/master/scripts/gdal2xyz.py
+    with the addition of an optional mask raster
+
+    mask_keep: if the mask raster has this value at index, it will write the row
+    """
+    r_ds = gdal.Open(raster_file)
+    rb = r_ds.GetRasterBand(band)
+    if mask_raster:
+        mask_ds = gdal.Open(mask_raster)
+        mb = mask_ds.GetRasterBand(mask_band)
+    ulx, xres, xskew, uly, yskew, yres = r_ds.GetGeoTransform()
+
+    with open(csv_out, 'w') as f:
+        for y in range(r_ds.RasterYSize):
+            data = rb.ReadAsArray(0, y, r_ds.RasterXSize, 1)
+            data = np.reshape(data, (r_ds.RasterXSize,))
+            if mask_raster:
+                mask_data = mb.ReadAsArray(0, y, r_ds.RasterXSize, 1)
+                mask_data = np.reshape(mask_data, (r_ds.RasterXSize,))
+
+            for x in range(0, r_ds.RasterXSize):
+                if not mask_raster or int(mask_data[x]) == mask_keep:
+                    if include_nans or data[x] != np.nan:
+                        geo_x = ulx + (x + 0.5) * xres + (y + 0.5) * xskew
+                        geo_y = uly + (x + 0.5) * yskew + (y + 0.5) * yres
+                        f.write(f"{float(geo_x)},{float(geo_y)},{float(data[x]):.2f}\n")
+
+
+if __name__ == '__main__':
+    logging.basicConfig(level=logging.DEBUG,
+                        format='[%(asctime)s] %(levelname)s: %(message)s')
+    # fix_lidar("/home/neil/data/albion-models/lidar/scotland/NN70_1M_DSM_PHASE1.tif",
+    #           "/home/neil/data/albion-models/lidar/scotland/NN70_1M_DSM_PHASE1_a.tif",
+    #           1.0)

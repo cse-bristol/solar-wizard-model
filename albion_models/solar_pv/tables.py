@@ -1,16 +1,16 @@
 """Database schema and table names"""
 
-PIXEL_HORIZON_TABLE = 'pixel_horizons'
-"""Table to store the per-pixel horizon data from 320-albion-saga-gis"""
+LIDAR_PIXEL_TABLE = 'lidar_pixels'
+"""Table to store the per-pixel data"""
 
-ROOF_HORIZON_TABLE = 'roof_horizons'
-"""Table to store the horizon data joined with the polygons which represent planar areas of roof"""
+ROOF_POLYGON_TABLE = 'roof_polygons'
+"""Table to store the polygons which represent planar areas of roof"""
 
-PANEL_HORIZON_TABLE = 'panel_horizons'
-"""Horizon data joined with polygons representing arrays of PV panels"""
+PANEL_POLYGON_TABLE = 'panel_polygons'
+"""pixel data joined with polygons representing arrays of PV panels"""
 
-SOLAR_PV_TABLE = 'solar_pv'
-"""Table to store the raw solar PV data received from PV-GIS"""
+PIXEL_KWH_TABLE = 'pixel_kwh'
+"""Table to store the raw per-pixel solar PV data received from PV-GIS"""
 
 BOUNDS_TABLE = 'bounds_4326'
 """Table with the job bounds transformed to SRID 4326"""
@@ -18,12 +18,8 @@ BOUNDS_TABLE = 'bounds_4326'
 BUILDINGS_TABLE = 'buildings'
 """All the buildings inside the job bounds, transformed to 27700"""
 
-ROOF_PLANE_TABLE = 'roof_planes'
-"""All the roof planes detected using RANSAC"""
-
-BUILDING_EXCLUSION_REASONS_TABLE = 'building_exclusion_reasons'
-"""A lookup from toid to the reason why the building has no PV
-(or null if the building has PV)"""
+SIMPLIFIED_BUILDING_GEOM_TABLE = 'simple_building_geoms'
+"""Building geometries simplified for export to open_solar"""
 
 
 def schema(job_id: int) -> str:

@@ -4,7 +4,7 @@ from typing import List
 import requests
 
 from albion_models.paths import PROJECT_ROOT
-from albion_models.solar_pv.pv_gis.flatten import flatten
+from albion_models.solar_pv.pvgis_old.flatten import flatten
 from albion_models.db_funcs import copy_csv, connect
 
 

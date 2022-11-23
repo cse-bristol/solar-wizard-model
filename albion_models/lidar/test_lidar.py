@@ -1,5 +1,3 @@
-from unittest import mock
-
 from albion_models.lidar import lidar
 from albion_models.test.test_funcs import ParameterisedTestCase
 
@@ -99,31 +97,3 @@ class LidarTestCase(ParameterisedTestCase):
                     resolution=lidar.Resolution.R_50CM,
                     filename="/home/neil/data/albion-models/lidar/sp2917_DSM_50CM.tiff")),
         ], lidar.LidarTile.from_filename)
-
-    @mock.patch('albion_models.gdal_helpers.count_raster_pixels_pct', new=_mocked_count_raster_pixels_pct)
-    def test_50cm_coverage(self):
-        tiles = lidar.LidarJobTiles(
-            tiles_50cm=[
-                lidar.LidarTile(tile_id="sp2917", year=2017, resolution=lidar.Resolution.R_50CM, filename="/home/sp2917_DSM_50CM.tiff"),
-                lidar.LidarTile(tile_id="sp2918", year=2017, resolution=lidar.Resolution.R_50CM, filename="/home/sp2918_DSM_50CM.tiff"),
-            ],
-            tiles_1m=[
-                lidar.LidarTile(tile_id="sp2917", year=2017, resolution=lidar.Resolution.R_1M, filename="/home/sp2917_DSM_1M.tiff"),
-                lidar.LidarTile(tile_id="sp2918", year=2017, resolution=lidar.Resolution.R_1M, filename="/home/sp2918_DSM_1M.tiff"),
-                lidar.LidarTile(tile_id="sp2919", year=2017, resolution=lidar.Resolution.R_1M, filename="/home/sp2919_DSM_1M.tiff"),
-            ]
-        )
-        cov = tiles._get_50cm_coverage()
-        assert cov == 0.2533670033670033, f"{cov}"
-
-        tiles = lidar.LidarJobTiles(
-            tiles_50cm=[
-                lidar.LidarTile(tile_id="sp2918", year=2017, resolution=lidar.Resolution.R_50CM, filename="/home/sp2918_DSM_50CM.tiff"),
-            ],
-            tiles_1m=[
-                lidar.LidarTile(tile_id="sp2918", year=2017, resolution=lidar.Resolution.R_1M, filename="/home/sp2918_DSM_1M.tiff"),
-                lidar.LidarTile(tile_id="sp2919", year=2017, resolution=lidar.Resolution.R_1M, filename="/home/sp2919_DSM_1M.tiff"),
-            ]
-        )
-        cov = tiles._get_50cm_coverage()
-        assert cov == 0.005050505050505055, f"{cov}"

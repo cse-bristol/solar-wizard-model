@@ -2,24 +2,25 @@ import logging
 import os
 import shutil
 from os.path import join
+from typing import Optional
 
 import psycopg2.extras
 from psycopg2.sql import Identifier
 
-import albion_models.solar_pv.pv_gis.pv_gis_client as pv_gis_client
 import albion_models.solar_pv.tables as tables
 from albion_models.db_funcs import connect, sql_script_with_bindings, process_pg_uri
-from albion_models.solar_pv.aggregate_horizons import aggregate_horizons
-from albion_models.solar_pv.lidar_check import check_lidar
-from albion_models.solar_pv.panels import add_panels
-from albion_models.solar_pv.saga_gis.horizons import find_horizons
+from albion_models.solar_pv.outdated_lidar.outdated_lidar_check import check_lidar
+from albion_models.solar_pv.panels.panels import place_panels
+from albion_models.solar_pv.pvgis.pvgis import pvgis
 from albion_models.solar_pv.ransac.run_ransac import run_ransac
+from albion_models.solar_pv.rasters import generate_rasters, \
+    generate_flat_roof_aspect_raster_4326, \
+    create_elevation_override_raster
 
 
 def model_solar_pv(pg_uri: str,
                    root_solar_dir: str,
                    job_id: int,
-                   lidar_vrt_file: str,
                    horizon_search_radius: int,
                    horizon_slices: int,
                    max_roof_slope_degrees: int,
@@ -28,7 +29,6 @@ def model_solar_pv(pg_uri: str,
                    flat_roof_degrees: int,
                    peak_power_per_m2: float,
                    pv_tech: str,
-                   max_avg_southerly_horizon_degrees: int,
                    panel_width_m: float,
                    panel_height_m: float,
                    panel_spacing_m: float,
@@ -39,7 +39,6 @@ def model_solar_pv(pg_uri: str,
 
     pg_uri = process_pg_uri(pg_uri)
     _validate_params(
-        lidar_vrt_file=lidar_vrt_file,
         horizon_search_radius=horizon_search_radius,
         horizon_slices=horizon_slices,
         max_roof_slope_degrees=max_roof_slope_degrees,
@@ -47,7 +46,6 @@ def model_solar_pv(pg_uri: str,
         min_roof_degrees_from_north=min_roof_degrees_from_north,
         flat_roof_degrees=flat_roof_degrees,
         peak_power_per_m2=peak_power_per_m2,
-        max_avg_southerly_horizon_degrees=max_avg_southerly_horizon_degrees,
         panel_width_m=panel_width_m,
         panel_height_m=panel_height_m)
 
@@ -57,38 +55,37 @@ def model_solar_pv(pg_uri: str,
     logging.info("Initialising postGIS schema...")
     _init_schema(pg_uri, job_id)
 
-    res = find_horizons(
+    logging.info("Generating and loading rasters...")
+    elevation_raster, mask_raster, res = generate_rasters(
         pg_uri=pg_uri,
         job_id=job_id,
         solar_dir=solar_dir,
-        lidar_vrt_file=lidar_vrt_file,
         horizon_search_radius=horizon_search_radius,
-        horizon_slices=horizon_slices,
         debug_mode=debug_mode)
 
     logging.info("Checking for outdated LiDAR and missing LiDAR coverage...")
-    check_lidar(pg_uri, job_id)
+    check_lidar(pg_uri, job_id, resolution_metres=res)
 
-    logging.info("Detecting roof planes...")
-    run_ransac(pg_uri, job_id, resolution_metres=res)
-
-    logging.info("Aggregating horizon data by roof plane and filtering...")
-    aggregate_horizons(
+    logging.info("Getting building height elevation override raster...")
+    elevation_override_filename: Optional[str] = create_elevation_override_raster(
         pg_uri=pg_uri,
         job_id=job_id,
-        horizon_slices=horizon_slices,
-        max_roof_slope_degrees=max_roof_slope_degrees,
-        min_roof_area_m=min_roof_area_m,
-        min_roof_degrees_from_north=min_roof_degrees_from_north,
-        flat_roof_degrees=flat_roof_degrees,
-        max_avg_southerly_horizon_degrees=max_avg_southerly_horizon_degrees,
-        large_building_threshold=large_building_threshold,
-        min_dist_to_edge_m=min_dist_to_edge_m,
-        min_dist_to_edge_large_m=min_dist_to_edge_large_m,
-        resolution_metres=res)
+        solar_dir=solar_dir,
+        elevation_raster_4326_filename=elevation_raster)
+
+    logging.info("Detecting roof planes...")
+    run_ransac(pg_uri, job_id,
+               max_roof_slope_degrees=max_roof_slope_degrees,
+               min_roof_area_m=min_roof_area_m,
+               min_roof_degrees_from_north=min_roof_degrees_from_north,
+               flat_roof_degrees=flat_roof_degrees,
+               large_building_threshold=large_building_threshold,
+               min_dist_to_edge_m=min_dist_to_edge_m,
+               min_dist_to_edge_large_m=min_dist_to_edge_large_m,
+               resolution_metres=res)
 
     logging.info("Adding individual PV panels...")
-    add_panels(
+    place_panels(
         pg_uri=pg_uri,
         job_id=job_id,
         min_roof_area_m=min_roof_area_m,
@@ -96,13 +93,27 @@ def model_solar_pv(pg_uri: str,
         panel_height_m=panel_height_m,
         panel_spacing_m=panel_spacing_m)
 
-    logging.info("Sending requests to PV-GIS...")
-    pv_gis_client.pv_gis(
+    logging.info("Generating flat roof raster")
+    flat_roof_aspect_raster_4326: Optional[str] = generate_flat_roof_aspect_raster_4326(
         pg_uri=pg_uri,
         job_id=job_id,
-        peak_power_per_m2=peak_power_per_m2,
-        pv_tech=pv_tech,
         solar_dir=solar_dir)
+
+    logging.info("Running PV-GIS...")
+    pvgis(pg_uri=pg_uri,
+          job_id=job_id,
+          solar_dir=solar_dir,
+          resolution_metres=res,
+          pv_tech=pv_tech,
+          horizon_search_radius=horizon_search_radius,
+          horizon_slices=horizon_slices,
+          peak_power_per_m2=peak_power_per_m2,
+          flat_roof_degrees=flat_roof_degrees,
+          elevation_raster=elevation_raster,
+          elevation_override_raster=elevation_override_filename,
+          mask_raster=mask_raster,
+          flat_roof_aspect_raster=flat_roof_aspect_raster_4326,
+          debug_mode=debug_mode)
 
     if not debug_mode:
         logging.info("Removing temp dir...")
@@ -121,8 +132,8 @@ def _init_schema(pg_uri: str, job_id: int):
             schema=Identifier(tables.schema(job_id)),
             bounds_4326=Identifier(tables.schema(job_id), tables.BOUNDS_TABLE),
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
-            roof_planes=Identifier(tables.schema(job_id), tables.ROOF_PLANE_TABLE),
-            building_exclusion_reasons=Identifier(tables.schema(job_id), tables.BUILDING_EXCLUSION_REASONS_TABLE),
+            roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE),
+            panel_polygons=Identifier(tables.schema(job_id), tables.PANEL_POLYGON_TABLE),
         )
     finally:
         pg_conn.close()
@@ -139,27 +150,21 @@ def _drop_schema(pg_uri: str, job_id: int):
         pg_conn.close()
 
 
-def _validate_params(lidar_vrt_file: str,
-                     horizon_search_radius: int,
+def _validate_params(horizon_search_radius: int,
                      horizon_slices: int,
                      max_roof_slope_degrees: int,
                      min_roof_area_m: int,
                      min_roof_degrees_from_north: int,
                      flat_roof_degrees: int,
                      peak_power_per_m2: float,
-                     max_avg_southerly_horizon_degrees: int,
                      panel_width_m: float,
                      panel_height_m: float):
-    if not lidar_vrt_file or not os.path.exists(lidar_vrt_file):
-        raise ValueError("No LIDAR tiles available, cannot run solar PV modelling.")
     if horizon_search_radius < 0 or horizon_search_radius > 10000:
         raise ValueError(f"horizon search radius must be between 0 and 10000, was {horizon_search_radius}")
     if horizon_slices > 64 or horizon_slices < 8:
         raise ValueError(f"horizon slices must be between 8 and 64, was {horizon_slices}")
     if max_roof_slope_degrees < 0 or max_roof_slope_degrees > 90:
         raise ValueError(f"max_roof_slope_degrees must be between 0 and 90, was {max_roof_slope_degrees}")
-    if max_avg_southerly_horizon_degrees < 0 or max_avg_southerly_horizon_degrees > 90:
-        raise ValueError(f"max_avg_southerly_horizon_degrees must be between 0 and 90, was {max_avg_southerly_horizon_degrees}")
     if min_roof_area_m < 0:
         raise ValueError(f"min_roof_area_m must be greater than or equal to 0, was {min_roof_area_m}")
     if min_roof_degrees_from_north < 0 or min_roof_degrees_from_north > 180:
@@ -172,3 +177,7 @@ def _validate_params(lidar_vrt_file: str,
         raise ValueError(f"panel_width_m must be greater than 0, was {panel_width_m}")
     if panel_height_m <= 0:
         raise ValueError(f"panel_height_m must be greater than 0, was {panel_height_m}")
+    if os.environ.get("PVGIS_DATA_TAR_FILE_DIR", None) is None:
+        raise ValueError(f"env var PVGIS_DATA_TAR_FILE_DIR must be set")
+    if os.environ.get("PVGIS_GRASS_DBASE_DIR", None) is None:
+        raise ValueError(f"env var PVGIS_GRASS_DBASE_DIR must be set")

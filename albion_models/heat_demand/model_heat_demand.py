@@ -8,18 +8,22 @@ import osgeo.ogr as ogr
 import osgeo.osr as osr
 from psycopg2.sql import SQL, Identifier, Literal
 
-from albion_models.db_funcs import sql_script_with_bindings, sql_script
+from albion_models.db_funcs import sql_script
 from albion_models.paths import PROJECT_ROOT
+from albion_models.postgis import get_merged_lidar_tiles
 
 
-def model_heat_demand(pg_conn, job_id: int, bounds: str,
-                      lidar_tiff_paths: List[str], heat_demand_dir: str, heat_degree_days: float):
+def model_heat_demand(pg_conn, job_id: int, bounds: str, heat_demand_dir: str, heat_degree_days: float):
     """
     Model the heat demand for buildings within the bounding box.
 
     Bounding box coordinates should be in SRS 4326.
     """
     os.makedirs(heat_demand_dir, exist_ok=True)
+
+    logging.info("Merging and extracting LiDAR")
+    lidar_tiff_paths = get_merged_lidar_tiles(pg_conn, job_id, heat_demand_dir)
+
     logging.info("Preparing geojson for heat demand estimation")
     geojson_file = join(heat_demand_dir, f"heat_demand_job_{job_id}.json")
     results_file = join(heat_demand_dir, f"heat_demand_job_{job_id}.tab")
@@ -32,8 +36,13 @@ def model_heat_demand(pg_conn, job_id: int, bounds: str,
 
     _load_output_to_database(pg_conn, results_file, job_id, heat_degree_days)
 
-    os.remove(geojson_file)
-    os.remove(results_file)
+    try:
+        os.remove(geojson_file)
+        os.remove(results_file)
+        for lt in lidar_tiff_paths:
+            os.remove(lt)
+    except OSError:
+        pass
 
     logging.info("Heat demand estimation complete")
 

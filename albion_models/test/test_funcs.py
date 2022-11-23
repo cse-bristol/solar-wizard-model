@@ -41,7 +41,9 @@ def insert_job(pg_conn, job_id: int, bounds: str, project: str):
 class ParameterisedTestCase(unittest.TestCase):
     def parameterised_test(self, mapping: List[tuple], fn):
         for tup in mapping:
-            with self.subTest():
-                expected = tup[-1]
-                actual = fn(*tup[:-1])
-                assert expected == actual, f"\nExpected: {expected}\nActual  : {actual}"
+            inputs = tup[:-1]
+            expected = tup[-1]
+            actual = fn(*inputs)
+            test_name = str(inputs)[:100] if len(inputs) > 1 else str(inputs[0])[:100]
+            with self.subTest(test_name):
+                assert expected == actual, f"\nExpected: {expected}\nActual  : {actual}\nInputs : {inputs}"

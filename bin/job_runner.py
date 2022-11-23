@@ -1,23 +1,22 @@
 import logging
 import os
 import textwrap
-
 import time
+from builtins import Exception
 from typing import Optional, List
 
 import psycopg2
 import psycopg2.extras
 
-from albion_models import gdal_helpers
-from albion_models.lidar.bulk_lidar_client import load_from_bulk
-from albion_models.lidar.defra_lidar_api_client import get_all_lidar
-from albion_models.lidar.lidar_coverage import calculate_lidar_coverage
+from albion_models.db_funcs import process_pg_uri
 from albion_models.hard_soft_dig.model_hard_soft_dig import model_hard_soft_dig
 from albion_models.heat_demand.model_heat_demand import model_heat_demand, \
     model_insulation_measure_costs
-from albion_models.solar_pv.model_solar_pv import model_solar_pv
+from albion_models.lidar.bulk_lidar_client import load_from_bulk
+from albion_models.lidar.defra_lidar_api_client import get_all_lidar
+from albion_models.lidar.lidar_coverage import calculate_lidar_coverage
 from albion_models.solar_pv.cost_benefit.model_cost_benefit import model_cost_benefit
-from albion_models.db_funcs import process_pg_uri
+from albion_models.solar_pv.model_solar_pv import model_solar_pv
 
 
 def main_loop():
@@ -30,6 +29,7 @@ def main_loop():
     logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
     pg_uri = os.environ.get("PG_URI")
     pg_conn = _connect(pg_uri)
+    _check_proj_datumgrid_ok(pg_conn)
     while True:
         job = _get_next_job(pg_conn)
         if job is not None:
@@ -63,7 +63,9 @@ def _get_next_job(pg_conn) -> Optional[dict]:
                 LIMIT 1
                 FOR UPDATE SKIP LOCKED
             )
-            UPDATE models.job_queue q SET status = 'IN_PROGRESS' FROM next
+            UPDATE models.job_queue q 
+            SET status = 'IN_PROGRESS', started_at = NOW() 
+            FROM next
             WHERE next.job_id = q.job_id
             RETURNING
                 q.job_id,
@@ -86,7 +88,7 @@ def _get_next_job(pg_conn) -> Optional[dict]:
 def _set_job_status(pg_conn, job_id: int, status: str, error: str = None):
     with pg_conn.cursor() as cursor:
         cursor.execute("UPDATE models.job_queue "
-                       "SET status = %s, error = %s WHERE job_id = %s",
+                       "SET status = %s, error = %s, finished_at = NOW() WHERE job_id = %s",
                        (status, error, job_id))
         pg_conn.commit()
 
@@ -110,21 +112,19 @@ def _handle_job(pg_conn, job: dict) -> bool:
         bulk_lidar_dir = os.environ.get("BULK_LIDAR_DIR", None)
         if not bulk_lidar_dir:
             logging.info("BULK_LIDAR_DIR not set, falling back to getting LiDAR from DEFRA API")
-            lidar_vrt_file = get_all_lidar(pg_conn, job_id, lidar_dir)
+            get_all_lidar(pg_conn, job_id, os.path.join(lidar_dir, "defra"))
         else:
-            lidar_vrt_file = load_from_bulk(pg_conn, job_id, lidar_dir, bulk_lidar_dir)
+            load_from_bulk(pg_conn, job_id, lidar_dir, bulk_lidar_dir)
 
         if job['lidar']:
-            calculate_lidar_coverage(job_id, lidar_dir, pg_uri)
+            calculate_lidar_coverage(job_id, pg_uri)
 
         if job['heat_demand']:
             heat_degree_days = params['heat_degree_days']
-            lidar_tiff_paths = gdal_helpers.files_in_vrt(lidar_vrt_file)
             model_heat_demand(
                 pg_conn,
                 job_id,
                 bounds,
-                lidar_tiff_paths,
                 os.environ.get("HEAT_DEMAND_DIR"),
                 heat_degree_days)
 
@@ -210,7 +210,6 @@ def _handle_job(pg_conn, job: dict) -> bool:
             flat_roof_degrees = params['flat_roof_degrees']
             peak_power_per_m2 = params['peak_power_per_m2']
             pv_tech = params['pv_tech']
-            max_avg_southerly_horizon_degrees = params['max_avg_southerly_horizon_degrees']
             panel_width_m = params['panel_width_m']
             panel_height_m = params['panel_height_m']
             panel_spacing_m = params['panel_spacing_m']
@@ -222,7 +221,6 @@ def _handle_job(pg_conn, job: dict) -> bool:
                 pg_uri=pg_uri,
                 root_solar_dir=os.environ.get("SOLAR_DIR"),
                 job_id=job_id,
-                lidar_vrt_file=lidar_vrt_file,
                 horizon_search_radius=horizon_search_radius,
                 horizon_slices=horizon_slices,
                 max_roof_slope_degrees=max_roof_slope_degrees,
@@ -231,7 +229,6 @@ def _handle_job(pg_conn, job: dict) -> bool:
                 flat_roof_degrees=flat_roof_degrees,
                 peak_power_per_m2=peak_power_per_m2,
                 pv_tech=pv_tech,
-                max_avg_southerly_horizon_degrees=max_avg_southerly_horizon_degrees,
                 panel_width_m=panel_width_m,
                 panel_height_m=panel_height_m,
                 panel_spacing_m=panel_spacing_m,
@@ -346,6 +343,23 @@ def _send_email(from_email: str, to_email: List[str], password: str, subject: st
             mailserver.send_message(msg)
     except smtplib.SMTPException:
         logging.exception("Failed to send email")
+
+
+def _check_proj_datumgrid_ok(conn):
+    """Check the proj-datumgrid is installed and setup for the postgis instance correctly
+    """
+    with conn.cursor() as curs:
+        curs.execute("""
+            SELECT (ABS(ST_X(p) - 292184.870542716) + ABS(ST_Y(p) - 168003.465539408)) > 1E-3 from ( 
+                SELECT ST_Transform( 
+                    'POINT(-3.55128349240 51.40078220140)', 
+                    '+proj=longlat +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +no_defs', 
+                    '+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 +ellps=airy +nadgrids=@OSTN15_NTv2_OSGBtoETRS.gsb +units=m +no_defs'
+                ) p) a
+                """)
+        fail = curs.fetchone()[0]
+    if fail:
+        raise EnvironmentError("Proj datumgrid isn't working correctly in Postgres - is it installed and env var set?")
 
 
 if __name__ == "__main__":

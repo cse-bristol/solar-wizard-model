@@ -2,6 +2,13 @@
 
 Extensions to scikit-learn RANSAC implementation with additions for usage with LIDAR to detect roof planes.
 
+#### Profiling
+
+```shell
+py-spy record --idle -F -o profile.svg -- python3 -m albion_models.solar_pv.ransac.dev_ransac
+```
+Produces a flamegraph SVG
+
 #### Changes made:
 
 * Tarsha-Kurdi, 2007 recommends rejecting planes where the (x,y) points in the plane do not form a single contiguous region of the LIDAR. This mostly helps but does exclude some valid planes where the correctly-fitted plane also happens to fit to other pixels in disconnected areas of the roof. I have modified it to allow planes where a small number of non-contiguous pixels fit, as long as the area ratio of those non-contiguous pixels to the area of the main mass of contiguous pixels is small.

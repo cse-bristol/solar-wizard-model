@@ -8,50 +8,78 @@ This repository contains code for
 
 This project uses [git-lfs](https://git-lfs.github.com/) for large file storage (currently just the thermos jar for heat demand estimation), so install that and run `git lfs pull` in the root of this repo after cloning.
 
-This project also contains a submodule, so run `git submodule update --init --recursive` after cloning.
+See also [320-albion-import](https://github.com/cse-bristol/320-albion), [320-albion-webapp](https://github.com/cse-bristol/320-albion-webapp). This repository is a git submodule of `320-albion-webapp`.
 
-## Albion solar PV modelling
+I'm not totally happy with the split across 320-albion-webapp and 320-albion-models - currently the database schema is handled by 320-albion-webapp which is sometimes annoying. It's possible that they shouldn't actually be separate things.
 
-required inputs:
-* LIDAR data for the relevant area.
-* polygon that defines the boundary of the relevant area.
-* OS mastermap building data
+## Development
 
-The main work is done by [PV-GIS](https://ec.europa.eu/jrc/en/PVGIS), which has an HTTP API we talk to. The API documentation is [here](https://ec.europa.eu/jrc/en/PVGIS/docs/noninteractive), with more detail on the parameters [here](https://ec.europa.eu/jrc/en/PVGIS/docs/usermanual). 
+`default.nix` contains the dependencies required to setup a dev environment. The `default.nix` in this repo also has the dependencies required for the repositories `320-albion` and `320-albion-webapp`.
 
-Because the PV-GIS API is rate limited to 25 requests a second, we cannot calculate the irradiation for every point in the desired area. A few things we do to cut down the amount of requests:
-* Only calculate for lidar pixels that fall within building polygons.
-* Rather than doing a request for each lidar pixel, attempt to find the pixels that represent a contiguous area of roof, and only do one request for that area. Our approach to this:
-    * Find the aspect (compass facing) of the lidar pixel with [gdaldem aspect](https://gdal.org/programs/gdaldem.html).
-    * group the aspect pixels using GDAL's [polygonize](https://gdal.org/programs/gdal_polygonize.html) tool (effectively a flood fill)
-* Exclude some of the resulting roof plane polygons if they are unsuitable. The criteria for unsuitability are model parameters: `max_roof_slope_degrees`, `min_roof_area_m`, `min_roof_degrees_from_north`.
+Run `nix-build default.nix -o nixenv` to create something equivalent to a python virtualenv that you can tell your IDE to use as a virtualenv. 
 
-Another key component of the model is a [patched version](https://github.com/cse-bristol/320-albion-saga-gis) of [SAGA GIS](http://www.saga-gis.org/en/index.html) which we use to calculate the horizon for each pixel in the lidar data. SAGA calculates this internally but does not normally output it. It has also been patched to take a mask raster as input so that we only calculate the horizons for pixels that fall inside mastermap building polygons.
+I also start pycharm from a nix-shell (command plain `nix-shell`, will use `default.nix`) using `/opt/pycharm-community-2020.3.3/bin/pycharm.sh  > /dev/null 2>&1 &` so that it can understand the dependencies properly. This isn't ideal as you have to rebuild nixenv and restart the nix-shell and pycharm whenever you change a dependency, but that doesn't happen often.
 
-### Model parameters
+## Dependencies
 
-* `horizon-search-radius`: Horizon search radius in metres (default 1000)
-* `horizon-slices`: Horizon compass slices (default 16)
-* `max-roof-slope-degrees`: Maximum roof slope for PV (default 80)
-* `min-roof-area-m`: Minimum roof area m² for PV installation (default 10)
-* `min-roof-degrees-from-north`: Minimum degree distance from North for PV (default 45)
-* `flat-roof-degrees`: Angle (degrees) to mount panels on flat roofs (default 10)
-* `peak-power-per-m2`: Nominal peak power (kWp) per m² of roof (default 0.120)
-* `pv-tech`: PV technology (default crystSi, can be CIS or CdTe)
+You will need a postGIS (postgres version >= 12; postGIS version >=3) database with some Albion data in it (see below).
 
-Increasing the `horizon-search-radius` or `horizon-slices` might slow things down a lot for large areas.
+The postGIS install will also need to have access to some proj datum grids, which are used for more accurate transformations between long/lat and easting/northing.
 
-### Future improvements
+To test your postGIS install, try the following:
+```sql
+SELECT  ST_AsText(
+            ST_Transform(
+                'POINT(-3.55128349240 51.40078220140)',
+                '+proj=longlat +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +no_defs',
+                '+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 +ellps=airy +nadgrids=@OSTN15_NTv2_OSGBtoETRS.gsb +units=m +no_defs'
+            )
+        )
+;
+                st_astext                 
+------------------------------------------
+ POINT(292184.870542716 168003.465539408)     -- Test point: 292184.870 168003.465
+```
+(test source: https://gis.stackexchange.com/a/396980)
 
-* Flat roofs are complicated and there are lots of decisions to make on what to do with them - see [this article](https://www.spiritenergy.co.uk/kb-flat-roof-solar-mounting).
-  * East-West mounting vs South-facing - mounting pairs of East-West facing panels means not needing to leave gaps between the rows, and can be a better choice.
-  * The higher the panels are angled, the bigger the spacing between rows needs to be - so sometimes a less-than-optimal angle is still better as it enables more panels to fit the space.
-  * Higher-angled panels might have problems with wind and require a strong roof to be attached to or ballasted on.
-  * Installations are often limited by roof strength rather than available area.
-  * Sometimes more panels can be fit on the roof if they go in parallel with the building shape, rather than facing due South.
+If the `proj` being used by postGIS doesn't have the datum grids, the result will be way off. It will only be correct if the file `OSTN15_NTv2_OSGBtoETRS.gsb` is in the directory indicated by the environment variable `PROJ_LIB` (or its default location of `/usr/share/proj` or `/usr/local/share/proj`, depending on distro, if `PROJ_LIB` is unset). If your proj version is < 7, this file is found in the project [proj-datumgrid](https://github.com/OSGeo/proj-datumgrid). If it is >=7, it is found in the project [proj-data](https://github.com/OSGeo/PROJ-data). Run `SELECT PostGIS_PROJ_Version();` To get the proj version.
 
-   The current approach treats them as south-facing and has an input parameter for the angle to mount them at (default 10). The usable area decreases as the angle increases, as the space in between the rows increases.
-  
-* Sometimes an area we want to model might be interested in putting some PV installations in a field - so there needs to be a way of adding arbitrary extra polygons to the mask so that horizon and irradiation values are calculated for those area.
+It seems that the postGIS in my distro package manager (debian-based) does include the datum grids by default; however the nixpkgs postGIS does not. See [shared-pg](https://github.com/cse-bristol/shared-pg/blob/master/machine-configuration.nix#L10-L14) for an example of how to get a nixpkgs postGIS to detect the datum grids. Also, [dev-db-shell.nix](https://github.com/cse-bristol/320-albion/blob/master/dev/db-shell.nix) will setup a shell which includes this, see [dev-notes](https://github.com/cse-bristol/320-albion/blob/master/dev/dev-notes.md) for more info. I don't know if the docker postGIS includes them or not.
 
-* Currently we use the built-in efficiency model in PV-GIS. This takes into account type of cell, temperature and irradiation, aging, and losses due to power transformations and cabling. These last two (aging and system losses) are rolled into an API parameter `loss`, which is a percentage with the recommended value being 14. It does not take shading into account but the horizon system should do so, especially as we currently use the highest value from all pixels in a roof plane per horizon slice, to emulate the strong negative effects of partial shading.
+### Albion dependencies
+
+At least some bits of the albion database must have been created locally using scripts from [320-albion-import](https://github.com/cse-bristol/320-albion). Currently, the bits required by all are:
+* local dev setup: `database/local-dev-setup.sql` - run manually
+* basic setup: `database/setup.db.sql` - will be run whenever any import job is run, or can be run manually
+
+Each model also needs some bits of Albion at least partially loaded:
+
+#### solar PV:
+* OSMM
+* OSMM heights
+
+#### heat demand:
+* buildings aggregate
+
+#### hard/soft dig:
+* OSMM highways
+* OS Greenspace
+* OS natural land
+
+## Environment variables
+
+* `LIDAR_DIR` - dir to store downloaded LiDAR tiles and tiles that have been extracted and processed from the raw format
+* `BULK_LIDAR_DIR` - directory containing bulk LiDAR for England, Scotland and Wales. This should have the following directory structure:
+  * 206817_LIDAR_Comp_DSM
+    * LIDAR-DSM-50CM-ENGLAND-EA
+    * LIDAR-DSM-1M-ENGLAND-EA
+    * LIDAR-DSM-2M-ENGLAND-EA
+  * scotland
+  * wales
+* `HEAT_DEMAND_DIR` - dir to store intermediate stages of heat demand modelling. Final outputs are in the database.
+* `SOLAR_DIR` - dir to store outputs and intermediate stages of solar PV modelling. Final outputs are in the database.
+* `PVGIS_DATA_TAR_FILE_DIR` - The directory containing the `pvgis_data.tar` file
+* `PVGIS_GRASS_DBASE_DIR` - where to create the GRASS dbase for PVMAPS
+* `SMTP_FROM` - (optional) email to send notifications from
+* `SMTP_PASS` - (optional) password for email to send notifications from
+* `EMAIL_TO_NOTIFY_ON_FAILURE` - (optional) email to notify if jobs or result extraction fails

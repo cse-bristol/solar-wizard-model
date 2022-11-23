@@ -3,15 +3,20 @@
 -- LIDAR API size limit.
 --
 CREATE TEMPORARY TABLE {grid_table} ON COMMIT DROP AS
-WITH bbox AS (
+WITH buffered_bounds AS (
+    SELECT
+        ST_Buffer(bounds, coalesce((params->>'horizon_search_radius')::int, 0)) AS bounds
+    FROM models.job_queue
+    WHERE job_id = %(job_id)s
+),
+bbox AS (
     SELECT
         bounds,
         ST_Xmin(bounds) as xmin,
         ST_Ymin(bounds) as ymin,
         ST_Xmax(bounds) as xmax,
         ST_Ymax(bounds) as ymax
-    FROM models.job_queue
-    WHERE job_id = %(job_id)s
+    FROM buffered_bounds
 ),
 cells AS (
     SELECT

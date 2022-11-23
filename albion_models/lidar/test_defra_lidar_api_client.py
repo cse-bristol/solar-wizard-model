@@ -9,7 +9,7 @@ from typing import List
 from unittest import mock
 
 from albion_models.lidar.defra_lidar_api_client import _get_lidar, _wkt_to_rings
-from albion_models.lidar.lidar import LidarJobTiles
+from albion_models.lidar.lidar import LidarTile
 from albion_models.paths import PROJECT_ROOT
 
 _lidar_dir = join(PROJECT_ROOT, "tmp")
@@ -54,9 +54,8 @@ def mocked_requests_get(*args, **kwargs):
 class LidarTestCase(unittest.TestCase):
 
     @mock.patch('requests.get', side_effect=mocked_requests_get)
-    @mock.patch('albion_models.lidar.lidar._tile_intersects_bounds', new=lambda *a, **k: True)
     def test_create_tiffs(self, mock_get):
-        tiffs = _get_lidar(None, 0, [[]], _lidar_dir)
+        tiffs = _get_lidar([[]], _lidar_dir)
         self._assert_tiffs([
             "tl3555_DSM_1M.tiff",
             "tl3555_DSM_2M.tiff",
@@ -65,65 +64,8 @@ class LidarTestCase(unittest.TestCase):
         ], tiffs)
 
     @mock.patch('requests.get', side_effect=mocked_requests_get)
-    @mock.patch('albion_models.lidar.lidar._tile_intersects_bounds', new=lambda *a, **k: True)
-    def test_dont_redownload_same_year(self, mock_get):
-        os.makedirs(_lidar_dir, exist_ok=True)
-        self._create_zip_file("2017-LIDAR-DSM-1M-TL35ne.zip", from_zip="LIDAR-DSM-1M-TL35ne.zip")
-
-        tiffs = _get_lidar(None, 0, [[]], _lidar_dir)
-
-        self.assertNotIn(
-            mock.call('https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARCOMP/LIDAR-DSM-1M-TL35ne.zip'),
-            mock_get.call_args_list)
-        self._assert_tiffs([
-            "tl3555_DSM_1M.tiff",
-            "tl3555_DSM_2M.tiff",
-            "tl3556_DSM_1M.tiff",
-            "tl3556_DSM_2M.tiff",
-        ], tiffs)
-
-    @mock.patch('requests.get', side_effect=mocked_requests_get)
-    @mock.patch('albion_models.lidar.lidar._tile_intersects_bounds', new=lambda *a, **k: True)
-    def test_dont_overwrite_newer_files(self, mock_get):
-        os.makedirs(_lidar_dir, exist_ok=True)
-        self._create_zip_file("2018-LIDAR-DSM-1M-TL35ne.zip", from_zip="LIDAR-DSM-1M-TL35ne.zip")
-
-        tiffs = _get_lidar(None, 0, [[]], _lidar_dir)
-
-        self.assertNotIn(
-            mock.call('https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARCOMP/LIDAR-DSM-1M-TL35ne.zip'),
-            mock_get.call_args_list)
-        self._assert_tiffs([
-            "tl3555_DSM_1M.tiff",
-            "tl3555_DSM_2M.tiff",
-            "tl3556_DSM_1M.tiff",
-            "tl3556_DSM_2M.tiff",
-        ], tiffs)
-
-    @mock.patch('requests.get', side_effect=mocked_requests_get)
-    @mock.patch('albion_models.lidar.lidar._tile_intersects_bounds', new=lambda *a, **k: True)
-    def test_handle_existing_tiffs_from_old_approach(self, mock_get):
-        os.makedirs(_lidar_dir, exist_ok=True)
-        self._create_zip_file("2018-LIDAR-DSM-1M-TL35ne.zip", from_zip="LIDAR-DSM-1M-TL35ne.zip")
-        self._create_file("2018_tl3555_DSM_1M.tiff")
-        self._create_file("2018_tl3556_DSM_1M.tiff")
-
-        tiffs = _get_lidar(None, 0, [[]], _lidar_dir)
-
-        self.assertNotIn(
-            mock.call('https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARCOMP/LIDAR-DSM-1M-TL35ne.zip'),
-            mock_get.call_args_list)
-        self._assert_tiffs([
-            "tl3555_DSM_1M.tiff",
-            "tl3555_DSM_2M.tiff",
-            "tl3556_DSM_1M.tiff",
-            "tl3556_DSM_2M.tiff",
-        ], tiffs)
-
-    @mock.patch('requests.get', side_effect=mocked_requests_get)
-    @mock.patch('albion_models.lidar.lidar._tile_intersects_bounds', new=lambda *a, **k: True)
     def test_prefer_1m(self, mock_get):
-        _get_lidar(None, 0, [[]], _lidar_dir)
+        _get_lidar([[]], _lidar_dir)
 
         self.assertIn(
             mock.call('https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARCOMP/LIDAR-DSM-1M-TL35ne.zip'),
@@ -160,8 +102,8 @@ class LidarTestCase(unittest.TestCase):
             actual = fn(*tup[:-1])
             assert expected == actual, f"\n{tup[:-1]}\nExpected: {expected}\nActual  : {actual}"
 
-    def _assert_tiffs(self, expected: List[str], ret_value: LidarJobTiles):
-        in_tiles_object = ret_value.all_filenames()
+    def _assert_tiffs(self, expected: List[str], ret_value: List[LidarTile]):
+        in_tiles_object = [t.filename for t in ret_value]
         assert len(expected) == len(in_tiles_object), f"{expected} length != {in_tiles_object} length"
         for name in expected:
             assert join(_lidar_dir, name) in in_tiles_object
