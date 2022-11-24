@@ -9,6 +9,12 @@ _failed = {"roof_plane_id": 4564,
            "slope": 25.924800796490043,
            "is_flat": False}
 
+_no_panels = {"roof_plane_id": 2620,
+              "roof": "Polygon ((402034.20776647521415725 202521.03231001805397682, 402033.70807106170104817 202520.51486026970087551, 402034.20776647509774193 202520.03231001817039214, 402034.19062131328973919 202520.01455568341771141, 402035.07987398374825716 202519.15581436161301099, 402032.27570524608017877 202516.29223845576052554, 402030.64963580697076395 202517.85775490032392554, 402033.9720082322601229 202521.25997910683508962, 402034.20776647521415725 202521.03231001805397682))",
+              "aspect": 10,
+              "slope": 224,
+              "is_flat": True}
+
 
 def assert_panel_count(roof, count):
     panels = _roof_panels(
@@ -30,3 +36,6 @@ class PanelTest(ParameterisedTestCase):
         # buffering from the edge of the building had split it into parts). Fixed by
         # making the algorithm only use the largest sub-polygon of a multi.
         assert_panel_count(_failed, 1)
+
+    def test_small_flat_roof(self):
+        assert_panel_count(_no_panels, 1)
