@@ -248,7 +248,7 @@ def parse_cli_args():
     extract_parser.add_argument('--gpkg_dir', help="Geopackage output file location (dir / folder)")
     extract_parser.add_argument("--pg_uri", **pg_uri_arg)
     extract_parser.add_argument("--extract_job_info", help="Extract job information (Open Solar run ID needed)",
-                                action='store_false', default=False)
+                                action='store_true', default=False)
     extract_parser.add_argument("--extract_base_info", help="Extract base information (e.g. LSOAs, LAs)",
                                 action='store_true', default=False)
     extract_parser.add_argument("--start_job_id", help="Minimum job id to export (inclusive)")

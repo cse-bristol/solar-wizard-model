@@ -21,6 +21,7 @@ def export(pg_conn, pg_uri: str, gpkg_fname: str, os_run_id: int, job_id: int, r
     """
     layer_names = get_layer_names(gpkg_fname)
     if regenerate or _INSTALLATIONS not in layer_names:
+        # The "installation_id" column below is needed as django doesn't support multi-column foreign keys or joins
         if command_to_gpkg(
             pg_conn, pg_uri, gpkg_fname, _INSTALLATIONS,
             src_srs=4326, dst_srs=4326,
@@ -34,7 +35,8 @@ def export(pg_conn, pg_uri: str, gpkg_fname: str, os_run_id: int, job_id: int, r
                 WHERE job_id = {job_id} 
                 GROUP BY roof_plane_id
             )
-            SELECT 
+            SELECT
+                rp.toid || '_' || rp.roof_plane_id AS installation_id,
                 {os_run_id} AS run_id,
                 rp.job_id AS job_id,
                 rp.toid AS toid,
@@ -58,12 +60,14 @@ def export(pg_conn, pg_uri: str, gpkg_fname: str, os_run_id: int, job_id: int, r
             raise RuntimeError("Error running ogr2ogr")
 
     if regenerate or _PANELS not in layer_names:
+        # The "installation_id" column below is needed as django doesn't support multi-column foreign keys or joins
         if command_to_gpkg(
             pg_conn, pg_uri, gpkg_fname, _PANELS,
             src_srs=4326, dst_srs=4326,
             overwrite=True,
             command=f"""
             SELECT 
+                toid || '_' || roof_plane_id AS installation_id,
                 {os_run_id} AS run_id,
                 job_id AS job_id,
                 toid AS toid,

@@ -38,7 +38,7 @@ def export(pg_conn, pg_uri: str, gpkg_fname: str, os_run_id: int, job_id: int, r
             overwrite=True,
             command=
             "WITH cte AS (SELECT toid, SUM(kwp) AS kwp, SUM(kwh_year) AS kwh "
-            " FROM models.solar_pv WHERE job_id = {job_id} GROUP BY toid) "
+            " FROM models.pv_panel WHERE job_id = {job_id} GROUP BY toid) "
             "SELECT "
             " {os_run_id} AS run_id, "
             " mp.job_id AS job_id, "
