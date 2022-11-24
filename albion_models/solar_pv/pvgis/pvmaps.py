@@ -447,6 +447,12 @@ class PVMaps:
         self._g_temp_mapset = f"pvmaps.{self.uid}"
         logging.info(f"_create_temp_mapset {self._g_temp_mapset}")
 
+        # Clean up mapset left behind by a previous run
+        temp_mapset_path: str = join(self._g_dbase, self._g_location, self._g_temp_mapset)
+        if os.path.exists(temp_mapset_path):
+            logging.warning(f"Found existing mapset at {temp_mapset_path} - removing it before re-creating")
+            shutil.rmtree(temp_mapset_path)
+
         # Create temp mapset
         # New mapset has same CRS as self._g_location
         cmd = f"grass -c -e {self._g_dbase}/{self._g_location}/{self._g_temp_mapset}"
