@@ -20,6 +20,9 @@ from datetime import date
 from subprocess import Popen
 from typing import List, Tuple, Optional
 
+from albion_models.solar_pv.pvgis.grass_gis_user import GrassGISUser
+from albion_models.solar_pv.pvgis.pymaps_setup import PVMapsSetup
+
 ##
 # Raster names used in grass db
 ELEVATION = "elevation"
@@ -48,15 +51,13 @@ OUT_PV_POWER_WIND_BASENAME = "hpv_wind_"
 OUT_PV_POWER_WIND_SPECTRAL_BASENAME = "hpv_wind_spectral_"
 ##
 
-PERMANENT_MAPSET = "PERMANENT"
-
 CSI = "cSi"  # Case matches spectraleffect_ rasters!
 CDTE = "CdTe"  # Case matches spectraleffect_ rasters!
 
 PI_HALF: float = math.pi / 2.0
 
 
-class PVMaps:
+class PVMaps(GrassGISUser):
     """Class that sets up a grass db for PV Maps and runs the PV Maps steps"""
     def __init__(self,
                  grass_dbase_dir: str,
@@ -93,17 +94,11 @@ class PVMaps:
         approx equal buckets of days
         :param job_id optional id used where dirs etc need to be created for a job, uses process id and time if not set
         """
-        self._executor: Optional[ThreadPoolExecutor] = None
-        self._gisrc_filename: Optional[str] = None
-        self._grass_env = None
-        self._keep_temp_mapset = keep_temp_mapset
+        super().__init__(27700, grass_dbase_dir, job_id)
+        self.pvmaps_setup: PVMapsSetup = PVMapsSetup(grass_dbase_dir, job_id, pvgis_data_tar_file, self._grass_env)
 
-        if os.path.exists(grass_dbase_dir):
-            if not os.path.isdir(grass_dbase_dir):
-                raise ValueError(f"Grass dbase directory ({grass_dbase_dir}) must be a directory")
-        else:
-            os.makedirs(grass_dbase_dir)
-        self._g_dbase: str = grass_dbase_dir
+        self._executor: Optional[ThreadPoolExecutor] = None
+        self._keep_temp_mapset = keep_temp_mapset
 
         if not os.path.isdir(input_dir):
             raise ValueError(f"Input directory ({input_dir}) must exist and be a directory")
@@ -116,7 +111,7 @@ class PVMaps:
             os.makedirs(output_dir)
         self._output_dir: str = output_dir
 
-        self._pvgis_data_tar: str = pvgis_data_tar_file
+
 
         num_cpus = os.cpu_count()
         if num_cpus is None:
@@ -158,26 +153,16 @@ class PVMaps:
                 raise ValueError(f"Num PV calcs per year must be between 1 and 365")
             else:
                 self._pv_time_steps = self._calc_pv_time_steps(num_pv_calcs_per_year)
-
-        if job_id:
-            self.uid = f"job_{job_id}"
-        else:
-            self.uid = f"{os.getpid()}.{int(time.time())}"
         ###
 
-        self._g_location: str = "grassdata"
 
         self._g_temp_mapset: str = ""
-
-        self._gisrc_filename = join(tempfile.gettempdir(), f"pvmaps.{self.uid}.rc")
 
         self.solar_decl: List[float] = self._calc_solar_declinations()
 
         self._executor = ThreadPoolExecutor(max_workers=self._num_procs)
 
-        self._setup_grass_env()
 
-        self._init_grass_db_pvmaps_data()
 
         os.makedirs(self._output_dir, exist_ok=True)
 
@@ -190,8 +175,6 @@ class PVMaps:
     def __del__(self):
         if self._executor:
             self._executor.shutdown()
-        if self._gisrc_filename is not None and os.path.exists(self._gisrc_filename):
-            os.remove(self._gisrc_filename)
 
     def create_pvmap(self, elevation_filename: str, mask_filename: str,
                      flat_roof_aspect_filename: Optional[str] = None,
@@ -311,60 +294,6 @@ class PVMaps:
             prev_end_f = end_f
         return rtn_val
 
-    def _setup_grass_env(self):
-        """See https://grasswiki.osgeo.org/wiki/Working_with_GRASS_without_starting_it_explicitly
-        """
-        # write initial gisrc file
-        self._update_mapset(PERMANENT_MAPSET)
-
-        self._find_grass_locn()
-        self._check_reqd_grass_paths()
-
-        # Setup env vars
-        grass_env = os.environ.copy()
-        grass_env["GISBASE"] = self._grass_install_dir
-        grass_env["GISRC"] = self._gisrc_filename
-
-        grass_bin = join(self._grass_install_dir, 'bin')
-        grass_scripts = join(self._grass_install_dir, 'scripts')
-        grass_env["PATH"] = f"{grass_bin}{os.pathsep}" \
-                            f"{grass_scripts}{os.pathsep}" \
-                            f"{grass_env.get('PATH', '')}"
-
-        grass_lib = join(self._grass_install_dir, 'lib')
-        grass_env["LD_LIBRARY_PATH"] = f"{grass_lib}{os.pathsep}" \
-                                       f"{grass_env.get('LD_LIBRARY_PATH', '')}"
-
-        # Ref https://grasswiki.osgeo.org/wiki/Working_with_GRASS_without_starting_it_explicitly#Python:_GRASS_GIS_8_with_existing_location
-        python_path: str = join(self._grass_install_dir, "etc", "python")
-        grass_env["PYTHONPATH"] = f"{python_path}{os.pathsep}{grass_env.get('PYTHONPATH', '')}"  # for sub-processes
-        self._grass_env = grass_env
-
-    def _check_reqd_grass_paths(self):
-        grass_bin = join(self._grass_install_dir, 'bin')
-        grass_scripts = join(self._grass_install_dir, 'scripts')
-        grass_lib = join(self._grass_install_dir, 'lib')
-        grass_python = join(self._grass_install_dir, 'etc', 'python')
-        if not os.path.exists(self._grass_install_dir):
-            raise FileNotFoundError(f"Path {self._grass_install_dir} not found")
-        if not os.path.exists(self._gisrc_filename):
-            raise FileNotFoundError(f"Path {self._gisrc_filename} not found")
-        if not os.path.exists(grass_bin):
-            raise FileNotFoundError(f"Path {grass_bin} not found")
-        if not os.path.exists(grass_scripts):
-            raise FileNotFoundError(f"Path {grass_scripts} not found")
-        if not os.path.exists(grass_lib):
-            raise FileNotFoundError(f"Path {grass_lib} not found")
-        if not os.path.exists(grass_python):
-            raise FileNotFoundError(f"Path {grass_python} not found")
-
-    def _update_mapset(self, mapset: str):
-        with open(self._gisrc_filename, "w") as rcfile:
-            rcfile.write(f"GISDBASE: {self._g_dbase}\n")
-            rcfile.write(f"LOCATION_NAME: {self._g_location}\n")
-            rcfile.write(f"MAPSET: {mapset}\n")
-            rcfile.write("\n")
-
     @staticmethod
     def _run_cmd_via_method(method, args_list: List[Tuple]) -> None:
         for args in args_list:
@@ -391,54 +320,10 @@ class PVMaps:
         if exc_str:
             raise Exception(f"Exception(s) raised\n{exc_str}")
 
-    def _run_cmd(self, cmd_line: str, exp_returncode: int = 0) -> str:
-        """ Run command, check outputs.
-        :param cmd_line: Command to run
-        :param exp_returncode: Raises exception if return is not this value
-        :return: process output text with control codes removed and prefixed with the pid
-        """
-        arguments: List[str] = shlex.split(cmd_line)
-
-        process = Popen(arguments, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=self._grass_env)
-        process_output: str = ""
-        with process.stdout:
-            line_s = process.stdout.read().decode("utf-8").replace("\n", " ").strip()
-            line_s = re.sub(r"[\x00-\x1f\x7f-\x9f]", "", line_s)
-            if len(line_s) > 0:
-                log_msg: str = f"{process.pid}: {line_s}"
-                logging.debug(log_msg)
-                process_output += log_msg
-        rtn_code: int = process.wait()
-
-        if rtn_code != exp_returncode:
-            logging.error(process_output)
-            raise Exception(f"Command {cmd_line} returned error code {rtn_code}")
-
-        return process_output
-
-    def _init_grass_db_pvmaps_data(self):
-        location = join(self._g_dbase, self._g_location)
-        permanent_mapset = join(self._g_dbase, self._g_location, PERMANENT_MAPSET)
-
-        if not os.path.exists(location):
-            if not os.path.isfile(self._pvgis_data_tar):
-                raise FileNotFoundError(f"File {self._pvgis_data_tar} not found")
-
-            logging.info("_init_grass_db_pvmaps_data")
-
-            # Create a new grass gis database
-            self._run_cmd(f"grass -c EPSG:4326 -e {location}")
-            # Extract the pvgis data into it's permanent mapset
-            with tarfile.open(self._pvgis_data_tar, "r") as tar:
-                tar.extractall(path=permanent_mapset)
-
-        elif not os.path.exists(permanent_mapset):
-            raise FileNotFoundError(f"Grass DB path ({location}) exists but {PERMANENT_MAPSET} is missing!")
-
     def _remove_temp_mapset_if_reqd(self):
         if not self._keep_temp_mapset:
             logging.info("_remove_temp_mapset_if_reqd")
-            if self._g_temp_mapset and self._g_temp_mapset != PERMANENT_MAPSET:
+            if self._g_temp_mapset and self._g_temp_mapset != self.PERMANENT_MAPSET:
                 shutil.rmtree(join(self._g_dbase, self._g_location, self._g_temp_mapset))
 
     def _create_temp_mapset(self):
@@ -705,43 +590,8 @@ class PVMaps:
         self.monthly_wh_rasters = monthly_wh_rasters
         self.horizons = horizons
 
-    def _find_grass_locn(self):
-        self._grass_install_dir = ""
-        g_exe_locns: List[str] = self._whereis("grass")
-        for g_exe_locn in g_exe_locns:
-            if g_exe_locn.endswith("grass"):
-                g_root_dir: str = os.path.dirname(g_exe_locn)
-                if g_root_dir.endswith("bin"):
-                    g_root_dir: str = os.path.dirname(g_root_dir)
-                for f in os.listdir(g_root_dir):
-                    if f.startswith("grass"):
-                        self._grass_install_dir = join(g_root_dir, f)
-                        logging.info(f"Using grass from here: {self._grass_install_dir}")
-                        return
-        raise FileNotFoundError(f"Failed to find grass install dir")
-
-    @staticmethod
-    def _whereis(cmd: str) -> List[str]:
-        """Based on shutil.which() but does whereis i.e. finds all matches where a dir from
-        the path contains an executable file called 'cmd'"""
-        matches = []
-        path = os.environ.get("PATH", None)
-        if path is None:
-            path = os.defpath
-        if path:
-            path_dirs = path.split(os.pathsep)
-            seen = set()
-            for path_dir in path_dirs:
-                if path_dir not in seen:
-                    seen.add(path_dir)
-                    name = os.path.join(path_dir, cmd)
-                    if os.path.exists(name) and os.access(name, os.F_OK | os.X_OK) and not os.path.isdir(name):
-                        matches.append(name)
-        return matches
-
 
 # Command line processing
-# e.g. --verbose --input_dir ../pvmaps/SampleInputsNeil_4326/ --keep_temp_mapset --pv_model_coeff_file_dir ../pvgis_scripts/PVPerf elevation_4326.tif mask_4326.tif
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter,
                                      description="Set up a grass db for PV Maps and run the PV Maps steps",

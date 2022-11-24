@@ -75,6 +75,7 @@ class TestPVMaps:
                 cls._clean_test_mapsets()
             print("Running create_pvmap for tests")
             cls.instance.create_pvmap(cls.ELEVATION_RASTER_FILENAME, cls.MASK_RASTER_FILENAME, cls.FLAT_ROOF_RASTER_FILENAME,
+                                      None,
                                       cls.FORCED_SLOPE_FILENAME, cls.FORCED_ASPECT_FILENAME, forced_horizon_basename)
 
         # Disable mask if it's enabled
