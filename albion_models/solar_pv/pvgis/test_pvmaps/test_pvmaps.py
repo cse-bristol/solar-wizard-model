@@ -63,7 +63,7 @@ class TestPVMaps:
 
         test_mapset = None
         num_test_mapsets = 0
-        mapsets = os.listdir(f"{GRASS_DBASE}/grassdata")
+        mapsets = os.listdir(f"{GRASS_DBASE}/grassdata_27700")
         for mapset in mapsets:
             if mapset.startswith("pvmaps."):
                 test_mapset = mapset
@@ -89,10 +89,10 @@ class TestPVMaps:
 
     @staticmethod
     def _clean_test_mapsets():
-        mapsets = os.listdir(f"{GRASS_DBASE}/grassdata")
+        mapsets = os.listdir(f"{GRASS_DBASE}/grassdata_27700")
         for mapset in mapsets:
             if mapset.startswith("pvmaps."):
-                shutil.rmtree(f"{GRASS_DBASE}/grassdata/{mapset}")
+                shutil.rmtree(f"{GRASS_DBASE}/grassdata_27700/{mapset}")
 
     def _get_raster_val(self, raster: str, lon_east: float, lat_north: float):
         val: float = 0.0

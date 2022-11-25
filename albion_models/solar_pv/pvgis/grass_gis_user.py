@@ -15,10 +15,11 @@ from typing import List, Optional, Dict
 
 
 class GrassGISUser(ABC):
-    PERMANENT_MAPSET = "PERMANENT"
+    PERMANENT_MAPSET: str = "PERMANENT"
+    GRASSDATA_DIR: str = "grassdata"
 
     def __init__(self, crs: int, grass_dbase_dir: str, job_id: int):
-        self._g_location: str = f"grassdata_{crs}"
+        self._g_location: str = f"{self.GRASSDATA_DIR}_{crs}"
 
         if os.path.exists(grass_dbase_dir):
             if not os.path.isdir(grass_dbase_dir):
