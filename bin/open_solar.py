@@ -111,7 +111,7 @@ def create_run(pg_conn, name: str, cell_size: int, cell_ids: Optional[List[int]]
             """,
             template="""(
                 'open_solar:' || %s || ':' || %s || ',' || %s,
-                ST_Multi(ST_GeomFromText( %s )),
+                ST_Multi(ST_GeomFromText(%s, 27700)),
                 true,
                 %s,
                 true)
