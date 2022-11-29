@@ -9,7 +9,7 @@ import albion_models.solar_pv.tables as tables
 import psycopg2.extras
 from albion_models import gdal_helpers
 from albion_models.db_funcs import sql_script, copy_csv, count, connection
-from albion_models.postgis import get_merged_lidar
+from albion_models.postgis import get_merged_lidar_tiles
 from albion_models.solar_pv import mask
 from albion_models.solar_pv.raster_names import MASK_4326_TIF, MASK_BUF1_TIF, ELEVATION_4326_TIF
 from albion_models.solar_pv.roof_polygons.roof_polygons import get_flat_roof_aspect_sql, create_flat_roof_aspect, \
@@ -31,6 +31,7 @@ def generate_rasters(pg_uri: str,
     the 4326 rasters.
     """
 
+    elevation_vrt = join(solar_dir, "elev.vrt")
     elevation_raster = join(solar_dir, 'elevation.tif')
     aspect_raster = join(solar_dir, 'aspect.tif')
     slope_raster = join(solar_dir, 'slope.tif')
@@ -39,17 +40,18 @@ def generate_rasters(pg_uri: str,
 
     if count(pg_uri, tables.schema(job_id), tables.LIDAR_PIXEL_TABLE) > 0:
         logging.info("Not creating rasters, raster data already loaded.")
-        res = gdal_helpers.get_res(elevation_raster)
+        res = gdal_helpers.get_res(elevation_vrt)
         return (join(solar_dir, ELEVATION_4326_TIF),
                 join(solar_dir, MASK_4326_TIF), res)
 
     with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
-        get_merged_lidar(pg_conn, job_id, elevation_raster)
+        elevation_tiles = get_merged_lidar_tiles(pg_conn, job_id, solar_dir)
+        gdal_helpers.create_vrt(elevation_tiles, elevation_vrt)
 
-    srid = gdal_helpers.get_srid(elevation_raster, fallback=27700)
-    res = gdal_helpers.get_res(elevation_raster)
+    srid = gdal_helpers.get_srid(elevation_vrt, fallback=27700)
+    res = gdal_helpers.get_res(elevation_vrt)
 
-    unit_dims, unit = gdal_helpers.get_srs_units(elevation_raster)
+    unit_dims, unit = gdal_helpers.get_srs_units(elevation_vrt)
     if unit_dims != 1.0 or unit != 'metre':
         # If this ever needs changing - the `resolution_metres` param of `create_roof_polygons()`
         # needs a resolution per metre rather than per whatever the unit of the SRS is -
@@ -73,7 +75,7 @@ def generate_rasters(pg_uri: str,
     gdal_helpers.expand(mask_raster_buf3, mask_raster_buf3, buffer=horizon_search_radius)
 
     logging.info("Cropping lidar to mask dimensions...")
-    gdal_helpers.crop_or_expand(elevation_raster, mask_raster_buf3, elevation_raster,
+    gdal_helpers.crop_or_expand(elevation_vrt, mask_raster_buf3, elevation_raster,
                                 adjust_resolution=True)
 
     logging.info("Creating aspect raster...")

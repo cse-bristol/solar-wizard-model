@@ -145,64 +145,6 @@ def _50cm_coverage(pg_conn, job_id: int) -> float:
     )
 
 
-def get_merged_lidar(pg_conn, job_id: int, output_file: str):
-    _50cm_cov = _50cm_coverage(pg_conn, job_id)
-    logging.info(f"50cm LiDAR coverage is {_50cm_cov}, threshold is {USE_50CM_THRESHOLD}")
-
-    if _50cm_cov >= USE_50CM_THRESHOLD:
-        logging.info(f"Using 50cm coverage")
-        sql = """
-        WITH all_res AS (
-                SELECT filename, ST_Resample(rast, (select rast from models.lidar_50cm limit 1)) AS rast 
-                FROM models.lidar_2m
-                LEFT JOIN models.job_queue q 
-                ON st_intersects(rast, ST_Buffer(q.bounds, coalesce((q.params->>'horizon_search_radius')::int, 0)))
-                WHERE q.job_id = %(job_id)s
-            UNION ALL
-                SELECT filename, ST_Resample(rast, (select rast from models.lidar_50cm limit 1)) AS rast 
-                FROM models.lidar_1m
-                LEFT JOIN models.job_queue q 
-                ON st_intersects(rast, ST_Buffer(q.bounds, coalesce((q.params->>'horizon_search_radius')::int, 0)))
-                WHERE q.job_id = %(job_id)s
-            UNION ALL
-                SELECT filename, rast 
-                FROM models.lidar_50cm
-                LEFT JOIN models.job_queue q 
-                ON st_intersects(rast, ST_Buffer(q.bounds, coalesce((q.params->>'horizon_search_radius')::int, 0)))
-                WHERE q.job_id = %(job_id)s
-        ) 
-        SELECT 
-            ST_AsGDALRaster(ST_Union(rast), 'GTiff') AS rast 
-        FROM all_res
-        """
-    else:
-        logging.info(f"Not using 50cm coverage")
-        sql = """
-        WITH all_res AS (
-                SELECT filename, ST_Resample(rast, (select rast from models.lidar_1m limit 1)) AS rast 
-                FROM models.lidar_2m
-                LEFT JOIN models.job_queue q 
-                ON st_intersects(rast, ST_Buffer(q.bounds, coalesce((q.params->>'horizon_search_radius')::int, 0)))
-                WHERE q.job_id = %(job_id)s
-            UNION ALL
-                SELECT filename, rast 
-                FROM models.lidar_1m
-                LEFT JOIN models.job_queue q 
-                ON st_intersects(rast, ST_Buffer(q.bounds, coalesce((q.params->>'horizon_search_radius')::int, 0)))
-                WHERE q.job_id = %(job_id)s
-        ) 
-        SELECT 
-            ST_AsGDALRaster(ST_Union(rast), 'GTiff') AS rast 
-        FROM all_res
-        """
-
-    raster = sql_command(
-        pg_conn, sql, {"job_id": job_id}, result_extractor=lambda res: res[0][0])
-
-    with open(output_file, 'wb') as f:
-        f.write(raster)
-
-
 def get_merged_lidar_tiles(pg_conn, job_id, output_dir: str) -> List[str]:
     _50cm_cov = _50cm_coverage(pg_conn, job_id)
     logging.info(f"50cm LiDAR coverage is {_50cm_cov}, threshold is {USE_50CM_THRESHOLD}")
