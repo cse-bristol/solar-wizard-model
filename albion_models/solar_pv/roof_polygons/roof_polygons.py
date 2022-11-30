@@ -123,6 +123,9 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
             roof_poly = roof_poly.intersection(building_geom)
             roof_poly = largest_polygon(roof_poly)
 
+            if roof_poly.is_empty:
+                continue
+
             # don't allow overlapping roof polygons:
             intersecting_polys = [p for p in polygons_by_toid[toid] if p.intersects(roof_poly)]
             if len(intersecting_polys) > 0:
@@ -130,6 +133,10 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
                 roof_poly = roof_poly.difference(other_polys)
                 roof_poly = largest_polygon(roof_poly)
             roof_poly = make_valid(roof_poly)
+
+            if roof_poly.is_empty:
+                continue
+
             # any other planes in the same toid will now not be allowed to overlap this one:
             polygons_by_toid[toid].append(roof_poly)
 

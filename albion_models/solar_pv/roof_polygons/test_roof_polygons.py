@@ -56,7 +56,8 @@ def _create_polygons_using_test_data(toid: str,
         min_dist_to_edge_large_m=min_dist_to_edge_large_m,
         resolution_metres=1.0)
     for plane in planes:
-        plane['roof_geom_27700'] = wkt.loads(plane['roof_geom_27700'])
+        if "roof_geom_27700" in plane:
+            plane['roof_geom_27700'] = wkt.loads(plane['roof_geom_27700'])
     return planes, building_geom
 
 
@@ -97,4 +98,13 @@ class PanelTest(ParameterisedTestCase):
         self.parameterised_test([
             ("osgb1000021445086", None),
             ("osgb1000021445097", None),
+        ], _do_test)
+
+    def test_failing_roof_polygons(self):
+        def _do_test(toid: str):
+            min_dist_to_edge_m = 0.55
+            _create_polygons_using_test_data(toid, min_dist_to_edge_m=min_dist_to_edge_m)
+
+        self.parameterised_test([
+            ("osgb1000034161241", None),
         ], _do_test)
