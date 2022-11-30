@@ -1,3 +1,4 @@
+import json
 from collections import defaultdict
 from typing import List, Dict
 
@@ -58,99 +59,104 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
 
     for plane in planes:
         toid = plane['toid']
-        # set is_flat, update slope and aspect of flat roofs
-        is_flat = plane['slope'] <= FLAT_ROOF_DEGREES_THRESHOLD
-        plane['is_flat'] = is_flat
-        if is_flat:
-            plane['slope'] = flat_roof_degrees
-
-        # update orientations
         building_geom = building_geoms[toid]
-        orientations = _building_orientations(building_geom)
-        for orientation in orientations:
-            threshold = AZIMUTH_ALIGNMENT_THRESHOLD if not is_flat else FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD
-            if abs(orientation - plane['aspect']) < threshold:
-                plane['aspect'] = orientation
-                break
+        try:
+            # set is_flat, update slope and aspect of flat roofs
+            is_flat = plane['slope'] <= FLAT_ROOF_DEGREES_THRESHOLD
+            plane['is_flat'] = is_flat
+            if is_flat:
+                plane['slope'] = flat_roof_degrees
 
-        # create roof polygon
-        pixels = []
-        for p in plane['inliers_xy']:
-            # Draw a square around the pixel centre:
-            edge = math.sqrt(resolution_metres**2 * 2.0) / 2
-            pixel = square(p[0] - edge, p[1] - edge, edge * 2)
+            # update orientations
+            orientations = _building_orientations(building_geom)
+            for orientation in orientations:
+                threshold = AZIMUTH_ALIGNMENT_THRESHOLD if not is_flat else FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD
+                if abs(orientation - plane['aspect']) < threshold:
+                    plane['aspect'] = orientation
+                    break
 
-            # Rotate the square to align with plane aspect:
-            pixel = affinity.rotate(pixel, -plane['aspect'])
-            pixels.append(pixel)
-        neg_buffer = -((math.sqrt(resolution_metres**2 * 2.0) - resolution_metres) / 2)
-        roof_poly = ops.unary_union(pixels).buffer(neg_buffer,
-                                                   cap_style=CAP_STYLE.square,
-                                                   join_style=JOIN_STYLE.mitre,
-                                                   resolution=1)
-        roof_poly = largest_polygon(roof_poly)
+            # create roof polygon
+            pixels = []
+            for p in plane['inliers_xy']:
+                # Draw a square around the pixel centre:
+                edge = math.sqrt(resolution_metres**2 * 2.0) / 2
+                pixel = square(p[0] - edge, p[1] - edge, edge * 2)
 
-        # # TODO: algorithm extension to consider:
-        # # basically a smooth diff between the poly and its convex hull.
-        # # doesn't work so well when an individual tooth to smooth has a shape
-        # # very different from its own hull.
-        # # 1. cv = convex_hull(poly)
-        # # 2. cvd = cv.difference(poly)
-        # # 3. remove any small things (like pixel jags) from cvd
-        # # 4. use cv.difference(cvd)
-        # cv = roof_poly.convex_hull
-        # cvd = cv.difference(roof_poly)
-        # if cvd.type == 'MultiPolygon':
-        #     cvd = make_valid(MultiPolygon([g.convex_hull for g in cvd.geoms]))
-        #     roof_poly = cv.difference(cvd)
-        # else:
-        #     roof_poly = cv.difference(cvd.convex_hull)
-        # roof_poly = largest_polygon(roof_poly)
-        # roof_poly = make_valid(roof_poly.buffer(0))
-
-        if roof_poly.is_empty:
-            continue
-
-        # constrain roof polygons to building geometry, enforcing min dist to edge:
-        if building_geom.area < large_building_threshold:
-            neg_buffer = -min_dist_to_edge_m
-        else:
-            neg_buffer = -min_dist_to_edge_large_m
-        building_geom = building_geom.buffer(
-            neg_buffer, cap_style=CAP_STYLE.square, join_style=JOIN_STYLE.mitre)
-        roof_poly = roof_poly.intersection(building_geom)
-        roof_poly = largest_polygon(roof_poly)
-
-        # don't allow overlapping roof polygons:
-        intersecting_polys = [p for p in polygons_by_toid[toid] if p.intersects(roof_poly)]
-        if len(intersecting_polys) > 0:
-            other_polys = ops.unary_union(intersecting_polys)
-            roof_poly = roof_poly.difference(other_polys)
+                # Rotate the square to align with plane aspect:
+                pixel = affinity.rotate(pixel, -plane['aspect'])
+                pixels.append(pixel)
+            neg_buffer = -((math.sqrt(resolution_metres**2 * 2.0) - resolution_metres) / 2)
+            roof_poly = ops.unary_union(pixels).buffer(neg_buffer,
+                                                       cap_style=CAP_STYLE.square,
+                                                       join_style=JOIN_STYLE.mitre,
+                                                       resolution=1)
             roof_poly = largest_polygon(roof_poly)
-        roof_poly = make_valid(roof_poly)
-        # any other planes in the same toid will now not be allowed to overlap this one:
-        polygons_by_toid[toid].append(roof_poly)
 
-        # Set usability:
-        if plane['slope'] > max_roof_slope_degrees:
-            plane['usable'] = False
-        elif plane['aspect'] < min_roof_degrees_from_north:
-            plane['usable'] = False
-        elif plane['aspect'] > 360 - min_roof_degrees_from_north:
-            plane['usable'] = False
-        elif roof_poly.area < min_roof_area_m:
-            plane['usable'] = False
-        else:
-            plane['usable'] = True
+            # # TODO: algorithm extension to consider:
+            # # basically a smooth diff between the poly and its convex hull.
+            # # doesn't work so well when an individual tooth to smooth has a shape
+            # # very different from its own hull.
+            # # 1. cv = convex_hull(poly)
+            # # 2. cvd = cv.difference(poly)
+            # # 3. remove any small things (like pixel jags) from cvd
+            # # 4. use cv.difference(cvd)
+            # cv = roof_poly.convex_hull
+            # cvd = cv.difference(roof_poly)
+            # if cvd.type == 'MultiPolygon':
+            #     cvd = make_valid(MultiPolygon([g.convex_hull for g in cvd.geoms]))
+            #     roof_poly = cv.difference(cvd)
+            # else:
+            #     roof_poly = cv.difference(cvd.convex_hull)
+            # roof_poly = largest_polygon(roof_poly)
+            # roof_poly = make_valid(roof_poly.buffer(0))
 
-        # Add other info:
-        plane['roof_geom_27700'] = roof_poly.wkt
-        easting, northing = roof_poly.centroid.xy
-        plane['easting'] = easting[0]
-        plane['northing'] = northing[0]
-        plane['raw_footprint'] = roof_poly.area
-        plane['raw_area'] = roof_poly.area / math.cos(math.radians(plane['slope']))
-        roof_polygons.append(plane)
+            if roof_poly.is_empty:
+                continue
+
+            # constrain roof polygons to building geometry, enforcing min dist to edge:
+            if building_geom.area < large_building_threshold:
+                neg_buffer = -min_dist_to_edge_m
+            else:
+                neg_buffer = -min_dist_to_edge_large_m
+            building_geom = building_geom.buffer(
+                neg_buffer, cap_style=CAP_STYLE.square, join_style=JOIN_STYLE.mitre)
+            roof_poly = roof_poly.intersection(building_geom)
+            roof_poly = largest_polygon(roof_poly)
+
+            # don't allow overlapping roof polygons:
+            intersecting_polys = [p for p in polygons_by_toid[toid] if p.intersects(roof_poly)]
+            if len(intersecting_polys) > 0:
+                other_polys = ops.unary_union(intersecting_polys)
+                roof_poly = roof_poly.difference(other_polys)
+                roof_poly = largest_polygon(roof_poly)
+            roof_poly = make_valid(roof_poly)
+            # any other planes in the same toid will now not be allowed to overlap this one:
+            polygons_by_toid[toid].append(roof_poly)
+
+            # Set usability:
+            if plane['slope'] > max_roof_slope_degrees:
+                plane['usable'] = False
+            elif plane['aspect'] < min_roof_degrees_from_north:
+                plane['usable'] = False
+            elif plane['aspect'] > 360 - min_roof_degrees_from_north:
+                plane['usable'] = False
+            elif roof_poly.area < min_roof_area_m:
+                plane['usable'] = False
+            else:
+                plane['usable'] = True
+
+            # Add other info:
+            plane['roof_geom_27700'] = roof_poly.wkt
+            easting, northing = roof_poly.centroid.xy
+            plane['easting'] = easting[0]
+            plane['northing'] = northing[0]
+            plane['raw_footprint'] = roof_poly.area
+            plane['raw_area'] = roof_poly.area / math.cos(math.radians(plane['slope']))
+            roof_polygons.append(plane)
+        except Exception as e:
+            print(json.dumps(_to_test_data(toid, [plane], building_geom),
+                             sort_keys=True, default=str))
+            raise e
 
     return roof_polygons
 
@@ -256,6 +262,22 @@ def get_outdated_lidar_building_h_sql_4326(pg_uri: str, job_id: int) -> str:
         ).format(
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE)
         ).as_string(pg_conn)
+
+
+def _to_test_data(toid: str, planes: List[dict], building_geom: Polygon) -> dict:
+    planes_ = []
+    for plane in planes:
+        plane = plane.copy()
+        plane["inliers_xy"] = list(map(tuple, plane["inliers_xy"]))
+        if "inliers" in plane:
+            del plane["inliers"]
+        planes_.append(plane)
+
+    return {
+        "planes": planes_,
+        "building_geom": building_geom.wkt,
+        "toid": toid,
+    }
 
 
 if __name__ == '__main__':

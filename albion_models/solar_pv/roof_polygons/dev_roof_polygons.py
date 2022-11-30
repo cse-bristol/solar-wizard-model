@@ -14,7 +14,8 @@ from shapely.geometry import Polygon
 from albion_models import paths
 from albion_models.db_funcs import connection, sql_command
 from albion_models.solar_pv import tables
-from albion_models.solar_pv.roof_polygons.roof_polygons import _building_geoms, _create_roof_polygons
+from albion_models.solar_pv.roof_polygons.roof_polygons import _building_geoms, \
+    _create_roof_polygons, _to_test_data
 
 _MAX_ROOF_SLOPE_DEGREES = 80
 _MIN_ROOF_AREA_M = 8
@@ -98,19 +99,9 @@ def make_roof_polygons(pg_uri: str, job_id: int, toid: str,
 
 def _write_test_data(toid: str, planes: List[dict], building_geom: Polygon, out_dir: str):
     jsonfile = join(out_dir, f"{toid}.json")
-    planes_ = []
-    for plane in planes:
-        plane = plane.copy()
-        plane["inliers_xy"] = list(map(tuple, plane["inliers_xy"]))
-        planes_.append(plane)
 
     with open(jsonfile, 'w') as f:
-        data = {
-            "planes": planes_,
-            "building_geom": building_geom.wkt,
-            "toid": toid,
-        }
-        json.dump(data, f, sort_keys=True)
+        json.dump(_to_test_data(toid, planes, building_geom), f, sort_keys=True)
 
 
 def _write_outputs(name: str, planes: List[dict], out_dir: str, building_geom: Polygon = None):
