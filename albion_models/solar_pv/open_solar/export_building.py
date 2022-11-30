@@ -57,7 +57,6 @@ def export(pg_conn, pg_uri: str, gpkg_fname: str, os_run_id: int, job_id: int, r
             " ST_Y(ab.centroid) AS lat, "
             " ST_X(ST_Transform(ab.centroid, 27700)) AS easting, "
             " ST_Y(ST_Transform(ab.centroid, 27700)) AS northing, "
-            " ab.centroid AS centroid, "
             " ST_AsGeoJSON(ab.centroid) AS centroid_str, "
             " ab.height AS height, "
             " tt.geojson AS geom_str_simplified, "
