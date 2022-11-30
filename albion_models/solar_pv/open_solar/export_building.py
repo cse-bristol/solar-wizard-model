@@ -53,7 +53,12 @@ def export(pg_conn, pg_uri: str, gpkg_fname: str, os_run_id: int, job_id: int, r
             " ab.la AS la_code, "                                   # aggregates.building.la Derived using ABP and OS BoundaryLine (Open government license)
             " ab.lsoa_2011 AS lsoa_2011, "                          # aggregates.building.lsoa_2011 Derived using ABP, ONSPD and census_boundaries (Open government license). Can be null if the OA is not in ONSPD
             " ST_AsGeoJSON(ab.geom_4326) AS geom_str, "
-            " ST_AsGeoJSON(ST_Centroid(ab.geom_4326)) AS centroid_str, "
+            " ST_X(ab.centroid) AS lon, "
+            " ST_Y(ab.centroid) AS lat, "
+            " ST_X(ST_Transform(ab.centroid, 27700)) AS easting, "
+            " ST_Y(ST_Transform(ab.centroid, 27700)) AS northing, "
+            " ab.centroid AS centroid, "
+            " ST_AsGeoJSON(ab.centroid) AS centroid_str, "
             " ab.height AS height, "
             " tt.geojson AS geom_str_simplified, "
             " ST_Area(ab.geom_4326) AS footprint, "
