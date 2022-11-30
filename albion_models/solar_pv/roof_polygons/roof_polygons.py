@@ -118,9 +118,9 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
                 neg_buffer = -min_dist_to_edge_m
             else:
                 neg_buffer = -min_dist_to_edge_large_m
-            building_geom = building_geom.buffer(
+            building_geom_shrunk = building_geom.buffer(
                 neg_buffer, cap_style=CAP_STYLE.square, join_style=JOIN_STYLE.mitre)
-            roof_poly = roof_poly.intersection(building_geom)
+            roof_poly = roof_poly.intersection(building_geom_shrunk)
             roof_poly = largest_polygon(roof_poly)
 
             if roof_poly.is_empty:

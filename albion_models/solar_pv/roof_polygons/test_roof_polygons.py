@@ -107,4 +107,6 @@ class PanelTest(ParameterisedTestCase):
 
         self.parameterised_test([
             ("osgb1000034161241", None),
+            ("osgb1000034178593", None),
+            ("osgb5000005113406742", None),
         ], _do_test)
