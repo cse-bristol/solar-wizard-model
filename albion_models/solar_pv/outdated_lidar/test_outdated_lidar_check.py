@@ -48,4 +48,8 @@ class OutdatedLidarTestCase(ParameterisedTestCase):
             ("osgb1000021445343.json", None),
             ("osgb5000005150981943.json", None),
             ("osgb1000021445346.json", None),
+            # Was throwing an exception in perimeter_gradient.py:
+            ("osgb1000034157635.json", None),
+            # Was throwing an exception in perimeter_gradient.py:
+            ("osgb1000034135706.json", None),
         ], _check)
