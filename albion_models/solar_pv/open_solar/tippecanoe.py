@@ -8,7 +8,7 @@ import shlex
 from os.path import join
 
 
-def cmd_tippecanoe(gpkg_filename: str, layer_name: str) -> str:
+def cmd_tippecanoe(gpkg_filename: str, layer_name: str, fields: list) -> str:
     base_dirname: str = os.path.dirname(gpkg_filename)
     gpkg_bname_stem, _ = os.path.splitext(os.path.basename(gpkg_filename))
 
@@ -17,15 +17,16 @@ def cmd_tippecanoe(gpkg_filename: str, layer_name: str) -> str:
 
     sqlite_fname = join(base_dirname, f"{gpkg_bname_stem}.sqlite")
 
-    _gpkg_to_geojson(gpkg_filename, layer_name, geojson_fname)
+    _gpkg_to_geojson(gpkg_filename, layer_name, geojson_fname, fields)
     _geojson_to_tiles(geojson_fname, layer_name, sqlite_fname)
 
     return sqlite_fname
 
 
-def _gpkg_to_geojson(gpkg_filename: str, layer_name: str, geojson_filename: str):
+def _gpkg_to_geojson(gpkg_filename: str, layer_name: str, geojson_filename: str, fields: list):
     logging.info(f"Generating {geojson_filename} from {gpkg_filename}")
-    cmdline: str = f"ogr2ogr -f GeoJSON -nln localauthority {geojson_filename} {gpkg_filename} {layer_name}"
+    cmdline: str = f"ogr2ogr -f GeoJSON -nln localauthority {geojson_filename} {gpkg_filename}" \
+                   f" -sql 'SELECT {','.join(fields)} FROM {layer_name}'"
 
     p = subprocess.run(shlex.split(cmdline), capture_output=True, text=True)
 
@@ -43,7 +44,8 @@ def _geojson_to_tiles(geojson_filename: str, layer_name: str, sqlite_fname: str)
         f'--layer="{layer_name}" '
         f'--name="{layer_name}" '
         '--force '
-        '--maximum-zoom=3 '   # See https://github.com/mapbox/tippecanoe#zoom-levels e.g. 18 = 4cm, 7 = 80m
+        '--minimum-zoom=8 '   # These are the zoom levels in the Leaflet map
+        '--maximum-zoom=16 '
         '--read-parallel '
         '--no-polygon-splitting '
         '--detect-shared-borders '

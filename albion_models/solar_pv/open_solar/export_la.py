@@ -23,6 +23,8 @@ def export(pg_conn, pg_uri: str, gpkg_fname: str, regenerate: bool):
         ) is not None:
             raise RuntimeError(f"Error running ogr2ogr")
 
-        cmd_tippecanoe(gpkg_fname, _LA)
+        # Don't include the geom_str field as it causes tippecanoe to take ages
+        fields = ["geom", "la_code", "name"]
+        cmd_tippecanoe(gpkg_fname, _LA, fields)
     else:
         logging.info(f"Not regenerating existing {gpkg_fname}")
