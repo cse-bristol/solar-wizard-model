@@ -43,7 +43,13 @@ def export(pg_conn, pg_uri: str, gpkg_fname: str, os_run_id: int, job_id: int, r
             " {os_run_id} AS run_id, "
             " mp.job_id AS job_id, "
             " toid AS toid, "
-            " ab.geom_4326 AS geom, "
+            # ensure panels are aligned with buildings by putting them through the same transformation:
+            """
+            ST_Transform(mb.geom_27700,
+             '+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 '
+             '+y_0=-100000 +datum=OSGB36 +nadgrids=OSTN15_NTv2_OSGBtoETRS.gsb +units=m +no_defs',
+             4326) AS geom,
+            """
             " ab.is_residential AS is_residential, "                # aggregates.building.is_residential (+3 other tables) Derived from AddressBase class (True if class is one of 'RD', 'RH', 'RI')
             " ab.has_rooftop_pv AS has_rooftop_pv, "                # aggregates.building.has_rooftop_pv (+3 other tables) Derived from EPC and pv_installations dataset
             " ab.pv_roof_area_pct AS pv_rooftop_area_pct, "         # aggregates.building.pv_roof_area_pct (+4 other tables) PV roof area % coverage (derived from photo_supply)
@@ -60,12 +66,13 @@ def export(pg_conn, pg_uri: str, gpkg_fname: str, os_run_id: int, job_id: int, r
             " ST_AsGeoJSON(ab.centroid) AS centroid_str, "
             " ab.height AS height, "
             " tt.geojson AS geom_str_simplified, "
-            " ST_Area(ab.geom_4326) AS footprint, "
+            " ab.calculated_area AS footprint, "
             " CASE "
             "  WHEN cte.kwp = 0 THEN 0 "
             "  ELSE cte.kwh / cte.kwp "
             " END AS kwh_per_kwp "
             "FROM aggregates.building ab "
+            "JOIN mastermap.building_27700 mb USING (toid) "
             "JOIN models.pv_building mp USING (toid) "
             "JOIN cte USING (toid) "
             "JOIN {simp_table} tt ON (tt.id = toid) "
