@@ -2,7 +2,6 @@ import logging
 import os
 import shutil
 from os.path import join
-from typing import Optional
 
 import psycopg2.extras
 from psycopg2.sql import Identifier
@@ -13,9 +12,7 @@ from albion_models.solar_pv.outdated_lidar.outdated_lidar_check import check_lid
 from albion_models.solar_pv.panels.panels import place_panels
 from albion_models.solar_pv.pvgis.pvgis import pvgis
 from albion_models.solar_pv.ransac.run_ransac import run_ransac
-from albion_models.solar_pv.rasters import generate_rasters, \
-    generate_flat_roof_aspect_raster_4326, \
-    create_elevation_override_raster
+from albion_models.solar_pv.rasters import generate_rasters
 
 
 def model_solar_pv(pg_uri: str,
@@ -66,13 +63,6 @@ def model_solar_pv(pg_uri: str,
     logging.info("Checking for outdated LiDAR and missing LiDAR coverage...")
     check_lidar(pg_uri, job_id, resolution_metres=res)
 
-    logging.info("Getting building height elevation override raster...")
-    elevation_override_filename: Optional[str] = create_elevation_override_raster(
-        pg_uri=pg_uri,
-        job_id=job_id,
-        solar_dir=solar_dir,
-        elevation_raster_4326_filename=elevation_raster)
-
     logging.info("Detecting roof planes...")
     run_ransac(pg_uri, job_id,
                max_roof_slope_degrees=max_roof_slope_degrees,
@@ -93,12 +83,6 @@ def model_solar_pv(pg_uri: str,
         panel_height_m=panel_height_m,
         panel_spacing_m=panel_spacing_m)
 
-    logging.info("Generating flat roof raster")
-    flat_roof_aspect_raster_4326: Optional[str] = generate_flat_roof_aspect_raster_4326(
-        pg_uri=pg_uri,
-        job_id=job_id,
-        solar_dir=solar_dir)
-
     logging.info("Running PV-GIS...")
     pvgis(pg_uri=pg_uri,
           job_id=job_id,
@@ -110,9 +94,7 @@ def model_solar_pv(pg_uri: str,
           peak_power_per_m2=peak_power_per_m2,
           flat_roof_degrees=flat_roof_degrees,
           elevation_raster=elevation_raster,
-          elevation_override_raster=elevation_override_filename,
           mask_raster=mask_raster,
-          flat_roof_aspect_raster=flat_roof_aspect_raster_4326,
           debug_mode=debug_mode)
 
     if not debug_mode:
