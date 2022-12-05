@@ -169,7 +169,7 @@ def _load_toid_planes(pg_uri: str, job_id: int, toid: str):
 
 
 if __name__ == "__main__":
-    # roof_polys_dir = join(paths.TEST_DATA, "roof_polygons")
+    roof_polys_dir = join(paths.TEST_DATA, "roof_polygons")
     # make_roof_polygons_all(
     #     "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion?application_name=blah",
     #     1621,
@@ -181,8 +181,15 @@ if __name__ == "__main__":
     #     1.0,
     #     roof_polys_dir)
 
-    make_job_roof_polygons(
+    # make_job_roof_polygons(
+    #     "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion?application_name=blah",
+    #     1620,
+    #     1.0,
+    #     "/home/neil/data/albion-models/roof-polys")
+
+    make_roof_polygons(
         "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion?application_name=blah",
-        1620,
+        1627,
+        "osgb1000000137769485",
         1.0,
-        "/home/neil/data/albion-models/roof-polys")
+        roof_polys_dir,)

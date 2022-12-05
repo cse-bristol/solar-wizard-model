@@ -5,6 +5,7 @@ import numpy as np
 from shapely import wkt
 
 from albion_models import paths
+from albion_models.solar_pv.constants import FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD
 from albion_models.solar_pv.roof_polygons.roof_polygons import _building_orientations, \
     _create_roof_polygons
 from albion_models.test.test_funcs import ParameterisedTestCase
@@ -110,3 +111,16 @@ class PanelTest(ParameterisedTestCase):
             ("osgb1000034178593", None),
             ("osgb5000005113406742", None),
         ], _do_test)
+
+    def test_flat_roofs_face_south(self):
+        planes, _ = _create_polygons_using_test_data("osgb1000000137769485")
+        assert len(planes) == 3
+        min_aspect = 180 - FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD
+        max_aspect = 180 + FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD
+        checked = False
+        for plane in planes:
+            if not plane['is_flat']:
+                continue
+            assert min_aspect < plane['aspect'] <= max_aspect
+            checked = True
+        assert checked is True

@@ -69,11 +69,16 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
 
             # update orientations
             orientations = _building_orientations(building_geom)
-            for orientation in orientations:
-                threshold = AZIMUTH_ALIGNMENT_THRESHOLD if not is_flat else FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD
-                if abs(orientation - plane['aspect']) < threshold:
-                    plane['aspect'] = orientation
-                    break
+            if not is_flat:
+                for orientation in orientations:
+                    if abs(orientation - plane['aspect']) < AZIMUTH_ALIGNMENT_THRESHOLD:
+                        plane['aspect'] = orientation
+                        break
+            else:
+                for orientation in orientations:
+                    if abs(orientation - 180) < FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD:
+                        plane['aspect'] = orientation
+                        break
 
             # create roof polygon
             pixels = []
