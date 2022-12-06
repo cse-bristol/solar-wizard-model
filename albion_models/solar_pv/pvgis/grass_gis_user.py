@@ -9,16 +9,18 @@ import subprocess
 import tempfile
 import time
 from abc import ABC
+from concurrent.futures import ThreadPoolExecutor, Future
 from os.path import join
 from subprocess import Popen
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Tuple
 
 
 class GrassGISUser(ABC):
     PERMANENT_MAPSET: str = "PERMANENT"
     GRASSDATA_DIR: str = "grassdata"
 
-    def __init__(self, crs: int, grass_dbase_dir: str, job_id: int):
+    def __init__(self, executor: ThreadPoolExecutor, crs: int, grass_dbase_dir: str, job_id: int,
+                 keep_temp_mapset: bool):
         self._g_location: str = f"{self.GRASSDATA_DIR}_{crs}"
 
         if os.path.exists(grass_dbase_dir):
@@ -34,6 +36,8 @@ class GrassGISUser(ABC):
             self.uid = f"{os.getpid()}_{int(time.time())}_{crs}"
 
         self._gisrc_filename = join(tempfile.gettempdir(), f"pvmaps.{self.uid}.rc")
+        self._executor = executor
+        self._keep_temp_data = keep_temp_mapset
 
         self._setup_grass_env()
 
@@ -178,3 +182,38 @@ class GrassGISUser(ABC):
         return log_msg
 
 
+    def _run_cmd_via_method_p(self, method, args_list: List[Tuple]) -> None:
+        """Ok to use threads as the cmd exe blocks. This does what ThreadPoolExecutor.map()
+        does but also collects multiple exceptions"""
+        futures: List[Tuple[str, Future]] = []
+        for args in args_list:
+            future = self._executor.submit(
+                lambda p: method(*p), args)
+            id_s = f"{method.__name__}{args}"
+            futures.append((id_s, future))
+
+        exc_str: str = ""
+        for id_s, future in futures:
+            try:
+                future.result()
+            except Exception as ex:
+                if exc_str:
+                    exc_str += "\n"
+                exc_str += f"{id_s} raised '{str(ex)}'"
+        if exc_str:
+            raise Exception(f"Exception(s) raised\n{exc_str}")
+
+    @staticmethod
+    def _run_cmd_via_method(method, args_list: List[Tuple]) -> None:
+        for args in args_list:
+            method(*args)
+
+    def _import_raster_raw(self, filename: str, name: str,
+                 grass_env: Optional[Dict] = None) -> None:
+        self._run_cmd(f"r.import input={filename} output={name}", grass_env=grass_env)
+
+    def _export_raster_raw(self, in_raster: str, out_raster_file: str, type: Optional[str] = "Float64",
+                 grass_env: Optional[Dict] = None):
+        type_arg = f"type={type}" if type else ""
+        self._run_cmd(f"r.out.gdal --overwrite input={in_raster} output='{out_raster_file}' "
+                      f"format=GTiff {type_arg} -c createopt=\"COMPRESS=PACKBITS,TILED=YES\"", grass_env=grass_env)

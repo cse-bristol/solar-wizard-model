@@ -1,23 +1,15 @@
 """
 Developed in https://github.com/cse-bristol/710-pvmaps-nix, see there for more details
 """
-import time
-from os.path import join
-
 import argparse
 import logging
 import math
 import os
-import re
-import shlex
 import shutil
-import subprocess
 import sys
-import tarfile
-import tempfile
-from concurrent.futures import ThreadPoolExecutor, Future
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
-from subprocess import Popen
+from os.path import join
 from typing import List, Tuple, Optional
 
 from albion_models.solar_pv.pvgis.grass_gis_user import GrassGISUser
@@ -94,11 +86,17 @@ class PVMaps(GrassGISUser):
         approx equal buckets of days
         :param job_id optional id used where dirs etc need to be created for a job, uses process id and time if not set
         """
-        super().__init__(27700, grass_dbase_dir, job_id)
-        self.pvmaps_setup: PVMapsSetup = PVMapsSetup(grass_dbase_dir, job_id, pvgis_data_tar_file, self._grass_env)
+        num_cpus = os.cpu_count()
+        if num_cpus is None:
+            num_cpus = 1
+        if not (1 <= num_processes <= num_cpus):
+            raise ValueError(f"Num processes must be 1 to {num_cpus}")
+        _executor = ThreadPoolExecutor(max_workers=num_processes)
 
-        self._executor: Optional[ThreadPoolExecutor] = None
-        self._keep_temp_mapset = keep_temp_mapset
+        super().__init__(_executor, 27700, grass_dbase_dir, job_id, keep_temp_mapset)
+        self.pvmaps_setup: PVMapsSetup = PVMapsSetup(_executor, grass_dbase_dir,
+                                                     job_id, pvgis_data_tar_file,
+                                                     self._grass_env, keep_temp_mapset)
 
         if not os.path.isdir(input_dir):
             raise ValueError(f"Input directory ({input_dir}) must exist and be a directory")
@@ -110,15 +108,6 @@ class PVMaps(GrassGISUser):
         else:
             os.makedirs(output_dir)
         self._output_dir: str = output_dir
-
-
-
-        num_cpus = os.cpu_count()
-        if num_cpus is None:
-            num_cpus = 1
-        if not (1 <= num_processes <= num_cpus):
-            raise ValueError(f"Num processes must be 1 to {num_cpus}")
-        self._num_procs: int = num_processes
 
         self._output_direct_diffuse = output_direct_diffuse
 
@@ -160,10 +149,6 @@ class PVMaps(GrassGISUser):
 
         self.solar_decl: List[float] = self._calc_solar_declinations()
 
-        self._executor = ThreadPoolExecutor(max_workers=self._num_procs)
-
-
-
         os.makedirs(self._output_dir, exist_ok=True)
 
         self.yearly_kwh_raster = None
@@ -173,8 +158,7 @@ class PVMaps(GrassGISUser):
         self.elevation = ELEVATION
 
     def __del__(self):
-        if self._executor:
-            self._executor.shutdown()
+        self._executor.shutdown()
 
     def create_pvmap(self, elevation_filename: str, mask_filename: str,
                      flat_roof_aspect_filename: Optional[str] = None,
@@ -294,34 +278,8 @@ class PVMaps(GrassGISUser):
             prev_end_f = end_f
         return rtn_val
 
-    @staticmethod
-    def _run_cmd_via_method(method, args_list: List[Tuple]) -> None:
-        for args in args_list:
-            method(*args)
-
-    def _run_cmd_via_method_p(self, method, args_list: List[Tuple]) -> None:
-        """Ok to use threads as the cmd exe blocks. This does what ThreadPoolExecutor.map()
-        does but also collects multiple exceptions"""
-        futures: List[Tuple[str, Future]] = []
-        for args in args_list:
-            future = self._executor.submit(
-                lambda p: method(*p), args)
-            id_s = f"{method.__name__}{args}"
-            futures.append((id_s, future))
-
-        exc_str: str = ""
-        for id_s, future in futures:
-            try:
-                future.result()
-            except Exception as ex:
-                if exc_str:
-                    exc_str += "\n"
-                exc_str += f"{id_s} raised '{str(ex)}'"
-        if exc_str:
-            raise Exception(f"Exception(s) raised\n{exc_str}")
-
     def _remove_temp_mapset_if_reqd(self):
-        if not self._keep_temp_mapset:
+        if not self._keep_temp_data:
             logging.info("_remove_temp_mapset_if_reqd")
             if self._g_temp_mapset and self._g_temp_mapset != self.PERMANENT_MAPSET:
                 shutil.rmtree(join(self._g_dbase, self._g_location, self._g_temp_mapset))
@@ -346,8 +304,7 @@ class PVMaps(GrassGISUser):
         self._update_mapset(self._g_temp_mapset)
 
     def _import_raster(self, filename: str, name: str) -> None:
-        cmd_line: str = f"r.import input={self._input_dir}{os.sep}{filename} output={name}"
-        self._run_cmd(cmd_line)
+        self._import_raster_raw(join(self._input_dir, filename), name)
 
     def _import_rasters_p(self, rasters_to_import: List[Tuple[str, str]]):
         logging.info("_import_rasters")
@@ -559,8 +516,7 @@ class PVMaps(GrassGISUser):
         self._run_cmd_via_method_p(self._run_cmd, [(bha_cmd,), (dha_cmd,), (hpv_cmd,)])
 
     def _export_raster(self, in_raster: str, out_raster_file: str):
-        self._run_cmd(f"r.out.gdal --overwrite input={in_raster} output='{out_raster_file}' "
-                      f"format=GTiff type=Float64 -c createopt=\"COMPRESS=PACKBITS,TILED=YES\"")
+        self._export_raster_raw(in_raster, out_raster_file, type="Float64")
 
     def _export_rasters(self):
         logging.info("_export_rasters")

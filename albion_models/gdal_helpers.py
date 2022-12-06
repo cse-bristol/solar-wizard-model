@@ -250,6 +250,19 @@ def reproject(raster_in: str, raster_out: str, src_srs: str, dst_srs: str):
               creationOptions=['TILED=YES', 'COMPRESS=PACKBITS'])
 
 
+def reproject_within_bounds(raster_in: str, raster_out: str, src_srs: str, dst_srs: str,
+                            bounds: Tuple[float, float, float, float],
+                            width: int, height: int):
+    """
+    Reproject a raster. By default, will keep the same number of pixels as before.
+    :param bounds: Tuple, (ulx, lry, lrx, uly) in destination CRS units
+    """
+    gdal.Warp(raster_out, raster_in, dstSRS=dst_srs, srcSRS=src_srs,
+              width=width, height=height,
+              outputBounds=bounds,
+              creationOptions=['TILED=YES', 'COMPRESS=PACKBITS'])
+
+
 def set_resolution(in_tiff: str,
                    out_tiff: str,
                    res: float):

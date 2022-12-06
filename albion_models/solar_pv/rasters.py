@@ -113,6 +113,8 @@ def _get_srs_for_reproject_to_4326(srid: int) -> str:
         # Use the 7-parameter shift rather than GDAL's default 3-parameter shift
         # for EN->long/lat transformation as it's much more accurate:
         # https://digimap.edina.ac.uk/webhelp/digimapgis/projections_and_transformations/transformations_in_gdalogr.htm
+        # Above not working Dec 22 so also -
+        # https://digimap.edina.ac.uk/help/gis/transformations/transform_gdal_ogr
         src_srs = _7_PARAM_SHIFT
     else:
         src_srs = f"EPSG:{srid}"
