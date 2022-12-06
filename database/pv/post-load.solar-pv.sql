@@ -29,7 +29,7 @@ SELECT
     pv.y
 FROM
     {panel_polygons} pp
-    LEFT JOIN {pixel_kwh} pv ON ST_Intersects(pixel, pp.panel_geom_27700);
+    INNER JOIN {pixel_kwh} pv ON ST_Intersects(pixel, pp.panel_geom_27700);
 
 CREATE INDEX ON {pixels_in_panels} (panel_id);
 CREATE INDEX ON {pixels_in_panels} (x, y);
@@ -63,8 +63,8 @@ SELECT
 FROM
     {panel_polygons} pp
     LEFT JOIN {roof_polygons} rp ON pp.roof_plane_id = rp.roof_plane_id
-    LEFT JOIN {pixels_in_panels} pip ON pp.panel_id = pip.panel_id
-    LEFT JOIN {pixel_kwh} pv ON pv.x = pip.x AND pv.y = pip.y
+    INNER JOIN {pixels_in_panels} pip ON pp.panel_id = pip.panel_id
+    INNER JOIN {pixel_kwh} pv ON pv.x = pip.x AND pv.y = pip.y
 WHERE pp.panel_geom_27700 IS NOT NULL AND rp.usable
 GROUP BY pp.panel_id;
 
