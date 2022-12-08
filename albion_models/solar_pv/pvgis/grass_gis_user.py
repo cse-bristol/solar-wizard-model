@@ -220,4 +220,5 @@ class GrassGISUser(ABC):
                  grass_env: Optional[Dict] = None):
         type_arg = f"type={type}" if type else ""
         self._run_cmd(f"r.out.gdal --overwrite input={in_raster} output='{out_raster_file}' "
-                      f"format=GTiff {type_arg} -c createopt=\"COMPRESS=PACKBITS,TILED=YES\"", grass_env=grass_env)
+                      f"format=GTiff {type_arg} -c createopt=\"COMPRESS=PACKBITS,TILED=YES,BIGTIFF=YES\"",
+                      grass_env=grass_env)
