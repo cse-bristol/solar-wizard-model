@@ -18,8 +18,7 @@ def create_vrt(tiles: List[str], vrt_file: str):
     if tiles and len(tiles) > 0:
         command = f"gdalbuildvrt -resolution highest {vrt_file} {' '.join(tiles)}"
 
-        logging.info("Running command:")
-        logging.info(command)
+        logging.info("Creating .vrt")
 
         res = subprocess.run(shlex.split(command), capture_output=True, text=True)
         print(res.stdout.strip())
@@ -209,10 +208,10 @@ def crop_or_expand(file_to_crop: str,
     lry = uly + (ref.RasterYSize * yres)
     if adjust_resolution:
         gdal.Warp(out_tiff, to_crop, outputBounds=(ulx, lry, lrx, uly), xRes=xres, yRes=yres,
-                  creationOptions=['TILED=YES', 'COMPRESS=PACKBITS'])
+                  creationOptions=['TILED=YES', 'COMPRESS=PACKBITS', 'BIGTIFF=YES'])
     else:
         gdal.Warp(out_tiff, to_crop, outputBounds=(ulx, lry, lrx, uly),
-                  creationOptions=['TILED=YES', 'COMPRESS=PACKBITS'])
+                  creationOptions=['TILED=YES', 'COMPRESS=PACKBITS', 'BIGTIFF=YES'])
 
 
 def expand(raster_in: str, raster_out: str, buffer: int):
@@ -231,7 +230,7 @@ def expand(raster_in: str, raster_out: str, buffer: int):
     lry = uly + (ref.RasterYSize * yres) + y_buffer
     gdal.Warp(raster_out, raster_in,
               outputBounds=(ulx - x_buffer, lry, lrx, uly - y_buffer),
-              creationOptions=['TILED=YES', 'COMPRESS=PACKBITS'])
+              creationOptions=['TILED=YES', 'COMPRESS=PACKBITS', 'BIGTIFF=YES'])
 
 
 def reproject(raster_in: str, raster_out: str, src_srs: str, dst_srs: str):
@@ -247,7 +246,7 @@ def reproject(raster_in: str, raster_out: str, src_srs: str, dst_srs: str):
               width=ref.RasterXSize, height=ref.RasterYSize,
               # resampleAlg="bilinear",
               outputBounds=(ulx, lry, lrx, uly), outputBoundsSRS=src_srs,
-              creationOptions=['TILED=YES', 'COMPRESS=PACKBITS'])
+              creationOptions=['TILED=YES', 'COMPRESS=PACKBITS', 'BIGTIFF=YES'])
 
 
 def set_resolution(in_tiff: str,
@@ -260,16 +259,16 @@ def set_resolution(in_tiff: str,
     in_f = gdal.Open(in_tiff)
     _, xres, _, _, _, yres = in_f.GetGeoTransform()
     gdal.Warp(out_tiff, in_f, xRes=res, yRes=res,
-              creationOptions=['TILED=YES', 'COMPRESS=PACKBITS'])
+              creationOptions=['TILED=YES', 'COMPRESS=PACKBITS', 'BIGTIFF=YES'])
     return out_tiff
 
 
 def aspect(cropped_lidar: str, aspect_file: str):
-    run(f"gdaldem aspect {cropped_lidar} {aspect_file} -of GTiff -b 1 -zero_for_flat -co \"COMPRESS=PACKBITS\" -co \"TILED=YES\"")
+    run(f"gdaldem aspect {cropped_lidar} {aspect_file} -of GTiff -b 1 -zero_for_flat -co \"COMPRESS=PACKBITS\" -co \"TILED=YES\" -co \"BIGTIFF=YES\"")
 
 
 def slope(cropped_lidar: str, slope_file: str):
-    run(f"gdaldem slope {cropped_lidar} {slope_file} -of GTiff -b 1  -co \"COMPRESS=PACKBITS\" -co \"TILED=YES\"")
+    run(f"gdaldem slope {cropped_lidar} {slope_file} -of GTiff -b 1  -co \"COMPRESS=PACKBITS\" -co \"TILED=YES\" -co \"BIGTIFF=YES\"")
 
 
 def merge(files: List[str], output_file: str, res: float, nodata: int):

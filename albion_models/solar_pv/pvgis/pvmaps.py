@@ -675,7 +675,7 @@ class PVMaps:
 
     def _export_raster(self, in_raster: str, out_raster_file: str):
         self._run_cmd(f"r.out.gdal --overwrite input={in_raster} output='{out_raster_file}' "
-                      f"format=GTiff type=Float64 -c createopt=\"COMPRESS=PACKBITS,TILED=YES\"")
+                      f"format=GTiff type=Float64 -c createopt=\"COMPRESS=PACKBITS,TILED=YES,BIGTIFF=YES\"")
 
     def _export_rasters(self):
         logging.info("_export_rasters")
