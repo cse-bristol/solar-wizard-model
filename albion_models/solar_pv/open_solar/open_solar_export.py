@@ -7,8 +7,9 @@ from typing import List, Tuple, Optional
 
 from psycopg2.extras import DictCursor
 
+import albion_models.solar_pv.open_solar.export_geographies
 from albion_models.db_funcs import sql_command, connection
-from albion_models.solar_pv.open_solar import export_panelarray, export_building, export_lsoa, export_la, \
+from albion_models.solar_pv.open_solar import export_panelarray, export_building, export_geographies, \
     export_conservation_area
 
 _JOB_GPKG_STEM = "job"
@@ -73,7 +74,7 @@ def _export_base_lsoa(pg_uri: str, gpkg_dir: str, regenerate: bool):
     logging.info(f"Exporting base LSOA info")
     gpkg_filename: str = join(gpkg_dir, f"{_BASE_GPKG_STEM}.lsoa{_GPKG_FNAME_EXTN}")
     with connection(pg_uri, cursor_factory=DictCursor) as pg_conn:  # Use a separate connection per call / thread
-        export_lsoa.export(pg_conn, pg_uri, gpkg_filename, regenerate)
+        export_geographies.export_lsoa(pg_conn, pg_uri, gpkg_filename, regenerate)
 
 
 def _export_base_la(pg_uri: str, gpkg_dir: str, regenerate: bool):
@@ -82,7 +83,25 @@ def _export_base_la(pg_uri: str, gpkg_dir: str, regenerate: bool):
     logging.info(f"Exporting base LA info")
     gpkg_filename: str = join(gpkg_dir, f"{_BASE_GPKG_STEM}.la{_GPKG_FNAME_EXTN}")
     with connection(pg_uri, cursor_factory=DictCursor) as pg_conn:  # Use a separate connection per call / thread
-        export_la.export(pg_conn, pg_uri, gpkg_filename, regenerate)
+        export_geographies.export_la(pg_conn, pg_uri, gpkg_filename, regenerate)
+
+
+def _export_base_msoa(pg_uri: str, gpkg_dir: str, regenerate: bool):
+    """ Base info goes into multiple gpkgs due to gpkg db full issues using overwrite
+    and so that extracts can be run concurrently """
+    logging.info(f"Exporting base MSOA info")
+    gpkg_filename: str = join(gpkg_dir, f"{_BASE_GPKG_STEM}.msoa{_GPKG_FNAME_EXTN}")
+    with connection(pg_uri, cursor_factory=DictCursor) as pg_conn:  # Use a separate connection per call / thread
+        export_geographies.export_msoa(pg_conn, pg_uri, gpkg_filename, regenerate)
+
+
+def _export_base_parish(pg_uri: str, gpkg_dir: str, regenerate: bool):
+    """ Base info goes into multiple gpkgs due to gpkg db full issues using overwrite
+    and so that extracts can be run concurrently """
+    logging.info(f"Exporting base parish info")
+    gpkg_filename: str = join(gpkg_dir, f"{_BASE_GPKG_STEM}.parish{_GPKG_FNAME_EXTN}")
+    with connection(pg_uri, cursor_factory=DictCursor) as pg_conn:  # Use a separate connection per call / thread
+        export_geographies.export_parish(pg_conn, pg_uri, gpkg_filename, regenerate)
 
 
 def _export_base_cons_area(pg_uri: str, gpkg_dir: str, regenerate: bool):
