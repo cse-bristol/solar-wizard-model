@@ -13,7 +13,8 @@ from albion_models.db_funcs import sql_script, connection, \
     sql_command
 from albion_models.solar_pv.constants import FLAT_ROOF_DEGREES_THRESHOLD, SYSTEM_LOSS
 from albion_models.solar_pv.pvgis import pvmaps
-from albion_models.solar_pv.rasters import copy_raster
+from albion_models.solar_pv.rasters import copy_raster, \
+    create_elevation_override_raster, generate_flat_roof_aspect_raster_4326
 from albion_models.transformations import _7_PARAM_SHIFT
 from albion_models.util import get_cpu_count
 
@@ -33,15 +34,8 @@ def pvgis(pg_uri: str,
           peak_power_per_m2: float,
           flat_roof_degrees: int,
           elevation_raster: str,
-          elevation_override_raster: Optional[str],
           mask_raster: str,
-          flat_roof_aspect_raster: Optional[str],
           debug_mode: bool):
-    """
-    TODO:
-     * usual check to see if stage of model has already happened
-     * 14% loss param
-    """
 
     if pv_tech == "crystSi":
         panel_type = pvmaps.CSI
@@ -61,6 +55,19 @@ def pvgis(pg_uri: str,
         logging.warning(f"Using f{horizon_step_degrees} for horizon step, "
                         f"truncated from {360 / horizon_slices}. To avoid this, use"
                         f"a horizon_slices value that is a factor of 360.")
+
+    logging.info("Getting building height elevation override raster...")
+    elevation_override_raster: Optional[str] = create_elevation_override_raster(
+        pg_uri=pg_uri,
+        job_id=job_id,
+        solar_dir=solar_dir,
+        elevation_raster_4326_filename=elevation_raster)
+
+    logging.info("Generating flat roof raster")
+    flat_roof_aspect_raster: Optional[str] = generate_flat_roof_aspect_raster_4326(
+        pg_uri=pg_uri,
+        job_id=job_id,
+        solar_dir=solar_dir)
 
     pvm = pvmaps.PVMaps(
         grass_dbase_dir=os.environ.get("PVGIS_GRASS_DBASE_DIR", None),
@@ -244,6 +251,9 @@ def _write_results_to_db(pg_conn,
         panel_kwh=Identifier(schema, "panel_kwh"),
         pixels_in_panels=Identifier(schema, "pixels_in_panels"),
         panel_polygons=Identifier(schema, tables.PANEL_POLYGON_TABLE),
+        pixels_in_roofs=Identifier(schema, "pixels_in_roofs"),
+        roof_horizons=Identifier(schema, "roof_horizons"),
+        roof_polygons=Identifier(schema, tables.ROOF_POLYGON_TABLE),
         buildings=Identifier(schema, tables.BUILDINGS_TABLE),
         job_view=Identifier(f"solar_pv_job_{job_id}"),
         res=Literal(resolution_metres),

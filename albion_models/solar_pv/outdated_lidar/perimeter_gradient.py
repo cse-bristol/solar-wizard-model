@@ -87,6 +87,9 @@ def check_perimeter_gradient(building,
         if len(segment.coords) > 2:
             segment = LineString(segment.coords[:2])
 
+        if segment.length < 0.01:
+            continue
+
         # Find the perpendicular bisector of the line-segment:
         perp_bisector = _perpendicular_bisector(segment, bisector_length)
 

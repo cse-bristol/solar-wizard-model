@@ -33,8 +33,8 @@ def _write_test_data(toid, building):
     Write out a test data CSV that can be used for unit tests.
     See test_oudated_lidar_check.py
     """
-    ransac_test_data_dir = join(paths.TEST_DATA, "outdated_lidar")
-    jsonfile = join(ransac_test_data_dir, f"{toid}.json")
+    lidar_test_data_dir = join(paths.TEST_DATA, "outdated_lidar")
+    jsonfile = join(lidar_test_data_dir, f"{toid}.json")
     with open(jsonfile, 'w') as f:
         json.dump(building, f, sort_keys=True, default=str)
 

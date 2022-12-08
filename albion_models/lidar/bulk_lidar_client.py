@@ -77,6 +77,11 @@ def load_from_bulk(pg_conn, job_id: int, lidar_dir: str, bulk_lidar_dir: str) ->
                      "falling back to DEFRA API")
         return get_all_lidar(pg_conn, job_id, lidar_dir)
 
+    for tile in job_tiles:
+        if not tile.filename.startswith(lidar_dir):
+            raise ValueError(f"LiDAR tiles must be in {lidar_dir} as otherwise they "
+                             f"are not available to postGIS")
+
     load_lidar(pg_conn, job_tiles, job_tmp_dir)
 
     logging.info(f"Prepared LiDAR")
@@ -95,14 +100,16 @@ def lidar_tiles(pg_conn, job_id: int, bulk_lidar_dir: str, lidar_dir: str, sourc
         for res in source.resolutions:
             filepath = source.filepath(bulk_lidar_dir, grid_ref, res)
             if os.path.exists(filepath):
-                logging.info(f"Using LiDAR zip {grid_ref} at res {res.value}m "
+                logging.info(f"Using LiDAR {'zip' if source.zipped else 'tile'} {filepath} "
                              f"from bulk LiDAR source {source}")
                 if source.zipped:
                     zt = ZippedTiles.from_filename(filepath, source.year)
                     yield zip_to_geotiffs(zt, lidar_dir)
                 else:
+                    dst_filepath = join(lidar_dir, os.path.basename(filepath))
                     _fix_lidar_res(filepath)
-                    yield [LidarTile.from_filename(filepath, source.year)]
+                    shutil.copyfile(filepath, dst_filepath)
+                    yield [LidarTile.from_filename(dst_filepath, source.year)]
 
 
 def _fix_lidar_res(filepath: str):

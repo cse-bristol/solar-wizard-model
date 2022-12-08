@@ -13,9 +13,12 @@ from psycopg2.extras import Json, execute_values, DictCursor
 from psycopg2.sql import Literal
 from typing import List, Optional
 
+from shapely.geometry import mapping
+
 from albion_models import paths
 from albion_models.db_funcs import sql_command, sql_script, connect
-from albion_models.geos import get_grid_cells, from_geojson_file, from_geojson, project_geom, to_geojson
+from albion_models.geos import get_grid_cells, from_geojson_file, from_geojson, \
+    project_geom, to_geojson
 from albion_models.solar_pv.open_solar import open_solar_export
 
 model_params = {
@@ -80,6 +83,22 @@ model_params = {
 }
 
 
+def cell_geojson(cell_size: int):
+    run_boundary_27700 = from_geojson_file(join(paths.RESOURCES_DIR, "gb.geojson"))
+
+    cells = get_grid_cells(run_boundary_27700, cell_size, cell_size)
+    cells.sort(key=lambda cell: cell.centroid.xy)
+    cells = [{
+        "type": "Feature",
+        "geometry": mapping(cell),
+        "properties": {"cell_id": i}} for i, cell in enumerate(cells)]
+
+    return json.dumps({
+        "type": "FeatureCollection",
+        "features": cells
+    })
+
+
 def create_run(pg_conn, name: str, cell_size: int, cell_ids: Optional[List[int]], run_boundary_27700_json: Optional[str], params: dict) -> int:
     with pg_conn.cursor() as cursor:
         os_run_id = sql_command(
@@ -94,6 +113,7 @@ def create_run(pg_conn, name: str, cell_size: int, cell_ids: Optional[List[int]]
             run_boundary_27700 = from_geojson_file(join(paths.RESOURCES_DIR, "gb.geojson"))
 
         cells = get_grid_cells(run_boundary_27700, cell_size, cell_size)
+        cells.sort(key=lambda cell: cell.centroid.xy)
         if cell_ids is not None:
             cells = [cells[cid] for cid in cell_ids]
 
@@ -111,7 +131,7 @@ def create_run(pg_conn, name: str, cell_size: int, cell_ids: Optional[List[int]]
             """,
             template="""(
                 'open_solar:' || %s || ':' || %s || ',' || %s,
-                ST_Multi(ST_GeomFromText( %s )),
+                ST_Multi(ST_GeomFromText(%s, 27700)),
                 true,
                 %s,
                 true)
@@ -229,6 +249,12 @@ def parse_cli_args():
                                         description="List existing Open Solar runs and their progress")
     list_parser.add_argument("--pg_uri", **pg_uri_arg)
 
+    cellmap_parser = subparsers.add_parser('cellmap',
+                                           help="Get geojson of cells and their IDs",
+                                           description="Get geojson of cells and their IDs")
+    cellmap_parser.add_argument('-c', '--cell_size', default=30000,
+                                help="Edge length of individual job bound squares in metres. (default: %(default)s)")
+
     cancel_parser = subparsers.add_parser('cancel',
                                           help="Cancel an Open Solar run",
                                           description="Cancel an Open Solar run")
@@ -248,7 +274,7 @@ def parse_cli_args():
     extract_parser.add_argument('--gpkg_dir', help="Geopackage output file location (dir / folder)")
     extract_parser.add_argument("--pg_uri", **pg_uri_arg)
     extract_parser.add_argument("--extract_job_info", help="Extract job information (Open Solar run ID needed)",
-                                action='store_false', default=False)
+                                action='store_true', default=False)
     extract_parser.add_argument("--extract_base_info", help="Extract base information (e.g. LSOAs, LAs)",
                                 action='store_true', default=False)
     extract_parser.add_argument("--start_job_id", help="Minimum job id to export (inclusive)")
@@ -261,7 +287,11 @@ def parse_cli_args():
 
 def open_solar_cli():
     args = parse_cli_args()
-    pg_conn = connect(args.pg_uri, cursor_factory=DictCursor)
+    if 'pg_uri' in args:
+        pg_conn = connect(args.pg_uri, cursor_factory=DictCursor)
+    else:
+        pg_conn = None
+
     logging.basicConfig(level=logging.INFO,
                         format='[%(asctime)s] %(levelname)s: %(message)s',
                         stream=sys.stdout)
@@ -290,11 +320,16 @@ def open_solar_cli():
                                      args.extract_job_info, args.extract_base_info,
                                      args.start_job_id, args.end_job_id,
                                      args.regenerate)
+        elif args.op == 'cellmap':
+            geojson = cell_geojson(args.cell_size)
+            print(geojson)
     except Exception as e:
-        pg_conn.rollback()
+        if pg_conn:
+            pg_conn.rollback()
         raise e
     finally:
-        pg_conn.close()
+        if pg_conn:
+            pg_conn.close()
 
 
 if __name__ == "__main__":

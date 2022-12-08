@@ -43,7 +43,11 @@ class ParameterisedTestCase(unittest.TestCase):
         for tup in mapping:
             inputs = tup[:-1]
             expected = tup[-1]
-            actual = fn(*inputs)
+            try:
+                actual = fn(*inputs)
+            except Exception as e:
+                print(e)
+                actual = e
             test_name = str(inputs)[:100] if len(inputs) > 1 else str(inputs[0])[:100]
             with self.subTest(test_name):
                 assert expected == actual, f"\nExpected: {expected}\nActual  : {actual}\nInputs : {inputs}"

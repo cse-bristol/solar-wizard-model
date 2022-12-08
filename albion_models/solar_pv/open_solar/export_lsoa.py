@@ -17,12 +17,14 @@ def export(pg_conn, pg_uri: str, gpkg_fname: str, regenerate: bool):
             "SELECT "
             " lsoa_2011, "
             " name, "
-            " geom_4326, "
+            " geom_4326 AS geom, "
             " ST_AsGeoJSON(geom_4326) AS geom_str "
             "FROM census_boundaries.lsoa"
         ) is not None:
             raise RuntimeError(f"Error running ogr2ogr")
 
-        cmd_tippecanoe(gpkg_fname, _LSOA)
+        # Don't include the geom_str field as it causes tippecanoe to take ages
+        fields = ["geom", "lsoa_2011", "name"]
+        cmd_tippecanoe(gpkg_fname, _LSOA, fields)
     else:
         logging.info(f"Not regenerating existing {gpkg_fname}")

@@ -80,7 +80,7 @@ def _export_base_la(pg_uri: str, gpkg_dir: str, regenerate: bool):
     """ Base info goes into multiple gpkgs due to gpkg db full issues using overwrite
     and so that extracts can be run concurrently """
     logging.info(f"Exporting base LA info")
-    gpkg_filename: str = join(gpkg_dir, f"{_BASE_GPKG_STEM}.LA{_GPKG_FNAME_EXTN}")
+    gpkg_filename: str = join(gpkg_dir, f"{_BASE_GPKG_STEM}.la{_GPKG_FNAME_EXTN}")
     with connection(pg_uri, cursor_factory=DictCursor) as pg_conn:  # Use a separate connection per call / thread
         export_la.export(pg_conn, pg_uri, gpkg_filename, regenerate)
 
@@ -89,7 +89,7 @@ def _export_base_cons_area(pg_uri: str, gpkg_dir: str, regenerate: bool):
     """ Base info goes into multiple gpkgs due to gpkg db full issues using overwrite
     and so that extracts can be run concurrently """
     logging.info(f"Exporting base conservation area info")
-    gpkg_filename: str = join(gpkg_dir, f"{_BASE_GPKG_STEM}.conservation-areas{_GPKG_FNAME_EXTN}")
+    gpkg_filename: str = join(gpkg_dir, f"{_BASE_GPKG_STEM}.conservation_areas{_GPKG_FNAME_EXTN}")
     with connection(pg_uri, cursor_factory=DictCursor) as pg_conn:  # Use a separate connection per call / thread
         export_conservation_area.export(pg_conn, pg_uri, gpkg_filename, regenerate)
 

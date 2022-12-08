@@ -4,7 +4,7 @@ import os
 from os.path import join
 
 from psycopg2.sql import Identifier
-from typing import List, Set, Dict
+from typing import List, Dict
 
 from albion_models.db_funcs import sql_script, sql_command
 from albion_models.gdal_helpers import run
@@ -12,8 +12,12 @@ from albion_models.lidar.lidar import LidarTile, Resolution, USE_50CM_THRESHOLD
 
 
 def load_lidar(pg_conn, tiles: List[LidarTile], temp_dir: str):
+    if len(tiles) == 0:
+        return
+
     tiles_by_res = _split_by_res(tiles)
     os.makedirs(temp_dir, exist_ok=True)
+    errors = 0
 
     # tile sizes of 1000/500/250 mean that all resolutions have the same tile sizes
     # and all the different lidar sources (Eng/Scot/Wales) tiles can be chopped
@@ -21,30 +25,42 @@ def load_lidar(pg_conn, tiles: List[LidarTile], temp_dir: str):
     # This is relied on by functionality in the lidar coverage model and the lidar
     # tile preparation for the heat demand model
     r = _tiles_to_insert(pg_conn, tiles_by_res[Resolution.R_50CM], Resolution.R_50CM)
-    rasters_to_postgis(pg_conn, r, "models.lidar_50cm", temp_dir, tile_size=1000)
+    errors += rasters_to_postgis(pg_conn, r, "models.lidar_50cm", temp_dir, tile_size=1000)
 
     r = _tiles_to_insert(pg_conn, tiles_by_res[Resolution.R_1M], Resolution.R_1M)
-    rasters_to_postgis(pg_conn, r, "models.lidar_1m", temp_dir, tile_size=500)
+    errors += rasters_to_postgis(pg_conn, r, "models.lidar_1m", temp_dir, tile_size=500)
 
     r = _tiles_to_insert(pg_conn, tiles_by_res[Resolution.R_2M], Resolution.R_2M)
-    rasters_to_postgis(pg_conn, r, "models.lidar_2m", temp_dir, tile_size=250)
+    errors += rasters_to_postgis(pg_conn, r, "models.lidar_2m", temp_dir, tile_size=250)
+
+    error_pct = round(errors / len(tiles) * 100, 2)
+    logging.info(f"LiDAR loaded, {errors} / {len(tiles)} ({error_pct}%) errored")
 
 
-def rasters_to_postgis(pg_conn, rasters: List[str], table: str, temp_dir: str, tile_size: int):
+def rasters_to_postgis(pg_conn, rasters: List[str], table: str, temp_dir: str, tile_size: int) -> int:
     if len(rasters) == 0:
-        return
+        return 0
 
     sql_file = join(temp_dir, "raster.sql")
-    rasters_str = ' '.join(rasters)
-    cmd = f"raster2pgsql -n filename -x -a -R -t {tile_size}x{tile_size} {rasters_str} {table} > {sql_file}"
-    run(cmd)
-    sql_script(pg_conn, sql_file)
+    errors = 0
+    for raster in rasters:
+        try:
+            cmd = f"raster2pgsql -n filename -x -a -R -t {tile_size}x{tile_size} {raster} {table} > {sql_file}"
+            run(cmd)
+            sql_script(pg_conn, sql_file)
+        except Exception as e:
+            pg_conn.rollback()
+            logging.warning("Failed to import raster", exc_info=e)
+            errors += 1
+
     _add_raster_constraints(pg_conn, table)
 
     try:
         os.remove(sql_file)
     except OSError:
         pass
+
+    return errors
 
 
 def _tiles_to_insert(pg_conn, paths: List[str], res: Resolution) -> List[str]:
@@ -143,64 +159,6 @@ def _50cm_coverage(pg_conn, job_id: int) -> float:
         bindings={"job_id": job_id},
         result_extractor=lambda rows: rows[0][0] or 0.0
     )
-
-
-def get_merged_lidar(pg_conn, job_id: int, output_file: str):
-    _50cm_cov = _50cm_coverage(pg_conn, job_id)
-    logging.info(f"50cm LiDAR coverage is {_50cm_cov}, threshold is {USE_50CM_THRESHOLD}")
-
-    if _50cm_cov >= USE_50CM_THRESHOLD:
-        logging.info(f"Using 50cm coverage")
-        sql = """
-        WITH all_res AS (
-                SELECT filename, ST_Resample(rast, (select rast from models.lidar_50cm limit 1)) AS rast 
-                FROM models.lidar_2m
-                LEFT JOIN models.job_queue q 
-                ON st_intersects(rast, ST_Buffer(q.bounds, coalesce((q.params->>'horizon_search_radius')::int, 0)))
-                WHERE q.job_id = %(job_id)s
-            UNION ALL
-                SELECT filename, ST_Resample(rast, (select rast from models.lidar_50cm limit 1)) AS rast 
-                FROM models.lidar_1m
-                LEFT JOIN models.job_queue q 
-                ON st_intersects(rast, ST_Buffer(q.bounds, coalesce((q.params->>'horizon_search_radius')::int, 0)))
-                WHERE q.job_id = %(job_id)s
-            UNION ALL
-                SELECT filename, rast 
-                FROM models.lidar_50cm
-                LEFT JOIN models.job_queue q 
-                ON st_intersects(rast, ST_Buffer(q.bounds, coalesce((q.params->>'horizon_search_radius')::int, 0)))
-                WHERE q.job_id = %(job_id)s
-        ) 
-        SELECT 
-            ST_AsGDALRaster(ST_Union(rast), 'GTiff') AS rast 
-        FROM all_res
-        """
-    else:
-        logging.info(f"Not using 50cm coverage")
-        sql = """
-        WITH all_res AS (
-                SELECT filename, ST_Resample(rast, (select rast from models.lidar_1m limit 1)) AS rast 
-                FROM models.lidar_2m
-                LEFT JOIN models.job_queue q 
-                ON st_intersects(rast, ST_Buffer(q.bounds, coalesce((q.params->>'horizon_search_radius')::int, 0)))
-                WHERE q.job_id = %(job_id)s
-            UNION ALL
-                SELECT filename, rast 
-                FROM models.lidar_1m
-                LEFT JOIN models.job_queue q 
-                ON st_intersects(rast, ST_Buffer(q.bounds, coalesce((q.params->>'horizon_search_radius')::int, 0)))
-                WHERE q.job_id = %(job_id)s
-        ) 
-        SELECT 
-            ST_AsGDALRaster(ST_Union(rast), 'GTiff') AS rast 
-        FROM all_res
-        """
-
-    raster = sql_command(
-        pg_conn, sql, {"job_id": job_id}, result_extractor=lambda res: res[0][0])
-
-    with open(output_file, 'wb') as f:
-        f.write(raster)
 
 
 def get_merged_lidar_tiles(pg_conn, job_id, output_dir: str) -> List[str]:

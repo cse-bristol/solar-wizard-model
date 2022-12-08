@@ -1,3 +1,4 @@
+import json
 import logging
 import multiprocessing as mp
 from typing import Tuple, List
@@ -57,9 +58,14 @@ def _check_lidar_page(pg_uri: str, job_id: int, resolution_metres: float, page: 
         to_write = []
 
         for building in buildings:
-            reason = _check_building(building, resolution_metres)
-            height = HeightAggregator(building['pixels']).height() if reason is None else None
-            to_write.append((building['toid'], reason, height))
+            try:
+                reason = _check_building(building, resolution_metres)
+                height = HeightAggregator(building['pixels']).height() if reason is None else None
+                to_write.append((building['toid'], reason, height))
+            except Exception as e:
+                print("outdated LiDAR check failed on building:")
+                print(json.dumps(building, sort_keys=True, default=str))
+                raise e
 
         _write_exclusions(pg_conn, job_id, to_write)
         print(f"Checked page {page} of LiDAR")
