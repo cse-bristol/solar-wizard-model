@@ -23,8 +23,8 @@ class TestPVMapsRealDataMulti(TestPVMaps):
     """
     Runs complete PVMaps process and then checks the data in the Grass DB - for multiple locations
     """
-    ELEVATION_RASTER_FILENAME: str = "elevation_4326.tif"
-    MASK_RASTER_FILENAME: str = "mask_4326.tif"
+    ELEVATION_RASTER_FILENAME: str = "elevation_27700.tif"
+    MASK_RASTER_FILENAME: str = "mask_27700.tif"
 
     # flat_roof_degrees=10.0 = default from web interface; flat_roof_degrees_threshold=5.0 = value from pvgis.py
     FLAT_ROOF_DEGREES: float = 10.0
@@ -35,8 +35,8 @@ class TestPVMapsRealDataMulti(TestPVMaps):
         cls.DATA_INPUT_DIR = os.path.realpath(f"{TEST_DATA_DIR}/test_pvmaps_real_data_{name}/inputs")
         cls.INPUT_DIR = cls.DATA_INPUT_DIR
         cls.DATA_OUTPUT_DIR = os.path.realpath(f"{TEST_DATA_DIR}/test_pvmaps_real_data_{name}/outputs")
-        if os.path.exists(os.path.join(cls.DATA_INPUT_DIR, "flat_roof_aspect_4326.tif")):
-            cls.FLAT_ROOF_RASTER_FILENAME = "flat_roof_aspect_4326.tif"
+        if os.path.exists(os.path.join(cls.DATA_INPUT_DIR, "flat_roof_aspect_27700.tif")):
+            cls.FLAT_ROOF_RASTER_FILENAME = "flat_roof_aspect_27700.tif"
         else:
             cls.FLAT_ROOF_RASTER_FILENAME = None
 
@@ -92,7 +92,7 @@ class TestPVMapsRealDataMulti(TestPVMaps):
                 raster_np = np.array(band_vals)
                 unmasked_coords = np.transpose(np.nonzero(np.isfinite(raster_np)))
             else:
-                raster_ds: Optional[gdal.Dataset] = gdal.Open(f"{self.DATA_INPUT_DIR}/mask_4326.tif")
+                raster_ds: Optional[gdal.Dataset] = gdal.Open(f"{self.DATA_INPUT_DIR}/mask_27700.tif")
                 gt = raster_ds.GetGeoTransform()
                 raster_band = raster_ds.GetRasterBand(1)
                 band_vals = raster_band.ReadAsArray(0, 0, raster_band.XSize, raster_band.YSize)
@@ -130,8 +130,8 @@ class TestPVMapsRealDataMulti(TestPVMaps):
 
             print(f"\nAvailable size = {len(test_locs)}, sample_size = {sample_size}")
             sampled_locns = sample(test_locs, sample_size)
-
-            pickle.dump(sampled_locns, open(f"{self.DATA_INPUT_DIR}/{cached_data_filename}.pkl", "wb"))
+            with open(f"{self.DATA_INPUT_DIR}/{cached_data_filename}.pkl", "wb") as cached_data_pkl:
+                pickle.dump(sampled_locns, cached_data_pkl)
         return sampled_locns
 
     def _test_aspects_used(self, test_locns: List[Tuple[float, float]]):

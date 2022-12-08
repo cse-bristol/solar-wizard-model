@@ -86,14 +86,16 @@ class PVMaps(GrassGISUser):
         approx equal buckets of days
         :param job_id optional id used where dirs etc need to be created for a job, uses process id and time if not set
         """
+        super().__init__(27700, grass_dbase_dir, job_id, keep_temp_mapset)
         num_cpus = os.cpu_count()
         if num_cpus is None:
             num_cpus = 1
         if not (1 <= num_processes <= num_cpus):
             raise ValueError(f"Num processes must be 1 to {num_cpus}")
         _executor = ThreadPoolExecutor(max_workers=num_processes)
+        self._set_executor(_executor)
+        self._setup_grass_env()
 
-        super().__init__(_executor, 27700, grass_dbase_dir, job_id, keep_temp_mapset)
         self.pvmaps_setup: PVMapsSetup = PVMapsSetup(_executor, grass_dbase_dir,
                                                      job_id, pvgis_data_tar_file,
                                                      self._grass_env, keep_temp_mapset)

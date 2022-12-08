@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import tempfile
 import time
@@ -19,8 +20,7 @@ class GrassGISUser(ABC):
     PERMANENT_MAPSET: str = "PERMANENT"
     GRASSDATA_DIR: str = "grassdata"
 
-    def __init__(self, executor: ThreadPoolExecutor, crs: int, grass_dbase_dir: str, job_id: int,
-                 keep_temp_mapset: bool):
+    def __init__(self, crs: int, grass_dbase_dir: str, job_id: int, keep_temp_mapset: bool):
         self._g_location: str = f"{self.GRASSDATA_DIR}_{crs}"
 
         if os.path.exists(grass_dbase_dir):
@@ -36,16 +36,15 @@ class GrassGISUser(ABC):
             self.uid = f"{os.getpid()}_{int(time.time())}_{crs}"
 
         self._gisrc_filename = join(tempfile.gettempdir(), f"pvmaps.{self.uid}.rc")
-        self._executor = executor
+        self._executor = None
         self._keep_temp_data = keep_temp_mapset
-
-        self._setup_grass_env()
-
-        self._init_grass_db(crs)
 
     def __del__(self):
         if self._gisrc_filename is not None and os.path.exists(self._gisrc_filename):
             os.remove(self._gisrc_filename)
+
+    def _set_executor(self, executor: ThreadPoolExecutor):
+        self._executor = executor
 
     def _update_mapset(self, mapset: str):
         with open(self._gisrc_filename, "w") as rcfile:
@@ -135,12 +134,12 @@ class GrassGISUser(ABC):
         grass_env["PYTHONPATH"] = f"{python_path}{os.pathsep}{grass_env.get('PYTHONPATH', '')}"  # for sub-processes
         self._grass_env = grass_env
 
-    def _init_grass_db(self, crs: int):
-        location = join(self._g_dbase, self._g_location)
-        permanent_mapset = join(self._g_dbase, self._g_location, self.PERMANENT_MAPSET)
+    def _init_grass_db(self, grass_dbase_dir: str, crs: int):
+        g_location: str = f"{self.GRASSDATA_DIR}_{crs}"
+        location = join(grass_dbase_dir, g_location)
+        permanent_mapset = join(grass_dbase_dir, g_location, self.PERMANENT_MAPSET)
 
         if not os.path.exists(location):
-
             logging.info(f"_init_grass_db (location = {location})")
 
             # Create a new grass gis database
@@ -148,6 +147,11 @@ class GrassGISUser(ABC):
 
         elif not os.path.exists(permanent_mapset):
             raise FileNotFoundError(f"Grass DB path ({location}) exists but {self.PERMANENT_MAPSET} is missing!")
+
+    def _delete_grass_db(self, grass_dbase_dir: str, crs: int):
+        g_location: str = f"{self.GRASSDATA_DIR}_{crs}"
+        location = join(grass_dbase_dir, g_location)
+        shutil.rmtree(location, ignore_errors=True)
 
     def _run_cmd(self, cmd_line: str, exp_returncode: int = 0,
                  grass_env: Optional[Dict] = None, raw_output_text: bool = False) -> str:

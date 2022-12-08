@@ -5,6 +5,7 @@ from os.path import join
 
 from albion_models.solar_pv.pvgis.pvmaps import PVMaps, CSI, ELEVATION_OVERRIDE, ELEVATION, ELEVATION_PATCHED
 from albion_models.paths import RESOURCES_DIR, TEST_DATA
+from albion_models.solar_pv.pvgis.test_pvmaps.test_pvmaps import TestPVMaps
 
 TEST_DATA_DIR: str = f"{TEST_DATA}/pvmaps"
 GRASS_DBASE: str = f"{TEST_DATA_DIR}/grass_dbase"
@@ -46,10 +47,10 @@ class PVMapsFunctionTests(unittest.TestCase):
         )
 
         instance._create_temp_mapset()
-        instance._import_raster("elevation_4326_part.tif", ELEVATION)
-        instance._import_raster("elevation_override.tif", ELEVATION_OVERRIDE)
-        elevation_fname = join(INPUT_DIR, "elevation_4326_part.tif")
-        override_raster_fname = join(INPUT_DIR, "elevation_override.tif")
+        instance._import_raster("elevation_27700_part.tif", ELEVATION)
+        instance._import_raster("elevation_27700_override.tif", ELEVATION_OVERRIDE)
+        elevation_fname = join(INPUT_DIR, "elevation_27700_part.tif")
+        override_raster_fname = join(INPUT_DIR, "elevation_27700_override.tif")
 
         instance._set_region_to_and_zoom(ELEVATION)
 
@@ -59,17 +60,18 @@ class PVMapsFunctionTests(unittest.TestCase):
         patched_raster_fname = join(OUTPUT_DIR, "elevation_patched.tif")
         instance._export_raster(ELEVATION_PATCHED, patched_raster_fname)
 
-        for (x, y, abs_h2, abs_max) in BUILDING_HEIGHTS:
-            original_elevation = self._gdal_get_value(elevation_fname, x, y)
-            override_elevation = self._gdal_get_value(override_raster_fname, x, y)
-            patched_elevation = self._gdal_get_value(patched_raster_fname, x, y)
+        for (long_4326, lat_4326, abs_h2, abs_max) in BUILDING_HEIGHTS:
+            easting_27700, northing_27700 = TestPVMaps.reproject_point(lat_4326, long_4326, 4326, 27700)
+            original_elevation = self._gdal_get_value(elevation_fname, easting_27700, northing_27700)
+            override_elevation = self._gdal_get_value(override_raster_fname, easting_27700, northing_27700)
+            patched_elevation = self._gdal_get_value(patched_raster_fname, easting_27700, northing_27700)
 
             exp_height = (abs_h2 + abs_max) / 2.0
             if override_elevation < original_elevation:
-                print(f"{x}, {y} - Using original elevation")
+                print(f"{easting_27700}, {northing_27700} - Using original elevation")
                 exp_height = original_elevation
             else:
-                print(f"{x}, {y} - Using building elevation")
+                print(f"{easting_27700}, {northing_27700} - Using building elevation")
 
             self.assertAlmostEqual(exp_height, patched_elevation, 3, f"exp: {exp_height}, act: {patched_elevation}")
 

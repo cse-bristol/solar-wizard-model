@@ -83,11 +83,11 @@ class TestPVMapsTestData(TestPVMaps):
         """
         self._run_pvmaps(self.FORCED_HORIZON_BASEFILENAME + ".tif")
 
-        self._test_pv_output(self.test_locns, "api_test_pv_output", max_diff_pc_year=5.8)  # Use to assert error if gets worse and not plot results
+        self._test_pv_output(self.test_locns, "api_test_pv_output", max_diff_pc_year=5.83)  # Use to assert error if gets worse and not plot results
 
     @classmethod
     def borrow_transform_projection(cls):
-        ds: gdal.Dataset = gdal.Open(f"{cls.DATA_INPUT_DIR}/mask_4326.tif")
+        ds: gdal.Dataset = gdal.Open(f"{cls.DATA_INPUT_DIR}/mask_27700.tif")
         gt = ds.GetGeoTransform()
         pr = ds.GetProjection()
         return gt, pr
