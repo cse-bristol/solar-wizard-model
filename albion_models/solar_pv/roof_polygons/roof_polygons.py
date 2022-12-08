@@ -260,15 +260,14 @@ def has_outdated_lidar(pg_uri: str, job_id: int) -> bool:
         pg_conn.close()
 
 
-def get_outdated_lidar_building_h_sql_4326(pg_uri: str, job_id: int) -> str:
+def get_outdated_lidar_building_h_sql_27700(pg_uri: str, job_id: int) -> str:
     """
-    A query to get the heights of buildings with outdated lidar as the Z value of their 4326 polygons
+    A query to get the heights of buildings with outdated lidar as the Z value of their 27700 polygons
     """
     with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
         return SQL(
-            "SELECT ST_Force3D(m.geom_4326, (h.abs_hmax + h.abs_h2) / 2) " 
+            "SELECT ST_Force3D(e.geom_27700, (h.abs_hmax + h.abs_h2) / 2) "
             "FROM {buildings} e "
-            "JOIN mastermap.building m USING (toid) "
             "JOIN mastermap.height h USING (toid) "
             "WHERE e.exclusion_reason = 'OUTDATED_LIDAR_COVERAGE'::models.pv_exclusion_reason"
         ).format(

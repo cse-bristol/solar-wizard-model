@@ -343,6 +343,8 @@ def raster_to_csv(raster_file: str,
     if mask_raster:
         mask_ds = gdal.Open(mask_raster)
         mb = mask_ds.GetRasterBand(mask_band)
+        if mask_ds.RasterYSize != r_ds.RasterYSize or mask_ds.RasterXSize != r_ds.RasterXSize:
+            raise ValueError("raster_to_csv: raster_file and mask_raster must be the same size")
     ulx, xres, xskew, uly, yskew, yres = r_ds.GetGeoTransform()
 
     with open(csv_out, 'w') as f:
