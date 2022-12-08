@@ -173,7 +173,7 @@ def get_merged_lidar_tiles(pg_conn, job_id, output_dir: str) -> List[str]:
                 ST_UpperLeftX(l.rast) x, 
                 ST_UpperLeftY(l.rast) y
             FROM models.job_queue q 
-            LEFT JOIN models.lidar_2m l ON st_intersects(l.rast, q.bounds)
+            INNER JOIN models.lidar_2m l ON st_intersects(l.rast, q.bounds)
             WHERE q.job_id = %(job_id)s
         UNION ALL
             SELECT 
@@ -181,12 +181,12 @@ def get_merged_lidar_tiles(pg_conn, job_id, output_dir: str) -> List[str]:
                 ST_UpperLeftX(l.rast) x, 
                 ST_UpperLeftY(l.rast) y
             FROM models.job_queue q 
-            LEFT JOIN models.lidar_1m l ON st_intersects(l.rast, q.bounds)
+            INNER JOIN models.lidar_1m l ON st_intersects(l.rast, q.bounds)
             WHERE q.job_id = %(job_id)s
         UNION ALL
             SELECT l.rast, ST_UpperLeftX(l.rast) x, ST_UpperLeftY(l.rast) y
             FROM models.job_queue q 
-            LEFT JOIN models.lidar_50cm l ON st_intersects(l.rast, q.bounds)
+            INNER JOIN models.lidar_50cm l ON st_intersects(l.rast, q.bounds)
             WHERE q.job_id = %(job_id)s
         )
         SELECT
@@ -202,12 +202,12 @@ def get_merged_lidar_tiles(pg_conn, job_id, output_dir: str) -> List[str]:
                 ST_UpperLeftX(l.rast) x, 
                 ST_UpperLeftY(l.rast) y
             FROM models.job_queue q 
-            LEFT JOIN models.lidar_2m l ON st_intersects(l.rast, q.bounds)
+            INNER JOIN models.lidar_2m l ON st_intersects(l.rast, q.bounds)
             WHERE q.job_id = %(job_id)s
         UNION ALL
             SELECT l.rast, ST_UpperLeftX(l.rast) x, ST_UpperLeftY(l.rast) y
             FROM models.job_queue q 
-            LEFT JOIN models.lidar_1m l ON st_intersects(l.rast, q.bounds)
+            INNER JOIN models.lidar_1m l ON st_intersects(l.rast, q.bounds)
             WHERE q.job_id = %(job_id)s
         )
         SELECT
