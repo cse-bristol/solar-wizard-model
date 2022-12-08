@@ -175,7 +175,6 @@ def zip_to_geotiffs(zt: ZippedTiles, lidar_dir: str) -> List[LidarTile]:
                 _asc_to_geotiff(lidar_dir, asc_filename, tiff_filename)
                 tiff_paths.append(tile)
             else:
-                logging.info(f"Skipping extraction of {tiff_filename}, already exists")
                 tiff_paths.append(LidarTile.from_filename(join(lidar_dir, tiff_filename), zt.year))
 
     return tiff_paths
