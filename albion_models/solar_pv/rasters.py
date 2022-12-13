@@ -11,9 +11,10 @@ from albion_models import gdal_helpers
 from albion_models.db_funcs import sql_script, copy_csv, count, connection
 from albion_models.postgis import get_merged_lidar_tiles
 from albion_models.solar_pv import mask
-from albion_models.solar_pv.raster_names import MASK_4326_TIF, MASK_BUF1_TIF, ELEVATION_4326_TIF
+from albion_models.solar_pv.raster_names import MASK_27700_TIF, MASK_BUF1_TIF, ELEVATION_27700_TIF, SLOPE_27700_TIF, \
+    ASPECT_27700_TIF
 from albion_models.solar_pv.roof_polygons.roof_polygons import get_flat_roof_aspect_sql, create_flat_roof_aspect, \
-    has_flat_roof, get_outdated_lidar_building_h_sql_4326, has_outdated_lidar
+    has_flat_roof, get_outdated_lidar_building_h_sql_27700, has_outdated_lidar
 from albion_models.transformations import _7_PARAM_SHIFT
 
 
@@ -21,14 +22,14 @@ def generate_rasters(pg_uri: str,
                      job_id: int,
                      solar_dir: str,
                      horizon_search_radius: int,
-                     debug_mode: bool = False) -> Tuple[str, str, float]:
+                     debug_mode: bool = False) -> Tuple[str, str, str, str, float]:
     """
     Generate a single geoTIFF for the entire job area, as well as rasters for
     aspect, slope and a building mask.
 
-    Generates all rasters in both EPSG:4326 (long/lat) and in whatever SRS the
-    input LIDAR was in (probably 27700 E/N), but the filenames returned reference
-    the 4326 rasters.
+    Generates all rasters in whatever SRS the input LIDAR was in (probably 27700 E/N),
+    and convert to 27700 if not in 27700.
+    :return: Tuple of 27700 raster file names and the resolution: (elevation, mask, slope, aspect, res)
     """
 
     elevation_vrt = join(solar_dir, "elev.vrt")
@@ -40,9 +41,20 @@ def generate_rasters(pg_uri: str,
 
     if count(pg_uri, tables.schema(job_id), tables.LIDAR_PIXEL_TABLE) > 0:
         logging.info("Not creating rasters, raster data already loaded.")
+        srid = gdal_helpers.get_srid(elevation_vrt, fallback=27700)
         res = gdal_helpers.get_res(elevation_vrt)
-        return (join(solar_dir, ELEVATION_4326_TIF),
-                join(solar_dir, MASK_4326_TIF), res)
+        if srid == 27700:
+            return (join(solar_dir, ELEVATION_27700_TIF),
+                    join(solar_dir, MASK_27700_TIF),
+                    join(solar_dir, SLOPE_27700_TIF),
+                    join(solar_dir, ASPECT_27700_TIF),
+                    res)
+        else:
+            return (elevation_raster,
+                    mask_raster_buf1,
+                    slope_raster,
+                    aspect_raster,
+                    res)
 
     with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
         elevation_tiles = get_merged_lidar_tiles(pg_conn, job_id, solar_dir)
@@ -84,37 +96,50 @@ def generate_rasters(pg_uri: str,
     logging.info("Creating slope raster...")
     gdal_helpers.slope(elevation_raster, slope_raster)
 
-    logging.info("Converting to 4326...")
-    cropped_lidar_4326, mask_raster_4326 = _generate_4326_rasters(
-        solar_dir, srid, elevation_raster, mask_raster_buf1)
+    logging.info("Check rasters are in / convert to 27700...")
+    cropped_lidar_27700, mask_raster_27700, slope_raster_27700, aspect_raster_27700 = _generate_27700_rasters(
+        solar_dir, srid, elevation_raster, mask_raster_buf1, slope_raster, aspect_raster)
 
     logging.info("Loading raster data...")
     _load_rasters_to_db(pg_uri, job_id, srid, res, solar_dir, elevation_raster,
                         aspect_raster, slope_raster, mask_raster_buf3, debug_mode)
 
-    return cropped_lidar_4326, mask_raster_4326, res
+    return cropped_lidar_27700, mask_raster_27700, slope_raster_27700, aspect_raster_27700, res
 
 
-def _generate_4326_rasters(solar_dir: str,
-                           srid: int,
-                           elevation_raster: str,
-                           mask_raster: str):
-    elevation_raster_4326 = join(solar_dir, ELEVATION_4326_TIF)
-    mask_raster_4326 = join(solar_dir, MASK_4326_TIF)
+def _generate_27700_rasters(solar_dir: str,
+                            srid: int,
+                            elevation_raster: str,
+                            mask_raster: str,
+                            slope_raster: str,
+                            aspect_raster: str):
+    """Reproject in 27700 if not already in 27700
+    """
+    if srid == 27700:
+        return elevation_raster, mask_raster, slope_raster, aspect_raster
 
-    src_srs: str = _get_srs_for_reproject_to_4326(srid)
+    elevation_raster_27700 = join(solar_dir, ELEVATION_27700_TIF)
+    mask_raster_27700 = join(solar_dir, MASK_27700_TIF)
+    slope_raster_27700 = join(solar_dir, SLOPE_27700_TIF)
+    aspect_raster_27700 = join(solar_dir, ASPECT_27700_TIF)
 
-    gdal_helpers.reproject(elevation_raster, elevation_raster_4326, src_srs=src_srs, dst_srs="EPSG:4326")
-    gdal_helpers.reproject(mask_raster, mask_raster_4326, src_srs=src_srs, dst_srs="EPSG:4326")
+    src_srs: str = _get_srs_for_reproject(srid)
 
-    return elevation_raster_4326, mask_raster_4326
+    gdal_helpers.reproject(elevation_raster, elevation_raster_27700, src_srs=src_srs, dst_srs=_7_PARAM_SHIFT)
+    gdal_helpers.reproject(mask_raster, mask_raster_27700, src_srs=src_srs, dst_srs=_7_PARAM_SHIFT)
+    gdal_helpers.reproject(slope_raster, slope_raster_27700, src_srs=src_srs, dst_srs=_7_PARAM_SHIFT)
+    gdal_helpers.reproject(aspect_raster, aspect_raster_27700, src_srs=src_srs, dst_srs=_7_PARAM_SHIFT)
+
+    return elevation_raster_27700, mask_raster_27700, slope_raster_27700, aspect_raster_27700
 
 
-def _get_srs_for_reproject_to_4326(srid: int) -> str:
+def _get_srs_for_reproject(srid: int) -> str:
     if srid == 27700:
         # Use the 7-parameter shift rather than GDAL's default 3-parameter shift
         # for EN->long/lat transformation as it's much more accurate:
         # https://digimap.edina.ac.uk/webhelp/digimapgis/projections_and_transformations/transformations_in_gdalogr.htm
+        # Above not working Dec 22 so also -
+        # https://digimap.edina.ac.uk/help/gis/transformations/transform_gdal_ogr
         src_srs = _7_PARAM_SHIFT
     else:
         src_srs = f"EPSG:{srid}"
@@ -176,24 +201,19 @@ def copy_raster(pg_conn,
             pass
 
 
-def generate_flat_roof_aspect_raster_4326(pg_uri: str,
-                                          job_id: int,
-                                          solar_dir: str) -> Optional[str]:
+def generate_flat_roof_aspect_raster(pg_uri: str,
+                                     job_id: int,
+                                     solar_dir: str,
+                                     mask_raster_27700_filename: str) -> Optional[str]:
     if has_flat_roof(pg_uri, job_id):
-        mask_raster = join(solar_dir, MASK_BUF1_TIF)
-        srid = gdal_helpers.get_srid(mask_raster, fallback=27700)
-        res = gdal_helpers.get_res(mask_raster)
+        srid = gdal_helpers.get_srid(mask_raster_27700_filename, fallback=27700)
+        res = gdal_helpers.get_res(mask_raster_27700_filename)
 
         flat_roof_aspect_raster_filename = join(solar_dir, 'flat_roof_aspect.tif')
         flat_roof_aspect_sql = get_flat_roof_aspect_sql(pg_uri=pg_uri, job_id=job_id)
         create_flat_roof_aspect(flat_roof_aspect_sql, flat_roof_aspect_raster_filename, pg_uri, res=res, srid=srid)
 
-        flat_roof_aspect_raster_4326_filename = join(solar_dir, 'flat_roof_aspect_4326.tif')
-        src_srs: str = _get_srs_for_reproject_to_4326(srid)
-        gdal_helpers.reproject(flat_roof_aspect_raster_filename, flat_roof_aspect_raster_4326_filename,
-                               src_srs=src_srs, dst_srs="EPSG:4326")
-
-        return flat_roof_aspect_raster_4326_filename
+        return flat_roof_aspect_raster_filename
 
     return None
 
@@ -201,13 +221,13 @@ def generate_flat_roof_aspect_raster_4326(pg_uri: str,
 def create_elevation_override_raster(pg_uri: str,
                                      job_id: int,
                                      solar_dir: str,
-                                     elevation_raster_4326_filename: str) -> Optional[str]:
+                                     elevation_raster_27700_filename: str) -> Optional[str]:
     if has_outdated_lidar(pg_uri, job_id):
-        res = gdal_helpers.get_xres_yres(elevation_raster_4326_filename)
-        srid = gdal_helpers.get_srid(elevation_raster_4326_filename)
+        srid = gdal_helpers.get_srid(elevation_raster_27700_filename, fallback=27700)
+        res = gdal_helpers.get_xres_yres(elevation_raster_27700_filename)
 
         patch_raster_filename: str = join(solar_dir, 'elevation_override.tif')
-        outdated_lidar_building_h_sql: str = get_outdated_lidar_building_h_sql_4326(pg_uri=pg_uri, job_id=job_id)
+        outdated_lidar_building_h_sql: str = get_outdated_lidar_building_h_sql_27700(pg_uri=pg_uri, job_id=job_id)
         gdal_helpers.rasterize_3d(pg_uri, outdated_lidar_building_h_sql, patch_raster_filename, res, srid, "Float32")
 
         return patch_raster_filename

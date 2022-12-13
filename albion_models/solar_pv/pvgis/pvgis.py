@@ -14,8 +14,7 @@ from albion_models.db_funcs import sql_script, connection, \
 from albion_models.solar_pv.constants import FLAT_ROOF_DEGREES_THRESHOLD, SYSTEM_LOSS
 from albion_models.solar_pv.pvgis import pvmaps
 from albion_models.solar_pv.rasters import copy_raster, \
-    create_elevation_override_raster, generate_flat_roof_aspect_raster_4326
-from albion_models.transformations import _7_PARAM_SHIFT
+    create_elevation_override_raster, generate_flat_roof_aspect_raster
 from albion_models.util import get_cpu_count
 
 
@@ -35,6 +34,8 @@ def pvgis(pg_uri: str,
           flat_roof_degrees: int,
           elevation_raster: str,
           mask_raster: str,
+          slope_raster: str,
+          aspect_raster: str,
           debug_mode: bool):
 
     if pv_tech == "crystSi":
@@ -61,13 +62,14 @@ def pvgis(pg_uri: str,
         pg_uri=pg_uri,
         job_id=job_id,
         solar_dir=solar_dir,
-        elevation_raster_4326_filename=elevation_raster)
+        elevation_raster_27700_filename=elevation_raster)
 
     logging.info("Generating flat roof raster")
-    flat_roof_aspect_raster: Optional[str] = generate_flat_roof_aspect_raster_4326(
+    flat_roof_aspect_raster: Optional[str] = generate_flat_roof_aspect_raster(
         pg_uri=pg_uri,
         job_id=job_id,
-        solar_dir=solar_dir)
+        solar_dir=solar_dir,
+        mask_raster_27700_filename=mask_raster)
 
     pvm = pvmaps.PVMaps(
         grass_dbase_dir=os.environ.get("PVGIS_GRASS_DBASE_DIR", None),
@@ -89,7 +91,9 @@ def pvgis(pg_uri: str,
         elevation_filename=os.path.basename(elevation_raster),
         mask_filename=os.path.basename(mask_raster),
         flat_roof_aspect_filename=os.path.basename(flat_roof_aspect_raster) if flat_roof_aspect_raster else None,
-        elevation_override_filename=os.path.basename(elevation_override_raster) if elevation_override_raster else None
+        elevation_override_filename=os.path.basename(elevation_override_raster) if elevation_override_raster else None,
+        forced_slope_filename=slope_raster,     # Use values from GDAL for slope and aspect as aspects differ by
+        forced_aspect_filename=aspect_raster    # up to approx 3 degrees after switch to 27700
     )
 
     yearly_kwh_raster = pvm.yearly_kwh_raster
@@ -97,7 +101,7 @@ def pvgis(pg_uri: str,
     # horizons are CCW from East
     horizon_rasters = pvm.horizons
 
-    yearly_kwh_27700, mask_27700, monthly_wh_27700, horizon_27700 = _generate_27700_rasters(
+    yearly_kwh_27700, mask_27700, monthly_wh_27700, horizon_27700 = _generate_equal_sized_rasters(
         pvmaps_dir, yearly_kwh_raster, mask_raster, monthly_wh_rasters, horizon_rasters)
 
     logging.info("Finished PVMAPS, loading into db...")
@@ -116,32 +120,29 @@ def pvgis(pg_uri: str,
             debug_mode=debug_mode)
 
 
-def _generate_27700_rasters(pvmaps_dir: str,
-                            yearly_kwh_raster: str,
-                            mask_raster: str,
-                            monthly_wh_rasters: List[str],
-                            horizon_rasters: List[str]):
+def _generate_equal_sized_rasters(pvmaps_dir: str,
+                                  yearly_kwh_raster: str,
+                                  mask_raster: str,
+                                  monthly_wh_rasters: List[str],
+                                  horizon_rasters: List[str]):
+    """Generate rasters the same size as mask_raster
+    """
     if len(monthly_wh_rasters) != 12:
         raise ValueError(f"Expected 12 monthly rasters - got {len(monthly_wh_rasters)}")
 
     yearly_kwh_27700 = join(pvmaps_dir, "kwh_year_27700.tif")
-    mask_27700 = join(pvmaps_dir, "mask_27700.tif")
-    gdal_helpers.reproject(yearly_kwh_raster, yearly_kwh_27700, src_srs="EPSG:4326", dst_srs=_7_PARAM_SHIFT)
-    gdal_helpers.reproject(mask_raster, mask_27700, src_srs="EPSG:4326", dst_srs=_7_PARAM_SHIFT)
 
-    gdal_helpers.crop_or_expand(yearly_kwh_27700, mask_27700, yearly_kwh_27700, True)
+    gdal_helpers.crop_or_expand(yearly_kwh_raster, mask_raster, yearly_kwh_27700, True)
 
     monthly_wh_27700 = [join(pvmaps_dir, f"wh_m{str(i).zfill(2)}_27700.tif") for i in range(1, 13)]
     for r_in, r_out in zip(monthly_wh_rasters, monthly_wh_27700):
-        gdal_helpers.reproject(r_in, r_out, src_srs="EPSG:4326", dst_srs=_7_PARAM_SHIFT)
-        gdal_helpers.crop_or_expand(r_out, mask_27700, r_out, True)
+        gdal_helpers.crop_or_expand(r_in, mask_raster, r_out, True)
 
     horizon_27700 = [join(pvmaps_dir, f"horizon_{str(i).zfill(2)}_27700.tif") for i, _ in enumerate(horizon_rasters)]
     for r_in, r_out in zip(horizon_rasters, horizon_27700):
-        gdal_helpers.reproject(r_in, r_out, src_srs="EPSG:4326", dst_srs=_7_PARAM_SHIFT)
-        gdal_helpers.crop_or_expand(r_out, mask_27700, r_out, True)
+        gdal_helpers.crop_or_expand(r_in, mask_raster, r_out, True)
 
-    return yearly_kwh_27700, mask_27700, monthly_wh_27700, horizon_27700
+    return yearly_kwh_27700, mask_raster, monthly_wh_27700, horizon_27700
 
 
 def _combine_horizons(pg_conn,

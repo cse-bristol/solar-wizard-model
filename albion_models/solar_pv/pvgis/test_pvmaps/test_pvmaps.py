@@ -10,6 +10,8 @@ from typing import List, Dict, Optional, Tuple
 
 import math
 
+from osgeo import gdal, osr, ogr
+
 from albion_models.solar_pv.pvgis.pvmaps import PVMaps, CSI, OUT_DIRECT_RAD_BASENAME, OUT_DIFFUSE_RAD_BASENAME, \
     HORIZON090_BASENAME, SLOPE_ADJUSTED, ASPECT_GRASS_ADJUSTED, OUT_PV_POWER_WIND_SPECTRAL_BASENAME
 from albion_models.paths import RESOURCES_DIR, TEST_DATA
@@ -63,7 +65,7 @@ class TestPVMaps:
 
         test_mapset = None
         num_test_mapsets = 0
-        mapsets = os.listdir(f"{GRASS_DBASE}/grassdata")
+        mapsets = os.listdir(f"{GRASS_DBASE}/grassdata_27700")
         for mapset in mapsets:
             if mapset.startswith("pvmaps."):
                 test_mapset = mapset
@@ -75,6 +77,7 @@ class TestPVMaps:
                 cls._clean_test_mapsets()
             print("Running create_pvmap for tests")
             cls.instance.create_pvmap(cls.ELEVATION_RASTER_FILENAME, cls.MASK_RASTER_FILENAME, cls.FLAT_ROOF_RASTER_FILENAME,
+                                      None,
                                       cls.FORCED_SLOPE_FILENAME, cls.FORCED_ASPECT_FILENAME, forced_horizon_basename)
 
         # Disable mask if it's enabled
@@ -88,10 +91,10 @@ class TestPVMaps:
 
     @staticmethod
     def _clean_test_mapsets():
-        mapsets = os.listdir(f"{GRASS_DBASE}/grassdata")
+        mapsets = os.listdir(f"{GRASS_DBASE}/grassdata_27700")
         for mapset in mapsets:
             if mapset.startswith("pvmaps."):
-                shutil.rmtree(f"{GRASS_DBASE}/grassdata/{mapset}")
+                shutil.rmtree(f"{GRASS_DBASE}/grassdata_27700/{mapset}")
 
     def _get_raster_val(self, raster: str, lon_east: float, lat_north: float):
         val: float = 0.0
@@ -145,7 +148,7 @@ class TestPVMaps:
             horizon_raster = f"{HORIZON090_BASENAME}_{grass_angle:03d}"
             horizon: float = self._get_raster_val(horizon_raster, lon_east, lat_north)
             if horizon_heights_in_radians:
-                horizon = 180 * horizon / math.pi  # Convert to degrees as api expects degrees
+                horizon = round(180 * horizon / math.pi, 3)  # Convert to degrees as api expects degrees
             if userhorizon:
                 userhorizon += ","
             if horizon < 0.0:
@@ -235,15 +238,18 @@ class TestPVMaps:
     def _create_cached_api_pv_data(self, test_locns: List[Tuple[float, float]], cached_data_filename: str):
         print("Re-fetching data from API")
         api_results = [self._get_api_pv_data(lon_east, lat_north) for lon_east, lat_north in test_locns]
-        pickle.dump(api_results, open(f"{self.DATA_INPUT_DIR}/{cached_data_filename}.pkl", "wb"))
+        with open(f"{self.DATA_INPUT_DIR}/{cached_data_filename}.pkl", "wb") as cached_data_pkl:
+            pickle.dump(api_results, cached_data_pkl)
         return api_results
 
-    def _get_api_pv_data(self, lon_east: float, lat_north: float):
-        print(f"\n_get_api_pv_data(): {lon_east},{lat_north}")
+    def _get_api_pv_data(self, lon_east_27700: float, lat_north_27700: float):
+        print(f"\n_get_api_pv_data(): {lon_east_27700},{lat_north_27700}")
+
+        lat_north_4326, lon_east_4326 = self.reproject_point(lon_east_27700, lat_north_27700, 27700, 4326)
 
         ###
         # Get api parameters
-        userhorizon, angle, aspect, aspect_grass = self._get_api_inputs_from_rasters(lon_east, lat_north)
+        userhorizon, angle, aspect, aspect_grass = self._get_api_inputs_from_rasters(lon_east_27700, lat_north_27700)
 
         # peakpower
         peakpower = 1.0
@@ -255,7 +261,7 @@ class TestPVMaps:
         ###
         # Get API values
         query_get = \
-            f"https://re.jrc.ec.europa.eu/api/v5_2/PVcalc?lat={lat_north}&lon={lon_east}&userhorizon={userhorizon}&peakpower={peakpower}&" \
+            f"https://re.jrc.ec.europa.eu/api/v5_2/PVcalc?lat={lat_north_4326}&lon={lon_east_4326}&userhorizon={userhorizon}&peakpower={peakpower}&" \
             f"loss={loss}&angle={angle}&aspect={aspect}&outputformat=json"
         query_get += "&raddatabase=PVGIS-SARAH2"
         # Don't use horizon
@@ -263,7 +269,7 @@ class TestPVMaps:
 
         print(f"query = {query_get}")
         response = requests.get(query_get)
-        # print(f"response = {response.json()}")
+        print(f"response = {response.json()}")
         api_e_day = []
         for mon_ix in range(12):
             api_e_day.append(response.json()["outputs"]["monthly"]["fixed"][mon_ix]["E_d"])
@@ -351,7 +357,8 @@ class TestPVMaps:
     def _create_cached_api_radiation_data(self, test_locns: List[Tuple[float, float]], cached_data_filename: str):
         print("Re-fetching data from API")
         api_results = [self._get_api_radiation_data(lat_north, lon_east) for lon_east, lat_north in test_locns]
-        pickle.dump(api_results, open(f"{self.DATA_INPUT_DIR}/{cached_data_filename}.pkl", "wb"))
+        with open(f"{self.DATA_INPUT_DIR}/{cached_data_filename}.pkl", "wb") as cached_data_pkl:
+            pickle.dump(api_results, cached_data_pkl)
         return api_results
 
     def _get_api_radiation_data(self, lon_east: float, lat_north: float):
@@ -410,3 +417,27 @@ class TestPVMaps:
 
         return local_rad_month
 
+
+    @staticmethod
+    def reproject_point(x_east_lat: float, y_north_long: float, src_srs: int, dst_srs: int):
+        """
+        :param x_east_lat: For 27700 x is easting, for 4326 x is latitude (angle north or south of the Equator)
+        :param y_north_long: For 27700 y is northing, for 4326 y is longitude
+        :param src_srs: e.g. 27700 or 4326
+        :param dst_srs: e.g. 27700 or 4326
+        :return: Tuple, x, y / latitude, longitude / easting, northing
+        """
+        source = osr.SpatialReference()
+        source.ImportFromEPSG(src_srs)
+
+        target = osr.SpatialReference()
+        target.ImportFromEPSG(dst_srs)
+
+        transform = osr.CoordinateTransformation(source, target)
+
+        point = ogr.Geometry(ogr.wkbPoint)
+        point.AddPoint(x_east_lat, y_north_long)
+
+        point.Transform(transform)
+
+        return point.GetX(), point.GetY()
