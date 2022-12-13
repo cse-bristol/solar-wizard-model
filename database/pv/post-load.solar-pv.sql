@@ -3,8 +3,6 @@
 -- to per-panel monthly/yearly kWh and horizon data
 --
 
-ALTER TABLE {pixel_kwh} RENAME COLUMN val TO kwh;
-
 DELETE FROM {pixel_kwh} WHERE kwh IS NULL OR kwh = 'NaN'::real;
 
 ALTER TABLE {pixel_kwh} ADD COLUMN en geometry(Point, 27700);

@@ -13,7 +13,7 @@ from albion_models.db_funcs import sql_script, connection, \
     sql_command
 from albion_models.solar_pv.constants import FLAT_ROOF_DEGREES_THRESHOLD, SYSTEM_LOSS
 from albion_models.solar_pv.pvgis import pvmaps
-from albion_models.solar_pv.rasters import copy_raster, \
+from albion_models.solar_pv.rasters import copy_rasters, \
     create_elevation_override_raster, generate_flat_roof_aspect_raster
 from albion_models.util import get_cpu_count
 
@@ -145,49 +145,20 @@ def _generate_equal_sized_rasters(pvmaps_dir: str,
     return yearly_kwh_27700, mask_raster, monthly_wh_27700, horizon_27700
 
 
-def _combine_horizons(pg_conn,
-                      job_id: int,
-                      horizon_tables: List[str]):
-    schema = tables.schema(job_id)
-    sql_command(
-        pg_conn,
-        "ALTER TABLE {pixel_kwh} ADD COLUMN horizon real[]",
-        pixel_kwh=Identifier(schema, tables.PIXEL_KWH_TABLE),
-    )
-    for htable in horizon_tables:
-        sql_command(
-            pg_conn,
-            """UPDATE {pixel_kwh} sp 
-               SET horizon = horizon || h.val 
-               FROM {htable} h 
-               WHERE sp.x = h.x AND sp.y = h.y;
-               
-               DROP TABLE {htable};""",
-            pixel_kwh=Identifier(schema, tables.PIXEL_KWH_TABLE),
-            htable=Identifier(schema, htable))
-        logging.info(f"combined horizon slice from {htable}")
+def _raster_value_transformer(data: List[float]) -> str:
+    kwh_year = data[0]
+    wh_month = data[1:13]
+    horizons = data[13:]
 
+    output_data = [f"{kwh_year:.2f}"]
+    for i, wh_monthday in enumerate(wh_month):
+        kwh_month = wh_monthday * 0.001 * mdays[i + 1]
+        output_data.append(f"{kwh_month:.2f}")
 
-def _combine_monthly_whs(pg_conn,
-                         job_id: int,
-                         monthly_wh_tables: List[str]):
-    schema = tables.schema(job_id)
-    for i, mtable in enumerate(monthly_wh_tables, start=1):
-        sql_command(
-            pg_conn,
-            """ALTER TABLE {pixel_kwh} ADD COLUMN {col} real;
-            
-               UPDATE {pixel_kwh} sp 
-               SET {col} = m.val * 0.001 * {mdays} 
-               FROM {month} m 
-               WHERE sp.x = m.x AND sp.y = m.y;
-               
-               DROP TABLE {month};""",
-            pixel_kwh=Identifier(schema, tables.PIXEL_KWH_TABLE),
-            col=Identifier(f"kwh_m{str(i).zfill(2)}"),
-            mdays=Literal(mdays[i]),
-            month=Identifier(schema, mtable))
-        logging.info(f"combined monthly Wh data from {mtable}")
+    horizon_array = '"{' + ','.join([f"{val:.2f}" for val in horizons]) + '}"'
+    output_data.append(horizon_array)
+
+    return ','.join(output_data)
 
 
 def _write_results_to_db(pg_conn,
@@ -204,44 +175,38 @@ def _write_results_to_db(pg_conn,
         raise ValueError(f"Expected 12 monthly rasters - got {len(monthly_wh_rasters)}")
 
     schema = tables.schema(job_id)
-    raster_tables = []
-    horizon_tables = []
-    monthly_tables = []
+    sql_command(
+        pg_conn,
+        """
+        CREATE TABLE {pixel_kwh} (
+            x double precision,
+            y double precision,
+            kwh real,
+            kwh_m01 real,
+            kwh_m02 real,
+            kwh_m03 real,
+            kwh_m04 real,
+            kwh_m05 real,
+            kwh_m06 real,
+            kwh_m07 real,
+            kwh_m08 real,
+            kwh_m09 real,
+            kwh_m10 real,
+            kwh_m11 real,
+            kwh_m12 real,
+            horizon real[],
+            PRIMARY KEY (x, y)
+        );
+        """,
+        pixel_kwh=Identifier(schema, tables.PIXEL_KWH_TABLE))
 
-    for i, raster in enumerate(monthly_wh_rasters):
-        m_id = "m" + str(i + 1).zfill(2)
-        m_table = f'{tables.PIXEL_KWH_TABLE}_{m_id}'
-        raster_tables.append((raster, m_table))
-        monthly_tables.append(m_table)
-
-    for i, raster in enumerate(horizon_rasters):
-        h_id = "s" + str(i).zfill(2)
-        h_table = f'horizon_{h_id}'
-        raster_tables.append((raster, h_table))
-        horizon_tables.append(h_table)
-
-    raster_tables.append((yearly_kwh_raster, tables.PIXEL_KWH_TABLE))
-
-    for raster, table in raster_tables:
-        sql_command(
-            pg_conn,
-            """
-            DROP TABLE IF EXISTS {table};
-            CREATE TABLE {table} (
-                x double precision,
-                y double precision,
-                val real,
-                PRIMARY KEY (x, y)
-            );
-            """,
-            table=Identifier(schema, table))
-        copy_raster(
-            pg_conn, solar_dir, raster, f"{schema}.{table}", mask_raster,
-            include_nans=False, debug_mode=debug_mode)
-        logging.info(f"Loaded {raster} into {table}")
-
-    _combine_monthly_whs(pg_conn, job_id, monthly_tables)
-    _combine_horizons(pg_conn, job_id, horizon_tables)
+    copy_rasters(
+        pg_conn, solar_dir,
+        [yearly_kwh_raster] + monthly_wh_rasters + horizon_rasters,
+        f"{schema}.{tables.PIXEL_KWH_TABLE}",
+        mask_raster,
+        value_transformer=_raster_value_transformer,
+        debug_mode=debug_mode)
 
     sql_script(
         pg_conn,
