@@ -1,9 +1,10 @@
+import shutil
 from os.path import join
 
 import logging
 import os
 from psycopg2.sql import Identifier, Literal
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List, Callable
 
 import albion_models.solar_pv.tables as tables
 import psycopg2.extras
@@ -11,6 +12,7 @@ from albion_models import gdal_helpers
 from albion_models.db_funcs import sql_script, copy_csv, count, connection
 from albion_models.postgis import get_merged_lidar_tiles
 from albion_models.solar_pv import mask
+from albion_models.solar_pv.constants import LIDAR_DOWNSCALE_TO
 from albion_models.solar_pv.raster_names import MASK_27700_TIF, MASK_BUF1_TIF, ELEVATION_27700_TIF, SLOPE_27700_TIF, \
     ASPECT_27700_TIF
 from albion_models.solar_pv.roof_polygons.roof_polygons import get_flat_roof_aspect_sql, create_flat_roof_aspect, \
@@ -41,20 +43,12 @@ def generate_rasters(pg_uri: str,
 
     if count(pg_uri, tables.schema(job_id), tables.LIDAR_PIXEL_TABLE) > 0:
         logging.info("Not creating rasters, raster data already loaded.")
-        srid = gdal_helpers.get_srid(elevation_vrt, fallback=27700)
         res = gdal_helpers.get_res(elevation_vrt)
-        if srid == 27700:
-            return (join(solar_dir, ELEVATION_27700_TIF),
-                    join(solar_dir, MASK_27700_TIF),
-                    join(solar_dir, SLOPE_27700_TIF),
-                    join(solar_dir, ASPECT_27700_TIF),
-                    res)
-        else:
-            return (elevation_raster,
-                    mask_raster_buf1,
-                    slope_raster,
-                    aspect_raster,
-                    res)
+        return (join(solar_dir, ELEVATION_27700_TIF),
+                join(solar_dir, MASK_27700_TIF),
+                join(solar_dir, SLOPE_27700_TIF),
+                join(solar_dir, ASPECT_27700_TIF),
+                res)
 
     with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
         elevation_tiles = get_merged_lidar_tiles(pg_conn, job_id, solar_dir)
@@ -62,6 +56,9 @@ def generate_rasters(pg_uri: str,
 
     srid = gdal_helpers.get_srid(elevation_vrt, fallback=27700)
     res = gdal_helpers.get_res(elevation_vrt)
+
+    if res < LIDAR_DOWNSCALE_TO:
+        res = LIDAR_DOWNSCALE_TO
 
     unit_dims, unit = gdal_helpers.get_srs_units(elevation_vrt)
     if unit_dims != 1.0 or unit != 'metre':
@@ -115,35 +112,37 @@ def _generate_27700_rasters(solar_dir: str,
                             aspect_raster: str):
     """Reproject in 27700 if not already in 27700
     """
-    if srid == 27700:
-        return elevation_raster, mask_raster, slope_raster, aspect_raster
-
     elevation_raster_27700 = join(solar_dir, ELEVATION_27700_TIF)
     mask_raster_27700 = join(solar_dir, MASK_27700_TIF)
     slope_raster_27700 = join(solar_dir, SLOPE_27700_TIF)
     aspect_raster_27700 = join(solar_dir, ASPECT_27700_TIF)
 
-    src_srs: str = _get_srs_for_reproject(srid)
-
-    gdal_helpers.reproject(elevation_raster, elevation_raster_27700, src_srs=src_srs, dst_srs=_7_PARAM_SHIFT)
-    gdal_helpers.reproject(mask_raster, mask_raster_27700, src_srs=src_srs, dst_srs=_7_PARAM_SHIFT)
-    gdal_helpers.reproject(slope_raster, slope_raster_27700, src_srs=src_srs, dst_srs=_7_PARAM_SHIFT)
-    gdal_helpers.reproject(aspect_raster, aspect_raster_27700, src_srs=src_srs, dst_srs=_7_PARAM_SHIFT)
+    if srid == 27700:
+        shutil.copyfile(elevation_raster, elevation_raster_27700)
+        shutil.copyfile(mask_raster, mask_raster_27700)
+        shutil.copyfile(slope_raster, slope_raster_27700)
+        shutil.copyfile(aspect_raster, aspect_raster_27700)
+    else:
+        dst_srs = _get_dst_srs_for_reproject(srid)
+        gdal_helpers.reproject(elevation_raster, elevation_raster_27700, src_srs=f"EPSG:{srid}", dst_srs=dst_srs)
+        gdal_helpers.reproject(mask_raster, mask_raster_27700, src_srs=f"EPSG:{srid}", dst_srs=dst_srs)
+        gdal_helpers.reproject(slope_raster, slope_raster_27700, src_srs=f"EPSG:{srid}", dst_srs=dst_srs)
+        gdal_helpers.reproject(aspect_raster, aspect_raster_27700, src_srs=f"EPSG:{srid}", dst_srs=dst_srs)
 
     return elevation_raster_27700, mask_raster_27700, slope_raster_27700, aspect_raster_27700
 
 
-def _get_srs_for_reproject(srid: int) -> str:
-    if srid == 27700:
+def _get_dst_srs_for_reproject(src_srid: int) -> str:
+    if src_srid == 4326:
         # Use the 7-parameter shift rather than GDAL's default 3-parameter shift
-        # for EN->long/lat transformation as it's much more accurate:
+        # for long/lat->EN transformation as it's much more accurate:
         # https://digimap.edina.ac.uk/webhelp/digimapgis/projections_and_transformations/transformations_in_gdalogr.htm
         # Above not working Dec 22 so also -
         # https://digimap.edina.ac.uk/help/gis/transformations/transform_gdal_ogr
-        src_srs = _7_PARAM_SHIFT
+        dst_srs = _7_PARAM_SHIFT
     else:
-        src_srs = f"EPSG:{srid}"
-    return src_srs
+        dst_srs = f"EPSG:27700"
+    return dst_srs
 
 
 def _load_rasters_to_db(pg_uri: str,
@@ -156,7 +155,6 @@ def _load_rasters_to_db(pg_uri: str,
                         slope_raster: str,
                         mask_raster: str,
                         debug_mode: bool):
-    # TODO this could be made a db-only operation, going from db-rasters to per-pixel info
     with connection(pg_uri) as pg_conn:
         schema = tables.schema(job_id)
         lidar_pixels_table = tables.LIDAR_PIXEL_TABLE
@@ -168,9 +166,12 @@ def _load_rasters_to_db(pg_uri: str,
             slope_pixels=Identifier(schema, "slope_pixels"),
         )
 
-        copy_raster(pg_conn, solar_dir, cropped_lidar, f"{schema}.{lidar_pixels_table}", mask_raster, debug_mode)
-        copy_raster(pg_conn, solar_dir, aspect_raster, f"{schema}.aspect_pixels", mask_raster, debug_mode)
-        copy_raster(pg_conn, solar_dir, slope_raster, f"{schema}.slope_pixels", mask_raster, debug_mode)
+        copy_rasters(pg_conn, solar_dir,
+                     rasters=[cropped_lidar, aspect_raster, slope_raster],
+                     table=f"{schema}.{lidar_pixels_table}",
+                     mask_raster=mask_raster,
+                     include_nans=False,
+                     debug_mode=debug_mode)
 
         sql_script(
             pg_conn, 'pv/post-load.lidar-pixels.sql',
@@ -184,15 +185,21 @@ def _load_rasters_to_db(pg_uri: str,
         )
 
 
-def copy_raster(pg_conn,
-                solar_dir: str,
-                raster: str,
-                table: str,
-                mask_raster: str = None,
-                include_nans: bool = True,
-                debug_mode: bool = False):
+def copy_rasters(pg_conn,
+                 solar_dir: str,
+                 rasters: List[str],
+                 table: str,
+                 mask_raster: str = None,
+                 include_nans: bool = True,
+                 value_transformer: Callable[[List[float]], str] = None,
+                 debug_mode: bool = False,):
     csv_file = join(solar_dir, f'temp-{table}.csv')
-    gdal_helpers.raster_to_csv(raster_file=raster, csv_out=csv_file, mask_raster=mask_raster, include_nans=include_nans)
+    gdal_helpers.rasters_to_csv(
+        raster_files=rasters,
+        csv_out=csv_file,
+        mask_raster=mask_raster,
+        include_nans=include_nans,
+        value_transformer=value_transformer)
     copy_csv(pg_conn, csv_file, table)
     if not debug_mode:
         try:
