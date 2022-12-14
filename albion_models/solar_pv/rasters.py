@@ -13,7 +13,7 @@ from albion_models.db_funcs import sql_script, copy_csv, count, connection
 from albion_models.postgis import get_merged_lidar_tiles
 from albion_models.solar_pv import mask
 from albion_models.solar_pv.constants import LIDAR_DOWNSCALE_TO
-from albion_models.solar_pv.raster_names import MASK_27700_TIF, MASK_BUF1_TIF, ELEVATION_27700_TIF, SLOPE_27700_TIF, \
+from albion_models.solar_pv.raster_names import MASK_27700_BUF1_TIF, MASK_27700_BUF3_TIF, ELEVATION_27700_TIF, SLOPE_27700_TIF, \
     ASPECT_27700_TIF
 from albion_models.solar_pv.roof_polygons.roof_polygons import get_flat_roof_aspect_sql, create_flat_roof_aspect, \
     has_flat_roof, get_outdated_lidar_building_h_sql_27700, has_outdated_lidar
@@ -38,14 +38,14 @@ def generate_rasters(pg_uri: str,
     elevation_raster = join(solar_dir, 'elevation.tif')
     aspect_raster = join(solar_dir, 'aspect.tif')
     slope_raster = join(solar_dir, 'slope.tif')
-    mask_raster_buf1 = join(solar_dir, MASK_BUF1_TIF)
+    mask_raster_buf1 = join(solar_dir, 'mask_buf1.tif')
     mask_raster_buf3 = join(solar_dir, 'mask_buf3.tif')
 
     if count(pg_uri, tables.schema(job_id), tables.LIDAR_PIXEL_TABLE) > 0:
         logging.info("Not creating rasters, raster data already loaded.")
         res = gdal_helpers.get_res(elevation_vrt)
         return (join(solar_dir, ELEVATION_27700_TIF),
-                join(solar_dir, MASK_27700_TIF),
+                join(solar_dir, MASK_27700_BUF1_TIF),
                 join(solar_dir, SLOPE_27700_TIF),
                 join(solar_dir, ASPECT_27700_TIF),
                 res)
@@ -94,42 +94,46 @@ def generate_rasters(pg_uri: str,
     gdal_helpers.slope(elevation_raster, slope_raster)
 
     logging.info("Check rasters are in / convert to 27700...")
-    cropped_lidar_27700, mask_raster_27700, slope_raster_27700, aspect_raster_27700 = _generate_27700_rasters(
-        solar_dir, srid, elevation_raster, mask_raster_buf1, slope_raster, aspect_raster)
+    elevation_raster, mask_raster_buf1, mask_raster_buf3, slope_raster, aspect_raster = _generate_27700_rasters(
+        solar_dir, srid, elevation_raster, mask_raster_buf1, mask_raster_buf3, slope_raster, aspect_raster)
 
     logging.info("Loading raster data...")
     _load_rasters_to_db(pg_uri, job_id, srid, res, solar_dir, elevation_raster,
                         aspect_raster, slope_raster, mask_raster_buf3, debug_mode)
 
-    return cropped_lidar_27700, mask_raster_27700, slope_raster_27700, aspect_raster_27700, res
+    return elevation_raster, mask_raster_buf1, slope_raster, aspect_raster, res
 
 
 def _generate_27700_rasters(solar_dir: str,
                             srid: int,
                             elevation_raster: str,
-                            mask_raster: str,
+                            mask_raster_buf1: str,
+                            mask_raster_buf3: str,
                             slope_raster: str,
                             aspect_raster: str):
     """Reproject in 27700 if not already in 27700
     """
     elevation_raster_27700 = join(solar_dir, ELEVATION_27700_TIF)
-    mask_raster_27700 = join(solar_dir, MASK_27700_TIF)
+    mask_raster_buf1_27700 = join(solar_dir, MASK_27700_BUF1_TIF)
+    mask_raster_buf3_27700 = join(solar_dir, MASK_27700_BUF3_TIF)
     slope_raster_27700 = join(solar_dir, SLOPE_27700_TIF)
     aspect_raster_27700 = join(solar_dir, ASPECT_27700_TIF)
 
     if srid == 27700:
-        shutil.copyfile(elevation_raster, elevation_raster_27700)
-        shutil.copyfile(mask_raster, mask_raster_27700)
-        shutil.copyfile(slope_raster, slope_raster_27700)
-        shutil.copyfile(aspect_raster, aspect_raster_27700)
+        shutil.move(elevation_raster, elevation_raster_27700)
+        shutil.move(mask_raster_buf1, mask_raster_buf1_27700)
+        shutil.move(mask_raster_buf3, mask_raster_buf3_27700)
+        shutil.move(slope_raster, slope_raster_27700)
+        shutil.move(aspect_raster, aspect_raster_27700)
     else:
         dst_srs = _get_dst_srs_for_reproject(srid)
         gdal_helpers.reproject(elevation_raster, elevation_raster_27700, src_srs=f"EPSG:{srid}", dst_srs=dst_srs)
-        gdal_helpers.reproject(mask_raster, mask_raster_27700, src_srs=f"EPSG:{srid}", dst_srs=dst_srs)
+        gdal_helpers.reproject(mask_raster_buf1, mask_raster_buf1_27700, src_srs=f"EPSG:{srid}", dst_srs=dst_srs)
+        gdal_helpers.reproject(mask_raster_buf3, mask_raster_buf3_27700, src_srs=f"EPSG:{srid}", dst_srs=dst_srs)
         gdal_helpers.reproject(slope_raster, slope_raster_27700, src_srs=f"EPSG:{srid}", dst_srs=dst_srs)
         gdal_helpers.reproject(aspect_raster, aspect_raster_27700, src_srs=f"EPSG:{srid}", dst_srs=dst_srs)
 
-    return elevation_raster_27700, mask_raster_27700, slope_raster_27700, aspect_raster_27700
+    return elevation_raster_27700, mask_raster_buf1_27700, mask_raster_buf3_27700, slope_raster_27700, aspect_raster_27700
 
 
 def _get_dst_srs_for_reproject(src_srid: int) -> str:
