@@ -144,7 +144,6 @@ def _load_rasters_to_db(pg_uri: str,
                         slope_raster: str,
                         mask_raster: str,
                         debug_mode: bool):
-    # TODO this could be made a db-only operation, going from db-rasters to per-pixel info
     with connection(pg_uri) as pg_conn:
         schema = tables.schema(job_id)
         lidar_pixels_table = tables.LIDAR_PIXEL_TABLE

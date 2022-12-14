@@ -13,7 +13,7 @@ from os.path import join
 from typing import List, Tuple, Optional
 
 from albion_models.solar_pv.pvgis.grass_gis_user import GrassGISUser
-from albion_models.solar_pv.pvgis.pymaps_setup import PVMapsSetup
+from albion_models.solar_pv.pvgis.pvmaps_setup import PVMapsSetup
 
 ##
 # Raster names used in grass db
