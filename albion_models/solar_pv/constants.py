@@ -26,3 +26,8 @@ SYSTEM_LOSS = 0.14
 RANSAC_LARGE_BUILDING = 1000
 
 RANSAC_BASE_MAX_TRIALS = 1000
+
+# LiDAR will be downscaled to this resolution if it is high-res (lower number):
+# 50cm LiDAR is too slow unfortunately, particularly at the stages of loading raster
+# pixel data into the database and running RANSAC
+LIDAR_DOWNSCALE_TO = 1.0
