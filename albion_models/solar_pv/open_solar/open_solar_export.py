@@ -7,10 +7,9 @@ from typing import List, Tuple, Optional
 
 from psycopg2.extras import DictCursor
 
-import albion_models.solar_pv.open_solar.export_geographies
 from albion_models.db_funcs import sql_command, connection
 from albion_models.solar_pv.open_solar import export_panelarray, export_building, export_geographies, \
-    export_conservation_area
+    export_conservation_area, export_paf
 
 _JOB_GPKG_STEM = "job"
 _BASE_GPKG_STEM = "base_info"
@@ -112,6 +111,12 @@ def _export_base_cons_area(pg_uri: str, gpkg_dir: str, regenerate: bool):
     with connection(pg_uri, cursor_factory=DictCursor) as pg_conn:  # Use a separate connection per call / thread
         export_conservation_area.export(pg_conn, pg_uri, gpkg_filename, regenerate)
 
+def _export_paf(pg_uri: str, output_dir: str, regenerate: bool):
+    """Export full PAF DB"""
+    logging.info(f"Exporting PAF")
+    output_filename: str = join(output_dir, f"paf.csv.gz")
+    with connection(pg_uri, cursor_factory=DictCursor) as pg_conn:  # Use a separate connection per call / thread
+        export_paf.export(pg_conn, output_filename, regenerate)
 
 def export(pg_uri: str, os_run_id: int, gpkg_dir: str,
            extract_job_info: bool, extract_base_info: bool,
@@ -147,6 +152,7 @@ def export(pg_uri: str, os_run_id: int, gpkg_dir: str,
             futures.append((None, executor.submit(_export_base_lsoa, pg_uri, gpkg_dir, regenerate)))
             futures.append((None, executor.submit(_export_base_la, pg_uri, gpkg_dir, regenerate)))
             futures.append((None, executor.submit(_export_base_cons_area, pg_uri, gpkg_dir, regenerate)))
+            futures.append((None, executor.submit(_export_paf, pg_uri, gpkg_dir, regenerate)))
 
         exc_str: str = ""
         for _id, future in futures:
