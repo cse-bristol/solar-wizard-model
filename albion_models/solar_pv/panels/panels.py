@@ -148,8 +148,8 @@ def _place_panel_page(pg_uri: str,
                 roof_plane_id = roof['roof_plane_id']
                 toid = roof['toid']
                 for panel in panels:
-                    area = panel.area
-                    footprint = area / math.cos(math.radians(roof['slope']))
+                    area = panel_width_m * panel_height_m
+                    footprint = panel.area
                     roof_panels.append((roof_plane_id,
                                         toid,
                                         panel.wkt,

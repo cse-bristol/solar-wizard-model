@@ -1,3 +1,5 @@
+import math
+
 from shapely import wkt
 
 from albion_models.solar_pv.panels.panels import _roof_panels
@@ -39,3 +41,18 @@ class PanelTest(ParameterisedTestCase):
 
     def test_small_flat_roof(self):
         assert_panel_count(_no_panels, 1)
+
+    def test_panel_area_footprint(self):
+        w = 0.99
+        h = 1.64
+        slope = _failed['slope']
+        panels = _roof_panels(
+            roof=wkt.loads(_failed['roof']),
+            panel_w=w,
+            panel_h=h,
+            aspect=_failed['aspect'],
+            slope=slope,
+            panel_spacing_m=0.01,
+            is_flat=_failed['is_flat'])
+        footprint = w * h * math.cos(math.radians(slope))
+        assert abs(panels[0].area - footprint) < 0.00001, f"Had {panels[0].area}, wanted {footprint}"
