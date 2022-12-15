@@ -3,9 +3,18 @@ import os
 
 from albion_models.db_funcs import command_to_csv_gzip
 
+# As multi-column primary keys don't work with Django ORM models, use an offset to produce a unique id and indicate an
+# address in Welsh instead of English.
+_WELSH_OFFSET: str = "1E9"
+
 _SQL_EXPORT_CMD: str = \
-"""
-SELECT b.toid, p.udprn, replace(p.formatted_address, E'\n', ', ') AS address, p.text_search
+f"""
+SELECT b.toid, 
+CASE 
+  WHEN lang = 'en' THEN p.udprn
+  ELSE p.udprn + {_WELSH_OFFSET}
+END,
+replace(p.formatted_address, E'\n', ', ') AS address, p.text_search
 FROM paf.paf p
 LEFT JOIN aggregates.building b 
 ON (p.udprn = ANY(b.udprns))
