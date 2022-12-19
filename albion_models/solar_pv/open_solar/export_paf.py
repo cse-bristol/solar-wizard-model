@@ -9,15 +9,14 @@ _WELSH_OFFSET: str = "1E9"
 
 _SQL_EXPORT_CMD: str = \
 f"""
-SELECT b.toid, 
+SELECT a.toid, 
 CASE 
-  WHEN lang = 'en' THEN p.udprn
-  ELSE p.udprn + {_WELSH_OFFSET}
+  WHEN p.lang = 'en' THEN udprn
+  ELSE udprn + {_WELSH_OFFSET}
 END,
-replace(p.formatted_address, E'\n', ', ') AS address, p.text_search
+p.formatted_address AS address, p.text_search
 FROM paf.paf p
-LEFT JOIN aggregates.building b 
-ON (p.udprn = ANY(b.udprns))
+LEFT JOIN addressbase.address a USING (udprn)
 """
 
 def export(pg_conn, output_fname: str, regenerate: bool):
