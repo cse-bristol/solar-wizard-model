@@ -8,6 +8,7 @@ from psycopg2.sql import Identifier, SQL
 from shapely import affinity, wkt
 from shapely.errors import ShapelyError
 from shapely.geometry import MultiPolygon, Polygon
+from shapely.validation import make_valid
 
 import albion_models.solar_pv.tables as tables
 from albion_models.db_funcs import sql_command, connection, count
@@ -196,6 +197,8 @@ def _roof_panels(roof: MultiPolygon,
     Core roof panel placement algorithm
     """
     roof: Polygon = largest_polygon(roof)
+    if roof is None:
+        return None
     slope_rads = math.radians(slope)
     sun_angle_for_spacing_calc = math.radians(15)
 
@@ -219,8 +222,9 @@ def _roof_panels(roof: MultiPolygon,
     # Rotate the roof area CCW by aspect, to be gridded easily:
     centroid = roof.centroid
     rotated_roof = affinity.rotate(roof, aspect, origin=centroid)
-    # TODO might not be necessary - see if any more errors happen
-    # rotated_roof = make_valid(rotated_roof)
+    rotated_roof = largest_polygon(make_valid(rotated_roof))
+    if rotated_roof is None:
+        return None
 
     # Define grids of portrait and landscape panels:
     portrait_grid = get_grid_cells(rotated_roof, portrait_panel_w, portrait_panel_h, spacing_x, spacing_y, grid_start='bounds-buffered')

@@ -111,7 +111,13 @@ def get_grid_refs(poly, cell_size: int) -> List[str]:
 def largest_polygon(multi: Union[MultiPolygon, Polygon]):
     if multi.type == 'Polygon':
         return multi
-    return max(multi.geoms, key=lambda poly: poly.area)
+    polygons = [g for g in multi.geoms if g.type == 'Polygon']
+    if len(polygons) == 0:
+        return None
+    elif len(polygons) == 1:
+        return polygons[0]
+
+    return max(polygons, key=lambda poly: poly.area)
 
 
 def azimuth(p1: Tuple[float, float], p2: Tuple[float, float]) -> float:
