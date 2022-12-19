@@ -1,3 +1,4 @@
+import gzip
 import os
 import shlex
 
@@ -152,13 +153,22 @@ def to_csv(pg_conn, file_name: str, table: str, encoding='utf-8'):
             cursor.copy_expert(copy_sql, f)
             pg_conn.commit()
 
+def _command_to_csv(pg_conn, file, command: str, **kwargs):
+    """Using the postgres COPY command, export the output of a SQL command to a file"""
+    with pg_conn.cursor() as cursor:
+        copy_sql = SQL("COPY ({}) TO stdin (FORMAT 'csv', HEADER)").format(SQL(command).format(**kwargs))
+        cursor.copy_expert(copy_sql, file)
+        pg_conn.commit()
 
 def command_to_csv(pg_conn, file_name: str, command: str, encoding='utf-8', **kwargs):
     """Using the postgres COPY command, export the output of a SQL command to a CSV file."""
-    with pg_conn.cursor() as cursor, open(file_name, 'w', encoding=encoding) as f:
-        copy_sql = SQL("COPY ({}) TO stdin (FORMAT 'csv', HEADER)").format(SQL(command).format(**kwargs))
-        cursor.copy_expert(copy_sql, f)
-        pg_conn.commit()
+    with open(file_name, 'w', encoding=encoding) as f:
+        _command_to_csv(pg_conn, f, command, **kwargs)
+
+def command_to_csv_gzip(pg_conn, file_name: str, command: str, **kwargs):
+    """Using the postgres COPY command, export the output of a SQL command to a gzipped CSV file."""
+    with gzip.open(file_name, 'w') as f:
+        _command_to_csv(pg_conn, f, command, **kwargs)
 
 
 def script_to_csv(pg_conn, file_name: str, script: str, encoding='utf-8', **kwargs):
