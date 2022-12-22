@@ -4,7 +4,7 @@ import os
 import shlex
 import subprocess
 import textwrap
-from typing import List, Tuple, Union
+from typing import List, Tuple, Union, Callable
 
 import math
 import numpy as np
@@ -324,42 +324,86 @@ def run(command: str):
         raise ValueError(res.stderr)
 
 
-def raster_to_csv(raster_file: str,
-                  csv_out: str,
-                  mask_raster: str = None,
-                  band: int = 1,
-                  mask_band: int = 1,
-                  mask_keep: int = 1,
-                  include_nans: bool = True):
+def check_raster_alignment(ds1, ds2) -> None:
+    ulx, xres, xskew, uly, yskew, yres = ds1.GetGeoTransform()
+    _ulx, _xres, _xskew, _uly, _yskew, _yres = ds2.GetGeoTransform()
+    x_size = ds1.RasterXSize
+    y_size = ds1.RasterYSize
+    _x_size = ds2.RasterXSize
+    _y_size = ds2.RasterYSize
+    if x_size != _x_size or y_size != _y_size:
+        raise ValueError(f"rasters must have same size, were "
+                         f"{(x_size, y_size)} and "
+                         f"{(_x_size, _y_size)}")
+    if ulx != _ulx or xres != _xres or xskew != _xskew or \
+            uly != _uly or yskew != _yskew or yres != _yres:
+        raise ValueError(f"rasters must be same alignment, were "
+                         f"{(ulx, xres, xskew, uly, yskew, yres)} and "
+                         f"{(_ulx, _xres, _xskew, _uly, _yskew, _yres)}")
+
+
+def rasters_to_csv(raster_files: List[str],
+                   csv_out: str,
+                   mask_raster: str = None,
+                   band: int = 1,
+                   mask_band: int = 1,
+                   mask_keep: int = 1,
+                   include_nans: bool = True,
+                   value_transformer: Callable[[List[float]], str] = None):
     """
     Adapted from https://github.com/postmates/gdal/blob/master/scripts/gdal2xyz.py
-    with the addition of an optional mask raster
+    with the addition of an optional mask raster and ability to load multiple rasters
+    at once. All rasters (including mask) must have the same alignment.
 
     mask_keep: if the mask raster has this value at index, it will write the row
+
+    include_nans: if true, will only check if the first raster has a NaN value, and
+    exclude the whole row if it does.
     """
-    r_ds = gdal.Open(raster_file)
-    rb = r_ds.GetRasterBand(band)
+
+    rasters = []
+    for raster_file in raster_files:
+        ds = gdal.Open(raster_file)
+        rasters.append({
+            "ds": ds,
+            "rb": ds.GetRasterBand(band),
+        })
+
+    ulx, xres, xskew, uly, yskew, yres = rasters[0]["ds"].GetGeoTransform()
+    x_size = rasters[0]["ds"].RasterXSize
+    y_size = rasters[0]["ds"].RasterYSize
+
+    for raster in rasters:
+        check_raster_alignment(rasters[0]["ds"], raster["ds"])
+
     if mask_raster:
         mask_ds = gdal.Open(mask_raster)
         mb = mask_ds.GetRasterBand(mask_band)
-        if mask_ds.RasterYSize != r_ds.RasterYSize or mask_ds.RasterXSize != r_ds.RasterXSize:
-            raise ValueError("raster_to_csv: raster_file and mask_raster must be the same size")
-    ulx, xres, xskew, uly, yskew, yres = r_ds.GetGeoTransform()
+        check_raster_alignment(rasters[0]["ds"], mask_ds)
 
     with open(csv_out, 'w') as f:
-        for y in range(r_ds.RasterYSize):
-            data = rb.ReadAsArray(0, y, r_ds.RasterXSize, 1)
-            data = np.reshape(data, (r_ds.RasterXSize,))
+        for y in range(y_size):
             if mask_raster:
-                mask_data = mb.ReadAsArray(0, y, r_ds.RasterXSize, 1)
-                mask_data = np.reshape(mask_data, (r_ds.RasterXSize,))
+                mask_data = mb.ReadAsArray(0, y, x_size, 1)
+                mask_data = np.reshape(mask_data, (x_size,))
 
-            for x in range(0, r_ds.RasterXSize):
-                if not mask_raster or int(mask_data[x]) == mask_keep:
-                    if include_nans or data[x] != np.nan:
-                        geo_x = ulx + (x + 0.5) * xres + (y + 0.5) * xskew
-                        geo_y = uly + (x + 0.5) * yskew + (y + 0.5) * yres
-                        f.write(f"{float(geo_x)},{float(geo_y)},{float(data[x]):.2f}\n")
+            all_data = []
+            for raster in rasters:
+                data = raster["rb"].ReadAsArray(0, y, x_size, 1)
+                all_data.append(np.reshape(data, (x_size,)))
+
+            for x in range(0, x_size):
+                if (not mask_raster or int(mask_data[x]) == mask_keep) \
+                        and (include_nans or not np.isnan(all_data[0][x])):
+                    geo_x = ulx + (x + 0.5) * xres + (y + 0.5) * xskew
+                    geo_y = uly + (x + 0.5) * yskew + (y + 0.5) * yres
+                    f.write(f"{float(geo_x)},{float(geo_y)},")
+                    if not value_transformer:
+                        vals = ','.join([f"{float(data[x]):.2f}" for data in all_data])
+                    else:
+                        vals = value_transformer([float(data[x]) for data in all_data])
+                    f.write(vals)
+                    f.write("\n")
 
 
 if __name__ == '__main__':
