@@ -78,7 +78,7 @@ def export_msoa(pg_conn, pg_uri: str, gpkg_fname: str, regenerate: bool):
 def export_parish(pg_conn, pg_uri: str, gpkg_fname: str, regenerate: bool):
     if regenerate or not os.path.isfile(gpkg_fname):
         if command_to_gpkg(
-            pg_conn, pg_uri, gpkg_fname, _MSOA,
+            pg_conn, pg_uri, gpkg_fname, _PARISH,
             src_srs=4326, dst_srs=4326,
             overwrite=True,
             command="""

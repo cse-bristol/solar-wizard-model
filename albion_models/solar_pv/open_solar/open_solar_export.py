@@ -153,6 +153,8 @@ def export(pg_uri: str, os_run_id: int, gpkg_dir: str,
             futures.append((None, executor.submit(_export_base_la, pg_uri, gpkg_dir, regenerate)))
             futures.append((None, executor.submit(_export_base_cons_area, pg_uri, gpkg_dir, regenerate)))
             futures.append((None, executor.submit(_export_paf, pg_uri, gpkg_dir, regenerate)))
+            futures.append((None, executor.submit(_export_base_msoa, pg_uri, gpkg_dir, regenerate)))
+            futures.append((None, executor.submit(_export_base_parish, pg_uri, gpkg_dir, regenerate)))
 
         exc_str: str = ""
         for _id, future in futures:
