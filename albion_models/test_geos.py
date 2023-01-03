@@ -20,6 +20,10 @@ class GeosTest(ParameterisedTestCase):
             (poly, 5000, ['SM72sw', 'SM72se', 'SM72nw', 'SM72ne']),
             (poly2, 10000, ['SN13', 'SN23', 'SN14', 'SN24']),
             (poly3, 10000, ['SK66']),
+            # test that shapes partially outside the range of grid refs still work:
+            (square(-1, -1, 10), 10000, ['SV00']),
+            # test that shapes fully outside the range of grid refs still work:
+            (square(-100, -100, 10), 10000, []),
         ], get_grid_refs)
 
     def test_get_grid_cells(self):

@@ -246,10 +246,6 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[dict]):
 
 def _mark_buildings_with_no_planes(pg_uri: str, job_id: int):
     with connection(pg_uri) as pg_conn:
-        # TODO this is also picking up things with no LiDAR coverage
-        #  Update:
-        #  I think this is resolved now (as previously nodata pixels were not being loaded
-        #  in to the db - now they are), due to not using SAGA any more. Need to test!
         sql_command(
             pg_conn,
             """

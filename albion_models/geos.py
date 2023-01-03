@@ -10,7 +10,7 @@ from shapely import wkt, ops
 from albion_models.db_funcs import sql_command
 
 
-from albion_models.lidar.en_to_grid_ref import en_to_grid_ref
+from albion_models.lidar.en_to_grid_ref import en_to_grid_ref, is_in_range
 from albion_models.util import round_down_to, round_up_to, frange
 
 
@@ -104,7 +104,10 @@ def get_grid_refs(poly, cell_size: int) -> List[str]:
     grid_refs = []
     for cell in get_grid_cells(poly, cell_size, cell_size):
         x, y, _, _ = cell.bounds
-        grid_refs.append(en_to_grid_ref(x, y, cell_size))
+        if is_in_range(x, y):
+            grid_refs.append(en_to_grid_ref(x, y, cell_size))
+        else:
+            print(f"Cannot get grid ref for EN ({x},{y}) - out of bounds")
     return grid_refs
 
 

@@ -8,17 +8,25 @@ _100KM = 100000
 _10KM = 10000
 _1KM = 1000
 
+_1ST_LETTER = {
+    (0, 0): 'S',
+    (_500KM, 0): 'T',
+    (0, _500KM): 'N',
+    (_500KM, _500KM): 'O',
+    (0, _500KM * 2): 'H',
+}
+
+
+def is_in_range(easting: Easting, northing: Northing) -> bool:
+    easting = round_down_to(easting, _500KM)
+    northing = round_down_to(northing, _500KM)
+    return _1ST_LETTER.get((easting, northing), None) is not None
+
 
 def _get_1st_letter(easting: Easting, northing: Northing) -> str:
     easting = round_down_to(easting, _500KM)
     northing = round_down_to(northing, _500KM)
-    return {
-        (0, 0): 'S',
-        (_500KM, 0): 'T',
-        (0, _500KM): 'N',
-        (_500KM, _500KM): 'O',
-        (0, _500KM * 2): 'H',
-    }[(easting, northing)]
+    return _1ST_LETTER[(easting, northing)]
 
 
 def _get_2nd_letter(easting: Easting, northing: Northing) -> str:
@@ -48,6 +56,9 @@ def _get_quadrant(easting: Easting, northing: Northing) -> str:
 
 
 def en_to_grid_ref(easting: Easting, northing: Northing, square_size: int) -> str:
+    if not is_in_range(easting, northing):
+        raise ValueError(f"easting and northing out of grid ref range: {easting}, {northing}")
+
     if square_size == _500KM:
         return _get_1st_letter(easting, northing)
 

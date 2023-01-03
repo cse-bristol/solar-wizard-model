@@ -83,3 +83,4 @@ Each model also needs some bits of Albion at least partially loaded:
 * `SMTP_FROM` - (optional) email to send notifications from
 * `SMTP_PASS` - (optional) password for email to send notifications from
 * `EMAIL_TO_NOTIFY_ON_FAILURE` - (optional) email to notify if jobs or result extraction fails
+* `USE_LIDAR_FROM_API` - (optional) if set to a value Python will coerce to True, allow falling back to the DEFRA LiDAR API if relevant LiDAR tiles are not found in the bulk LiDAR. This can be left unset, in which case the API will never be used.
