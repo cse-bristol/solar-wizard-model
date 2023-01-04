@@ -61,7 +61,7 @@ def _get_next_job(pg_conn) -> Optional[dict]:
             WITH next AS (
                 SELECT job_id FROM models.job_queue
                 WHERE status = 'NOT_STARTED'
-                ORDER BY created_at ASC
+                ORDER BY created_at ASC, job_id ASC
                 LIMIT 1
                 FOR UPDATE SKIP LOCKED
             )
