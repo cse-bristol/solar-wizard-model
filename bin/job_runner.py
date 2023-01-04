@@ -2,6 +2,7 @@ import logging
 import os
 import textwrap
 import time
+import traceback
 from builtins import Exception
 from typing import Optional, List
 
@@ -37,9 +38,10 @@ def main_loop():
                 success = _handle_job(pg_conn, job)
                 _set_job_status(pg_conn, job['job_id'], 'COMPLETE' if success else 'FAILED')
             except Exception as e:
+                stack_trace = traceback.format_exc()
                 pg_conn.rollback()
-                err_message = "Job failed: {0}. Arguments:\n{1!r}".format(type(e).__name__, e.args)
-                _set_job_status(pg_conn, job['job_id'], 'FAILED', err_message)
+                _set_job_status(pg_conn, job['job_id'], 'FAILED', stack_trace)
+                err_message = f"Job failed: {type(e)}. Error:\n{stack_trace}"
                 _send_failure_email(job['email'], job['job_id'], job['project'], err_message)
                 raise
         time.sleep(60)
