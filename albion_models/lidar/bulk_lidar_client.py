@@ -71,7 +71,8 @@ def load_from_bulk(pg_conn, job_id: int, lidar_dir: str, bulk_lidar_dir: str) ->
         for tiles in lidar_tiles(pg_conn, job_id, bulk_lidar_dir, lidar_dir, source):
             job_tiles.extend(tiles)
 
-    if len(job_tiles) == 0:
+    allow_api_lidar = os.environ.get("USE_LIDAR_FROM_API", False)
+    if len(job_tiles) == 0 and allow_api_lidar:
         # Fallback to LiDAR API client if no tiles found
         logging.info("No LiDAR intersecting job bounds found in bulk LiDAR, "
                      "falling back to DEFRA API")

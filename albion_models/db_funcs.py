@@ -5,6 +5,8 @@ import shlex
 import subprocess
 
 import logging
+import time
+import traceback
 
 from contextlib import ExitStack, contextmanager
 from os.path import join
@@ -12,10 +14,12 @@ from typing import Union, Optional
 
 import psycopg2
 from psycopg2.sql import SQL, Identifier, Composed
+from psycopg2 import OperationalError
 
 from albion_models.paths import SQL_DIR
 
 PG_NULL = "\\N"
+MAX_CONN_ATTEMPTS = 10
 
 
 def sql_command(pg_conn, command: Union[str, Composed], bindings: dict = None, result_extractor=None, **kwargs):
@@ -199,7 +203,18 @@ def process_pg_uri(pg_uri: str) -> str:
 
 
 def connect(pg_uri: str, **kwargs):
-    return psycopg2.connect(process_pg_uri(pg_uri), **kwargs)
+    pg_uri = process_pg_uri(pg_uri)
+    attempts = 0
+    while attempts <= MAX_CONN_ATTEMPTS:
+        try:
+            return psycopg2.connect(pg_uri, **kwargs)
+        except OperationalError as e:
+            print("error on attempting to connect to database")
+            traceback.print_exc()
+            attempts += 1
+            time.sleep(5)
+
+    raise Exception("Failed to connect to database")
 
 
 @contextmanager

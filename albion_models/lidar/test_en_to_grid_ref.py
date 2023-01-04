@@ -1,4 +1,5 @@
-from albion_models.lidar.en_to_grid_ref import en_to_grid_ref, round_down_to
+from albion_models.lidar.en_to_grid_ref import en_to_grid_ref, round_down_to, \
+    is_in_range
 from albion_models.test.test_funcs import ParameterisedTestCase
 
 
@@ -62,3 +63,13 @@ class GridRefTest(ParameterisedTestCase):
             (399_560, 10_000, 390_000),
             (399_560, 5_000, 395_000),
         ], round_down_to)
+
+    def test_is_in_range(self):
+        self.parameterised_test([
+            (-1, -1, False),
+            (0, 0, True),
+            (0, 1_500_000, False),
+            (0, 1_499_999, True),
+            (999_999, 999_999, True),
+            (1_000_000, 1_000_000, False),
+        ], is_in_range)

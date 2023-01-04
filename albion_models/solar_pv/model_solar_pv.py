@@ -7,7 +7,9 @@ import psycopg2.extras
 from psycopg2.sql import Identifier
 
 import albion_models.solar_pv.tables as tables
-from albion_models.db_funcs import connect, sql_script_with_bindings, process_pg_uri
+from albion_models.db_funcs import process_pg_uri, \
+    connection, sql_command, sql_script
+from albion_models.postgis import raster_tile_coverage_count
 from albion_models.solar_pv.outdated_lidar.outdated_lidar_check import check_lidar
 from albion_models.solar_pv.panels.panels import place_panels
 from albion_models.solar_pv.pvgis.pvgis import pvgis
@@ -51,6 +53,9 @@ def model_solar_pv(pg_uri: str,
 
     logging.info("Initialising postGIS schema...")
     _init_schema(pg_uri, job_id)
+
+    if _skip(pg_uri, job_id):
+        return
 
     logging.info("Generating and loading rasters...")
     elevation_raster_27700, mask_raster_27700, slope_raster_27700, aspect_raster_27700, res = generate_rasters(
@@ -109,9 +114,8 @@ def model_solar_pv(pg_uri: str,
 
 
 def _init_schema(pg_uri: str, job_id: int):
-    pg_conn = connect(pg_uri, cursor_factory=psycopg2.extras.DictCursor)
-    try:
-        sql_script_with_bindings(
+    with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
+        sql_script(
             pg_conn, 'pv/create.schema.sql', {"job_id": job_id},
             schema=Identifier(tables.schema(job_id)),
             bounds_4326=Identifier(tables.schema(job_id), tables.BOUNDS_TABLE),
@@ -119,19 +123,44 @@ def _init_schema(pg_uri: str, job_id: int):
             roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE),
             panel_polygons=Identifier(tables.schema(job_id), tables.PANEL_POLYGON_TABLE),
         )
-    finally:
-        pg_conn.close()
 
 
 def _drop_schema(pg_uri: str, job_id: int):
-    pg_conn = connect(pg_uri, cursor_factory=psycopg2.extras.DictCursor)
-    try:
-        sql_script_with_bindings(
+    with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
+        sql_script(
             pg_conn, 'pv/drop.schema.sql', {"job_id": job_id},
             schema=Identifier(tables.schema(job_id)),
         )
-    finally:
-        pg_conn.close()
+
+
+def _skip(pg_uri: str, job_id: int) -> bool:
+    with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
+        building_count = sql_command(
+            pg_conn,
+            "SELECT COUNT(*) FROM {buildings}",
+            buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE))
+        if building_count == 0:
+            logging.info("skipping PV job, no buildings found")
+            return True
+
+        tile_cov_count = raster_tile_coverage_count(pg_conn, job_id)
+        if tile_cov_count == 0:
+            logging.info("skipping PV job, no LiDAR tiles intersect the job bounds")
+            sql_command(
+                pg_conn,
+                """
+                UPDATE {buildings} SET exclusion_reason = 'NO_LIDAR_COVERAGE';
+                
+                INSERT INTO models.pv_building
+                SELECT %(job_id)s, toid, exclusion_reason, height
+                FROM {buildings};
+                """,
+                {"job_id": job_id},
+                buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
+            )
+            return True
+
+        return False
 
 
 def _validate_params(horizon_search_radius: int,

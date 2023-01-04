@@ -48,6 +48,11 @@ def pvgis(pg_uri: str,
     pvmaps_dir = join(solar_dir, "pvmaps")
     os.makedirs(pvmaps_dir, exist_ok=True)
 
+    # GRASS needs the user to have a home directory that exists
+    # (not always the case for prod deployments in containers):
+    home_dir = os.environ.get("HOME")
+    os.makedirs(home_dir, exist_ok=True)
+
     # In theory for r.horizon and r.pv this value can be a float,
     # but I can't get that to work. r.horizon seems to truncate it to int
     # in the filename, though the code doesn't read like it should

@@ -231,3 +231,41 @@ def get_merged_lidar_tiles(pg_conn, job_id, output_dir: str) -> List[str]:
             f.write(raster['rast'])
         paths.append(file_path)
     return paths
+
+
+def raster_tile_coverage_count(pg_conn, job_id: int) -> int:
+    _50cm_cov = _50cm_coverage(pg_conn, job_id)
+    logging.info(f"50cm LiDAR coverage is {_50cm_cov}, threshold is {USE_50CM_THRESHOLD}")
+
+    sql = """
+    SELECT COUNT(*)
+    FROM models.job_queue q 
+    INNER JOIN {lidar_table} l ON st_intersects(l.rast, q.bounds)
+    WHERE q.job_id = %(job_id)s
+    """
+
+    count_2m = sql_command(
+        pg_conn,
+        sql,
+        bindings={"job_id": job_id},
+        lidar_table=Identifier("models", "lidar_2m"),
+        result_extractor=lambda res: res[0][0])
+
+    count_1m = sql_command(
+        pg_conn,
+        sql,
+        bindings={"job_id": job_id},
+        lidar_table=Identifier("models", "lidar_1m"),
+        result_extractor=lambda res: res[0][0])
+
+    if _50cm_cov >= USE_50CM_THRESHOLD:
+        count_50cm = sql_command(
+            pg_conn,
+            sql,
+            bindings={"job_id": job_id},
+            lidar_table=Identifier("models", "lidar_50cm"),
+            result_extractor=lambda res: res[0][0])
+    else:
+        count_50cm = 0
+
+    return count_2m + count_1m + count_50cm
