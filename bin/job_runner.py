@@ -27,7 +27,9 @@ def main_loop():
 
     systemd handles restarting in case of error.
     """
-    logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
+    logging.basicConfig(level=logging.INFO, format='[%(asctime)s] [%(job_id)s] %(levelname)s: %(message)s')
+    _setup_logging(0)
+
     pg_uri = os.environ.get("PG_URI")
     pg_conn = _connect(pg_uri)
     _check_proj_datumgrid_ok(pg_conn)
@@ -35,6 +37,7 @@ def main_loop():
         job = _get_next_job(pg_conn)
         if job is not None:
             try:
+                _setup_logging(job['job_id'])
                 success = _handle_job(pg_conn, job)
                 _set_job_status(pg_conn, job['job_id'], 'COMPLETE' if success else 'FAILED')
             except Exception as e:
@@ -45,6 +48,21 @@ def main_loop():
                 _send_failure_email(job['email'], job['job_id'], job['project'], err_message)
                 raise
         time.sleep(60)
+
+
+def _setup_logging(job_id: int):
+    """
+    Logging setup required to:
+    * include the job ID in every log line (see `format` arg to logging.BasicConfig)
+    """
+    old_factory = logging.getLogRecordFactory()
+
+    def record_factory(*args, **kwargs):
+        record = old_factory(*args, **kwargs)
+        record.job_id = str(job_id)
+        return record
+
+    logging.setLogRecordFactory(record_factory)
 
 
 def _connect(pg_uri):
