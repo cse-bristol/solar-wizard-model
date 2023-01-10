@@ -50,28 +50,40 @@ def export(pg_conn, pg_uri: str, gpkg_fname: str, os_run_id: int, job_id: int, r
              '+y_0=-100000 +datum=OSGB36 +nadgrids=OSTN15_NTv2_OSGBtoETRS.gsb +units=m +no_defs',
              4326) AS geom,
             """
-            " ab.is_residential AS is_residential, "                # aggregates.building.is_residential (+3 other tables) Derived from AddressBase class (True if class is one of 'RD', 'RH', 'RI')
-            " ab.has_rooftop_pv AS has_rooftop_pv, "                # aggregates.building.has_rooftop_pv (+3 other tables) Derived from EPC and pv_installations dataset
-            " ab.pv_roof_area_pct AS pv_rooftop_area_pct, "         # aggregates.building.pv_roof_area_pct (+4 other tables) PV roof area % coverage (derived from photo_supply)
-            " ab.pv_peak_power AS pv_peak_power, "                  # aggregates.building.pv_peak_power (+4 other tables) PV peak power, kWp (derived from photo_supply)
-            " ab.listed_building_grade AS listed_building_grade, "  # aggregates.building.listed_building_grade (+3 other tables) Derived from Historic England listed buildings dataset.
+            " bt.address as address, "
+            " bt.postcode as postcode, "
+            """
+            CASE 
+                WHEN ab.num_dom_epcs >= ab.num_epc_certs / 2 THEN true
+                WHEN ab.num_non_dom_epcs + ab.num_decs > ab.num_epc_certs / 2 THEN false
+            ELSE NULL END AS is_residential,
+            """
+            " ab.has_rooftop_pv AS has_rooftop_pv, "                # Derived from EPC and pv_installations dataset
+            " ab.pv_roof_area_pct AS pv_rooftop_area_pct, "         # EPC
+            " ab.pv_peak_power AS pv_peak_power, "                  # EPC
+            " ab.listed_building_grade AS listed_building_grade, "  # Derived from Historic England listed buildings dataset.
             " cte.kwh AS total_avg_energy_prod_kwh_per_year, "
-            " ab.la AS la_code, "                                   # aggregates.building.la Derived using ABP and OS BoundaryLine (Open government license)
-            " ab.lsoa_2011 AS lsoa_2011, "                          # aggregates.building.lsoa_2011 Derived using ABP, ONSPD and census_boundaries (Open government license). Can be null if the OA is not in ONSPD
+            " ab.la AS la_code, "                                   # Derived using OSMM and OS BoundaryLine (Open government license)
+            " ab.msoa_2011 AS msoa_2011, "                          # Derived using OSMM and census_boundaries (Open government license)
+            " ab.lsoa_2011 AS lsoa_2011, "                          # Derived using OSMM and census_boundaries (Open government license). Can be null if OA is not in ONSPD
+            " ab.oa_2011 AS oa_2011, "                              # Derived using OSMM and census_boundaries (Open government license)
+            " ab.ward AS ward, "                                    # Derived using OSMM and OS BoundaryLine (Open government license)
+            " ab.parish AS parish, "                                # Derived using OSMM and OS BoundaryLine (Open government license)
             " ST_AsGeoJSON(ab.geom_4326) AS geom_str, "
             " ST_X(ab.centroid) AS lon, "
             " ST_Y(ab.centroid) AS lat, "
             " ST_X(ST_Transform(ab.centroid, 27700)) AS easting, "
             " ST_Y(ST_Transform(ab.centroid, 27700)) AS northing, "
             " ST_AsGeoJSON(ab.centroid) AS centroid_str, "
-            " ab.height AS height, "
+            " mp.height AS height, "
             " tt.geojson AS geom_str_simplified, "
-            " ab.calculated_area AS footprint, "
             " CASE "
             "  WHEN cte.kwp = 0 THEN 0 "
             "  ELSE cte.kwh / cte.kwp "
-            " END AS kwh_per_kwp "
+            " END AS kwh_per_kwp, "
+            " mp.exclusion_reason AS exclusion_reason "
             "FROM aggregates.building ab "
+            "JOIN paf.by_toid bt USING (toid) "
             "JOIN mastermap.building_27700 mb USING (toid) "
             "JOIN models.pv_building mp USING (toid) "
             "JOIN cte USING (toid) "
