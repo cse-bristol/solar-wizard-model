@@ -8,7 +8,7 @@ from typing import List, Dict
 
 from albion_models.db_funcs import sql_script, sql_command
 from albion_models.gdal_helpers import run
-from albion_models.lidar.lidar import LidarTile, Resolution, USE_50CM_THRESHOLD
+from albion_models.lidar.lidar import LidarTile, Resolution
 
 
 def load_lidar(pg_conn, tiles: List[LidarTile], temp_dir: str):
@@ -139,79 +139,126 @@ def _add_raster_constraints(pg_conn, table: str):
                       "schema": schema})
 
 
-def _50cm_coverage(pg_conn, job_id: int) -> float:
+def _coverage(pg_conn, job_id: int, res: Resolution) -> float:
     """
     This won't be exact due to not snapping the bounds polygon
-    to a 50cm grid - but it's close enough for the types of bounds
+    to a grid - but it's close enough for the types of bounds
     polygons we expect.
     """
+    if res == Resolution.R_50CM:
+        lidar_table = "lidar_50cm"
+        divisor = 4
+    elif res == Resolution.R_1M:
+        lidar_table = "lidar_1m"
+        divisor = 1
+    elif res == Resolution.R_2M:
+        lidar_table = "lidar_2m"
+        divisor = 0.25
+    else:
+        raise ValueError(f"Unknown resolution {res}")
+
     return sql_command(
         pg_conn,
         """
         SELECT
-            -- Divide by 4 as this is the count of 0.5m2 pixels 
-            (SUM(st_count(st_clip(l.rast, jq.bounds))) / 4) 
+            (SUM(st_count(st_clip(l.rast, jq.bounds))) / %(divisor)s ) 
                 / MAX(st_area(jq.bounds)) 
-        FROM models.lidar_50cm l
+        FROM {lidar_table} l
         LEFT JOIN models.job_queue jq ON st_intersects(l.rast, jq.bounds) 
         WHERE jq.job_id = %(job_id)s
         """,
-        bindings={"job_id": job_id},
-        result_extractor=lambda rows: rows[0][0] or 0.0
-    )
+        bindings={"job_id": job_id, "divisor": divisor},
+        lidar_table=Identifier("models", lidar_table),
+        result_extractor=lambda rows: rows[0][0] or 0.0)
+
+
+def _target_resolution(pg_conn, job_id) -> Resolution:
+    _50cm_cov = _coverage(pg_conn, job_id, Resolution.R_50CM)
+    _1m_cov = _coverage(pg_conn, job_id, Resolution.R_1M)
+    _2m_cov = _coverage(pg_conn, job_id, Resolution.R_2M)
+    logging.info(f"LiDAR coverage:  50cm: {_50cm_cov}, 1m: {_1m_cov}, 2m: {_2m_cov}")
+
+    # We don't currently use 50cm res LiDAR unless merged into 1m or 2m as it's too slow
+    # when loading raster pixel data into the database or running RANSAC.
+    # it will still be merged into the 1m, though, so if there's more of it than 1m use
+    # its coverage %:
+    _1m_cov = max(_50cm_cov, _1m_cov)
+    if _1m_cov < 0.25 and _2m_cov > _1m_cov + 0.5:
+        target_res = Resolution.R_2M
+    else:
+        target_res = Resolution.R_1M
+    logging.info(f"Using resolution {target_res}")
+    return target_res
 
 
 def get_merged_lidar_tiles(pg_conn, job_id, output_dir: str) -> List[str]:
-    _50cm_cov = _50cm_coverage(pg_conn, job_id)
-    logging.info(f"50cm LiDAR coverage is {_50cm_cov}, threshold is {USE_50CM_THRESHOLD}")
+    target_res = _target_resolution(pg_conn, job_id)
 
-    if _50cm_cov >= USE_50CM_THRESHOLD:
+    # RANSAC produces bad outputs if lower resolutions are merged into higher (e.g. 2m into 1m)
+    # as essentially the 2m tile is converted into 4 1m tiles and RANSAC rightly treats that
+    # as a flat step. So we only merge higher res into lower (e.g. 50cm into 1m)
+
+    # Use 2m, with 1m and 50cm merged in:
+    if target_res == Resolution.R_2M:
+        logging.info(f"Using 2m LiDAR")
         sql = """
         WITH all_res AS (
             SELECT 
-                ST_Resample(l.rast, (select rast from models.lidar_50cm limit 1)) AS rast, 
+                ST_Resample(l.rast, (SELECT rast FROM models.lidar_2m ORDER BY filename LIMIT 1)) AS rast, 
                 ST_UpperLeftX(l.rast) x, 
-                ST_UpperLeftY(l.rast) y
+                ST_UpperLeftY(l.rast) y,
+                0.5 AS res
             FROM models.job_queue q 
-            INNER JOIN models.lidar_2m l ON st_intersects(l.rast, q.bounds)
+            INNER JOIN models.lidar_50cm l ON st_intersects(l.rast, q.bounds)
             WHERE q.job_id = %(job_id)s
         UNION ALL
             SELECT 
-                ST_Resample(l.rast, (select rast from models.lidar_50cm limit 1)) AS rast, 
+                ST_Resample(l.rast, (SELECT rast FROM models.lidar_2m ORDER BY filename LIMIT 1)) AS rast, 
                 ST_UpperLeftX(l.rast) x, 
-                ST_UpperLeftY(l.rast) y
+                ST_UpperLeftY(l.rast) y,
+                1.0 AS res
             FROM models.job_queue q 
             INNER JOIN models.lidar_1m l ON st_intersects(l.rast, q.bounds)
             WHERE q.job_id = %(job_id)s
         UNION ALL
-            SELECT l.rast, ST_UpperLeftX(l.rast) x, ST_UpperLeftY(l.rast) y
+            SELECT 
+                l.rast, 
+                ST_UpperLeftX(l.rast) x, 
+                ST_UpperLeftY(l.rast) y, 
+                2.0 AS res
             FROM models.job_queue q 
-            INNER JOIN models.lidar_50cm l ON st_intersects(l.rast, q.bounds)
+            INNER JOIN models.lidar_2m l ON st_intersects(l.rast, q.bounds)
             WHERE q.job_id = %(job_id)s
         )
         SELECT
-            x, y, ST_AsGDALRaster(ST_Union(rast), 'GTiff') AS rast 
+            x, y, ST_AsGDALRaster(ST_Union(rast ORDER BY res DESC), 'GTiff') AS rast 
         FROM all_res
         GROUP BY x, y
         """
+    # Use 1m, with 50cm merged in:
     else:
         sql = """
         WITH all_res AS (
             SELECT 
-                ST_Resample(l.rast, (select rast from models.lidar_1m limit 1)) AS rast, 
+                ST_Resample(l.rast, (SELECT rast FROM models.lidar_1m ORDER BY filename LIMIT 1)) AS rast, 
                 ST_UpperLeftX(l.rast) x, 
-                ST_UpperLeftY(l.rast) y
+                ST_UpperLeftY(l.rast) y,
+                0.5 AS res
             FROM models.job_queue q 
-            INNER JOIN models.lidar_2m l ON st_intersects(l.rast, q.bounds)
+            INNER JOIN models.lidar_50cm l ON st_intersects(l.rast, q.bounds)
             WHERE q.job_id = %(job_id)s
         UNION ALL
-            SELECT l.rast, ST_UpperLeftX(l.rast) x, ST_UpperLeftY(l.rast) y
+            SELECT 
+                l.rast, 
+                ST_UpperLeftX(l.rast) x, 
+                ST_UpperLeftY(l.rast) y, 
+                1.0 AS res
             FROM models.job_queue q 
             INNER JOIN models.lidar_1m l ON st_intersects(l.rast, q.bounds)
             WHERE q.job_id = %(job_id)s
         )
         SELECT
-            x, y, ST_AsGDALRaster(ST_Union(rast), 'GTiff') AS rast 
+            x, y, ST_AsGDALRaster(ST_Union(rast ORDER BY res DESC), 'GTiff') AS rast 
         FROM all_res
         GROUP BY x, y
         """
@@ -220,8 +267,7 @@ def get_merged_lidar_tiles(pg_conn, job_id, output_dir: str) -> List[str]:
         pg_conn,
         sql,
         bindings={"job_id": job_id},
-        result_extractor=lambda res: res
-    )
+        result_extractor=lambda res: res)
 
     paths = []
     for raster in rasters:
@@ -234,8 +280,7 @@ def get_merged_lidar_tiles(pg_conn, job_id, output_dir: str) -> List[str]:
 
 
 def raster_tile_coverage_count(pg_conn, job_id: int) -> int:
-    _50cm_cov = _50cm_coverage(pg_conn, job_id)
-    logging.info(f"50cm LiDAR coverage is {_50cm_cov}, threshold is {USE_50CM_THRESHOLD}")
+    target_res = _target_resolution(pg_conn, job_id)
 
     sql = """
     SELECT COUNT(*)
@@ -244,12 +289,15 @@ def raster_tile_coverage_count(pg_conn, job_id: int) -> int:
     WHERE q.job_id = %(job_id)s
     """
 
-    count_2m = sql_command(
-        pg_conn,
-        sql,
-        bindings={"job_id": job_id},
-        lidar_table=Identifier("models", "lidar_2m"),
-        result_extractor=lambda res: res[0][0])
+    if target_res == Resolution.R_2M:
+        count_2m = sql_command(
+            pg_conn,
+            sql,
+            bindings={"job_id": job_id},
+            lidar_table=Identifier("models", "lidar_2m"),
+            result_extractor=lambda res: res[0][0])
+    else:
+        count_2m = 0
 
     count_1m = sql_command(
         pg_conn,
@@ -258,14 +306,11 @@ def raster_tile_coverage_count(pg_conn, job_id: int) -> int:
         lidar_table=Identifier("models", "lidar_1m"),
         result_extractor=lambda res: res[0][0])
 
-    if _50cm_cov >= USE_50CM_THRESHOLD:
-        count_50cm = sql_command(
-            pg_conn,
-            sql,
-            bindings={"job_id": job_id},
-            lidar_table=Identifier("models", "lidar_50cm"),
-            result_extractor=lambda res: res[0][0])
-    else:
-        count_50cm = 0
+    count_50cm = sql_command(
+        pg_conn,
+        sql,
+        bindings={"job_id": job_id},
+        lidar_table=Identifier("models", "lidar_50cm"),
+        result_extractor=lambda res: res[0][0])
 
     return count_2m + count_1m + count_50cm

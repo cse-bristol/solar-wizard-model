@@ -46,6 +46,7 @@ def run_ransac(pg_uri: str,
 
     building_count = _building_count(pg_uri, job_id)
     segments = math.ceil(building_count / building_page_size)
+    workers = min(segments, workers)
     logging.info(f"{building_count} buildings, in {segments} batches to process")
     logging.info(f"Using {workers} processes for RANSAC")
     start_time = time.time()
