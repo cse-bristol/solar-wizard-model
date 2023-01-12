@@ -6,9 +6,20 @@ import os
 import subprocess
 import shlex
 from os.path import join
+import resource as res
+
+def set_num_file_handles():
+    soft, hard = res.getrlimit(res.RLIMIT_NOFILE)
+    logging.info(f"Initial file handle limits are: {soft} {hard}")
+    soft = 10000
+    res.setrlimit(res.RLIMIT_NOFILE,(soft,hard))
+    soft, hard = res.getrlimit(res.RLIMIT_NOFILE)
+    logging.info(f"New file handle limits are: {soft} {hard}")
 
 
 def cmd_tippecanoe(gpkg_filename: str, layer_name: str, fields: list) -> str:
+    set_num_file_handles()
+
     base_dirname: str = os.path.dirname(gpkg_filename)
     gpkg_bname_stem, _ = os.path.splitext(os.path.basename(gpkg_filename))
 
