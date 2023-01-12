@@ -12,7 +12,6 @@ from albion_models import gdal_helpers
 from albion_models.db_funcs import sql_script, copy_csv, count, connection
 from albion_models.postgis import get_merged_lidar_tiles
 from albion_models.solar_pv import mask
-from albion_models.solar_pv.constants import LIDAR_DOWNSCALE_TO
 from albion_models.solar_pv.raster_names import MASK_27700_BUF1_TIF, MASK_27700_BUF3_TIF, ELEVATION_27700_TIF, SLOPE_27700_TIF, \
     ASPECT_27700_TIF
 from albion_models.solar_pv.roof_polygons.roof_polygons import get_flat_roof_aspect_sql, create_flat_roof_aspect, \
@@ -56,9 +55,6 @@ def generate_rasters(pg_uri: str,
 
     srid = gdal_helpers.get_srid(elevation_vrt, fallback=27700)
     res = gdal_helpers.get_res(elevation_vrt)
-
-    if res < LIDAR_DOWNSCALE_TO:
-        res = LIDAR_DOWNSCALE_TO
 
     unit_dims, unit = gdal_helpers.get_srs_units(elevation_vrt)
     if unit_dims != 1.0 or unit != 'metre':
