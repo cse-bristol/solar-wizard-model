@@ -8,18 +8,15 @@ import shlex
 from os.path import join
 import resource as res
 
-def set_num_file_handles():
+def set_num_file_handles(soft: int):
     soft, hard = res.getrlimit(res.RLIMIT_NOFILE)
     logging.info(f"Initial file handle limits are: {soft} {hard}")
-    soft = 10000
     res.setrlimit(res.RLIMIT_NOFILE,(soft,hard))
     soft, hard = res.getrlimit(res.RLIMIT_NOFILE)
     logging.info(f"New file handle limits are: {soft} {hard}")
 
 
 def cmd_tippecanoe(gpkg_filename: str, layer_name: str, fields: list) -> str:
-    set_num_file_handles()
-
     base_dirname: str = os.path.dirname(gpkg_filename)
     gpkg_bname_stem, _ = os.path.splitext(os.path.basename(gpkg_filename))
 
@@ -48,6 +45,12 @@ def _gpkg_to_geojson(gpkg_filename: str, layer_name: str, geojson_filename: str,
 
 def _geojson_to_tiles(geojson_filename: str, layer_name: str, sqlite_fname: str):
     logging.info(f"Generating {sqlite_fname} from {geojson_filename}")
+
+    # Set some file handle and thread limits that allow running on bats. See "init_cpus()" in
+    # https://github.com/mapbox/tippecanoe/blob/18e53cd7fb9ae6be8b89d817d69d3ce06f30eb9d/main.cpp#L217-L221
+    set_num_file_handles(5000)
+    tippecanoe_env = {**os.environ, "TIPPECANOE_MAX_THREADS": "64"}
+
     cmdline: str = (
         'tippecanoe '
         f'-o {sqlite_fname} '
@@ -65,7 +68,7 @@ def _geojson_to_tiles(geojson_filename: str, layer_name: str, sqlite_fname: str)
     )
 
     p = subprocess.Popen(shlex.split(cmdline), shell=False,
-                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=tippecanoe_env)
 
     # Log tippecanoe o/p as it's running (as it takes a while to run!)
     for line in p.stdout:
