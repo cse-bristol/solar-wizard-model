@@ -8,10 +8,12 @@ import shlex
 from os.path import join
 import resource as res
 
-def set_num_file_handles(soft: int):
+
+def set_num_file_handles(new_soft: int):
     soft, hard = res.getrlimit(res.RLIMIT_NOFILE)
     logging.info(f"Initial file handle limits are: {soft} {hard}")
-    res.setrlimit(res.RLIMIT_NOFILE,(soft,hard))
+    new_soft = min(new_soft, hard)
+    res.setrlimit(res.RLIMIT_NOFILE, (new_soft, hard))
     soft, hard = res.getrlimit(res.RLIMIT_NOFILE)
     logging.info(f"New file handle limits are: {soft} {hard}")
 
@@ -46,9 +48,9 @@ def _gpkg_to_geojson(gpkg_filename: str, layer_name: str, geojson_filename: str,
 def _geojson_to_tiles(geojson_filename: str, layer_name: str, sqlite_fname: str):
     logging.info(f"Generating {sqlite_fname} from {geojson_filename}")
 
-    # Set some file handle and thread limits that allow running on bats. See "init_cpus()" in
+    # Set file handle and thread limits that allow running on bats. See "init_cpus()" in
     # https://github.com/mapbox/tippecanoe/blob/18e53cd7fb9ae6be8b89d817d69d3ce06f30eb9d/main.cpp#L217-L221
-    set_num_file_handles(5000)
+    set_num_file_handles(2000)
     tippecanoe_env = {**os.environ, "TIPPECANOE_MAX_THREADS": "64"}
 
     cmdline: str = (
