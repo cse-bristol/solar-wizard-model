@@ -19,4 +19,5 @@ FROM
 WHERE
     q.archived = false
     AND q.open_solar
+    AND osr.os_run_id = {os_run_id}
 ORDER BY q.created_at DESC;
