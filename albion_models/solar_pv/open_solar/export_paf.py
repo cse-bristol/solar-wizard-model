@@ -17,6 +17,10 @@ END,
 p.formatted_address AS address, p.text_search
 FROM paf.paf p
 LEFT JOIN addressbase.address a USING (udprn)
+WHERE p.postcode not like 'BT%'
+AND p.postcode not like 'GY%'
+AND p.postcode not like 'JE%'
+AND p.postcode not like 'IM%'
 """
 
 def export(pg_conn, output_fname: str, regenerate: bool):
