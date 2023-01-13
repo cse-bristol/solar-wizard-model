@@ -86,7 +86,7 @@ def export(pg_conn, pg_uri: str, gpkg_fname: str, os_run_id: int, job_id: int, r
             " END AS kwh_per_kwp, "
             " mp.exclusion_reason AS exclusion_reason "
             "FROM aggregates.building ab "
-            "JOIN paf.by_toid bt USING (toid) "
+            "LEFT JOIN paf.by_toid bt USING (toid) "
             "JOIN mastermap.building_27700 mb USING (toid) "
             "JOIN models.pv_building mp USING (toid) "
             "JOIN cte USING (toid) "
