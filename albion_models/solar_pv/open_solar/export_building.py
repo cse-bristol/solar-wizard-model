@@ -2,7 +2,7 @@ import logging
 
 from psycopg2.sql import Identifier, Literal
 
-from albion_models.db_funcs import command_to_gpkg
+from albion_models.db_funcs import command_to_gpkg, sql_command
 from albion_models.ogr_helpers import get_layer_names
 from albion_models.solar_pv import tables
 from albion_models.solar_pv.open_solar.mapshaper import ms_simplify
@@ -21,10 +21,13 @@ def export(pg_conn, pg_uri: str, gpkg_fname: str, os_run_id: int, job_id: int, r
     :param job_id: Job to export from
     """
     if regenerate or _BUILDINGS not in get_layer_names(gpkg_fname):
+        simplified_building_geoms_tbl: Identifier = \
+            Identifier("models", f"{tables.SIMPLIFIED_BUILDING_GEOM_TABLE}_{job_id}")
+
         # Get simplified versions of the building geometries for job_id in a temporary table
         ms_simplify(
             pg_conn,
-            Identifier(tables.schema(job_id), tables.SIMPLIFIED_BUILDING_GEOM_TABLE),
+            simplified_building_geoms_tbl,
             "FROM models.pv_building mpb "
             "JOIN mastermap.building mb USING (toid) "
             "WHERE mpb.job_id = %(job_id)s ",
@@ -91,8 +94,14 @@ def export(pg_conn, pg_uri: str, gpkg_fname: str, os_run_id: int, job_id: int, r
             "WHERE mp.job_id = {job_id} ",
             job_id=Literal(job_id),
             os_run_id=Literal(os_run_id),
-            simp_table=Identifier(tables.schema(job_id), tables.SIMPLIFIED_BUILDING_GEOM_TABLE),
+            simp_table=simplified_building_geoms_tbl,
         ) is not None:
             raise RuntimeError(f"Error running ogr2ogr")
+
+        sql_command(
+            pg_conn,
+            "DROP TABLE {simp_table}",
+            simp_table=simplified_building_geoms_tbl
+        )
     else:
         logging.info(f"Not regenerating existing {gpkg_fname}")
