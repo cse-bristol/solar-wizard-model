@@ -89,7 +89,7 @@ def export(pg_conn, pg_uri: str, gpkg_fname: str, os_run_id: int, job_id: int, r
             "LEFT JOIN paf.by_toid bt USING (toid) "
             "JOIN mastermap.building_27700 mb USING (toid) "
             "JOIN models.pv_building mp USING (toid) "
-            "JOIN cte USING (toid) "
+            "LEFT JOIN cte USING (toid) "
             "JOIN {simp_table} tt ON (tt.id = toid) "
             "WHERE mp.job_id = {job_id} ",
             job_id=Literal(job_id),
