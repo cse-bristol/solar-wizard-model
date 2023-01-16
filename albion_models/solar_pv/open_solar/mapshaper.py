@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import subprocess
 from os.path import join
@@ -15,13 +16,13 @@ _MAPSHAPER_R: str = join(os.path.realpath(os.path.dirname(__file__)), "mapshaper
 _GET_GEOJSON_SQL: str = """
 SELECT json_build_object( 
 'type', 'FeatureCollection', 
-'features', json_agg( 
+'features', COALESCE(json_agg( 
 json_build_object( 
  'type', 'Feature', 
  'properties', json_build_object( 'id', {id_sql} ), 
  'geometry', ST_AsGeoJSON({geom_col})::jsonb 
-)::json) 
-)::text {from_sql}
+)::json), '[]' 
+))::text {from_sql}
 """.replace("\n", " ")
 
 
@@ -38,9 +39,17 @@ def ms_simplify(pg_conn,
     :param bindings: Values to bind in the FROM clause
     :return: Name of the temp table
     """
-    geojson_in = _get_geojson(pg_conn, from_sql, id_sql, geom_col, bindings)
-    geojson_out = _ms_simplify(geojson_in)
-    simplified_geos = _parse_geojson(geojson_out)
+    has_panels = sql_command(pg_conn,
+                             "SELECT count(*) > 0 FROM models.pv_building mpb WHERE mpb.job_id = %(job_id)s",
+                             result_extractor=lambda res: res[0][0],
+                             bindings=bindings
+                             )
+    if has_panels:
+        geojson_in = _get_geojson(pg_conn, from_sql, id_sql, geom_col, bindings)
+        geojson_out = _ms_simplify(geojson_in)
+        simplified_geos = _parse_geojson(geojson_out)
+    else:
+        simplified_geos = []
     _create_output_table(pg_conn, to_table, simplified_geos)
 
 
