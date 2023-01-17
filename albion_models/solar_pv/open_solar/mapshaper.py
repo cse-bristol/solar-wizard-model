@@ -54,7 +54,7 @@ def ms_simplify(pg_conn,
                                bindings=bindings
                                )
     if building_num:
-        logging.info(f"mapshaper: {building_num} buildings to do")
+        logging.info(f"mapshaper: (start) {building_num} buildings to do")
         building_num_done = 0
         bindings["chunk_size"] = _GET_GEOJSON_CHUNK_SIZE
         for chunk_offset in range(0, building_num, _GET_GEOJSON_CHUNK_SIZE):
@@ -64,7 +64,10 @@ def ms_simplify(pg_conn,
             simplified_geos = _parse_geojson(geojson_out)
             insert_into_output_table(pg_conn, to_table, simplified_geos)
             building_num_done += len(simplified_geos)
-            logging.info(f"mapshaper: Output {building_num_done} of {building_num} input buildings")
+        logging.info(f"mapshaper: (complete) output {building_num_done} of {building_num} input buildings")
+        if building_num_done != building_num:
+            raise RuntimeError(f"Error running mapshaper: simplified building count incorrect - "
+                               f"output {building_num_done} of {building_num} input buildings")
 
 
 def _get_geojson(pg_conn, from_sql: str, id_sql: str, geom_col: Identifier, bindings: dict = None):

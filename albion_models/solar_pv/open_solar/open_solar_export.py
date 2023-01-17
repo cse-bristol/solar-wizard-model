@@ -3,11 +3,12 @@ import os
 from asyncio import Future
 from concurrent.futures import ThreadPoolExecutor
 from os.path import join
+from threading import current_thread
 from typing import List, Tuple, Optional
 
 from psycopg2.extras import DictCursor
 
-from albion_models.db_funcs import sql_command, connection
+from albion_models.db_funcs import sql_command, connection, get_max_connections
 from albion_models.solar_pv.open_solar import export_panelarray, export_building, export_geographies, \
     export_conservation_area, export_paf
 
@@ -61,6 +62,8 @@ def _export_job(pg_uri: str, gpkg_dir: str, os_run_id: int, job_id: int, regener
     """Job info goes into one gpkg in multiple layers
     """
     logging.info(f"Exporting job {job_id}")
+    thread = current_thread()
+    thread.name = f"job_id_{job_id}"
     gpkg_filename: str = join(gpkg_dir, f"{_JOB_GPKG_STEM}.{job_id}{_GPKG_FNAME_EXTN}")
     with connection(pg_uri, cursor_factory=DictCursor) as pg_conn:  # Use a separate connection per call / thread
         export_panelarray.export(pg_conn, pg_uri, gpkg_filename, os_run_id, job_id, regenerate)
@@ -111,12 +114,14 @@ def _export_base_cons_area(pg_uri: str, gpkg_dir: str, regenerate: bool):
     with connection(pg_uri, cursor_factory=DictCursor) as pg_conn:  # Use a separate connection per call / thread
         export_conservation_area.export(pg_conn, pg_uri, gpkg_filename, regenerate)
 
+
 def _export_paf(pg_uri: str, output_dir: str, regenerate: bool):
     """Export full PAF DB"""
     logging.info(f"Exporting PAF")
     output_filename: str = join(output_dir, f"paf.csv.gz")
     with connection(pg_uri, cursor_factory=DictCursor) as pg_conn:  # Use a separate connection per call / thread
         export_paf.export(pg_conn, output_filename, regenerate)
+
 
 def export(pg_uri: str, os_run_id: int, gpkg_dir: str,
            extract_job_info: bool, extract_base_info: bool,
@@ -134,7 +139,8 @@ def export(pg_uri: str, os_run_id: int, gpkg_dir: str,
         gpkg_dir = "."
 
     with connection(pg_uri, cursor_factory=DictCursor) as pg_conn:
-        executor = ThreadPoolExecutor(max_workers=os.cpu_count())
+        mw = int(min(0.75 * os.cpu_count(), 0.75 * get_max_connections(pg_conn)))
+        executor = ThreadPoolExecutor(max_workers=mw)
         futures: List[Tuple[Optional[int], Future]] = []
 
         # Run threads that start sub-processes to do the extracts

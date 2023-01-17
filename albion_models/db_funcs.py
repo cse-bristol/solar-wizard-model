@@ -246,3 +246,12 @@ def count(pg_uri: str, schema: str, table: str) -> int:
             return cursor.fetchone()[0]
     finally:
         pg_conn.close()
+
+
+def get_max_connections(pg_conn) -> int:
+    """
+    Get the max_connections db configuration value
+    """
+    max_connections: int = sql_command(pg_conn, "SELECT (current_setting('max_connections'))::integer",
+                                       result_extractor=lambda rows: rows[0][0])
+    return max_connections
