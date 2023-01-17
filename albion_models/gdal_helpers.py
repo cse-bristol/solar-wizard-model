@@ -49,6 +49,8 @@ def get_res(filename: str) -> float:
 
     f = gdal.Open(filename)
     _, xres, _, _, _, yres = f.GetGeoTransform()
+    xres = round(xres, 10)
+    yres = round(yres, 10)
     if abs(xres) == abs(yres):
         return abs(xres)
     else:
@@ -61,6 +63,8 @@ def get_xres_yres(filename: str) -> (float, float):
 
     f = gdal.Open(filename)
     _, xres, _, _, _, yres = f.GetGeoTransform()
+    xres = round(xres, 10)
+    yres = round(yres, 10)
     return xres, yres
 
 

@@ -27,4 +27,4 @@ RANSAC_LARGE_BUILDING = 1000
 
 RANSAC_BASE_MAX_TRIALS = 1000
 # Don't go over this number of trials, whatever size the building is:
-RANSAC_ABS_MAX_TRIALS = 30000
+RANSAC_ABS_MAX_TRIALS = 15000
