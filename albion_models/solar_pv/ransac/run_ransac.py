@@ -38,7 +38,7 @@ def run_ransac(pg_uri: str,
                min_dist_to_edge_large_m: float,
                resolution_metres: float,
                workers: int = _ransac_cpu_count(),
-               building_page_size: int = 100) -> None:
+               building_page_size: int = 50) -> None:
 
     if count(pg_uri, tables.schema(job_id), tables.ROOF_POLYGON_TABLE) > 0:
         logging.info("Not detecting roof planes, already detected.")
@@ -72,6 +72,7 @@ def run_ransac(pg_uri: str,
 
 
 def _handle_building_page(pg_uri: str, job_id: int, page: int, page_size: int, params: dict):
+    start_time = time.time()
     by_toid = _load(pg_uri, job_id, page, page_size)
 
     planes = []
@@ -82,7 +83,7 @@ def _handle_building_page(pg_uri: str, job_id: int, page: int, page_size: int, p
 
     planes = create_roof_polygons(pg_uri, job_id, planes, **params)
     _save_planes(pg_uri, job_id, planes)
-    print(f"Page {page} of buildings complete")
+    print(f"Page {page} of {page_size} buildings complete, took {round(time.time() - start_time, 2)} s.")
 
 
 def _ransac_building(pixels_in_building: List[dict],
