@@ -139,7 +139,8 @@ def export(pg_uri: str, os_run_id: int, gpkg_dir: str,
         gpkg_dir = "."
 
     with connection(pg_uri, cursor_factory=DictCursor) as pg_conn:
-        mw = int(min(0.75 * os.cpu_count(), 0.75 * get_max_connections(pg_conn)))
+        # Using 0.25 here as 0.75 gives errors on bats
+        mw = int(min(0.25 * os.cpu_count(), 0.25 * get_max_connections(pg_conn)))
         executor = ThreadPoolExecutor(max_workers=mw)
         futures: List[Tuple[Optional[int], Future]] = []
 
