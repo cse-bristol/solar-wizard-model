@@ -50,10 +50,11 @@ def export(pg_conn, pg_uri: str, gpkg_fname: str, os_run_id: int, job_id: int, r
                 rp.is_flat AS is_flat,
                 kwh_per_kwp.kwh_per_kwp AS kwh_per_kwp
             FROM models.pv_roof_plane rp 
-            LEFT JOIN kwh_per_kwp 
+            INNER JOIN kwh_per_kwp 
             ON rp.roof_plane_id = kwh_per_kwp.roof_plane_id 
             WHERE job_id = {job_id}
-            """,
+            """,  # using inner join above so that roof planes with no panels are not included (they shouldn't be in
+                  # pv_roof_plane, but they are)
             os_run_id=Literal(os_run_id),
             job_id=Literal(job_id)
         ) is not None:
