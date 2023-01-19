@@ -57,6 +57,7 @@ def export(pg_conn, pg_uri: str, gpkg_fname: str, os_run_id: int, job_id: int, r
             " bt.postcode as postcode, "
             """
             CASE 
+                WHEN ab.num_epc_certs = 0 THEN false
                 WHEN ab.num_dom_epcs >= ab.num_epc_certs / 2 THEN true
                 WHEN ab.num_non_dom_epcs + ab.num_decs > ab.num_epc_certs / 2 THEN false
             ELSE NULL END AS is_residential,
