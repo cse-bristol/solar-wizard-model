@@ -17,14 +17,14 @@ from albion_models.util import get_cpu_count
 
 def _lidar_check_cpu_count():
     """Use 3/4s of available CPUs for lidar checking"""
-    return int(get_cpu_count() * 0.75)
+    return min(int(get_cpu_count() * 0.75), 100)
 
 
 def check_lidar(pg_uri: str,
                 job_id: int,
                 resolution_metres: float,
                 workers: int = _lidar_check_cpu_count(),
-                page_size: int = 1000):
+                page_size: int = 3000):
     """
     Check for discrepancies between OS MasterMap building polygon data and
     LiDAR data.
