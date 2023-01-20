@@ -18,7 +18,7 @@ from albion_models.util import get_cpu_count
 
 def _panel_placement_cpu_count():
     """Use 3/4s of available CPUs for panel placement"""
-    return int(get_cpu_count() * 0.75)
+    return min(int(get_cpu_count() * 0.75), 100)
 
 
 def place_panels(pg_uri: str,
@@ -28,7 +28,7 @@ def place_panels(pg_uri: str,
                  panel_spacing_m: float,
                  min_roof_area_m: float,
                  workers: int = _panel_placement_cpu_count(),
-                 page_size: int = 1000):
+                 page_size: int = 3000):
     schema = tables.schema(job_id)
 
     panel_polygon_count = count(pg_uri, schema, tables.PANEL_POLYGON_TABLE)
