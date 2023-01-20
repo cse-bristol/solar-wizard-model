@@ -1,6 +1,7 @@
 import json
 import logging
 import multiprocessing as mp
+import time
 from typing import Tuple, List
 
 import math
@@ -53,6 +54,7 @@ def check_lidar(pg_uri: str,
 
 
 def _check_lidar_page(pg_uri: str, job_id: int, resolution_metres: float, page: int, page_size: int = 1000):
+    start_time = time.time()
     with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
         buildings = _load_buildings(pg_conn, job_id, page, page_size)
         to_write = []
@@ -68,7 +70,7 @@ def _check_lidar_page(pg_uri: str, job_id: int, resolution_metres: float, page: 
                 raise e
 
         _write_exclusions(pg_conn, job_id, to_write)
-        print(f"Checked page {page} of LiDAR")
+        print(f"Checked page {page} of LiDAR, took {round(time.time() - start_time, 2)} s.")
 
 
 def _check_building(building, resolution_metres: float, debug: bool = False):

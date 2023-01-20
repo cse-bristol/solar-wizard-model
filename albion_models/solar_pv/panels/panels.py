@@ -1,4 +1,5 @@
 import logging
+import time
 from typing import List, Tuple
 import multiprocessing as mp
 
@@ -106,6 +107,7 @@ def _place_panel_page(pg_uri: str,
                       page: int,
                       page_size: int = 1000):
     schema = tables.schema(job_id)
+    start_time = time.time()
 
     with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
         roofs = sql_command(
@@ -158,7 +160,7 @@ def _place_panel_page(pg_uri: str,
                                         footprint))
 
         _write_panels(pg_conn, job_id, roof_panels)
-        print(f"Finished panels page {page}")
+        print(f"Finished panels page {page}, took {round(time.time() - start_time, 2)} s.")
 
 
 def _write_panels(pg_conn, job_id: int, roofs: List[Tuple[str, str, str, float, float]]):
