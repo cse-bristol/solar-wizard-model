@@ -1,4 +1,5 @@
 import logging
+import time
 from typing import List, Tuple
 import multiprocessing as mp
 
@@ -18,7 +19,7 @@ from albion_models.util import get_cpu_count
 
 def _panel_placement_cpu_count():
     """Use 3/4s of available CPUs for panel placement"""
-    return int(get_cpu_count() * 0.75)
+    return min(int(get_cpu_count() * 0.75), 100)
 
 
 def place_panels(pg_uri: str,
@@ -28,7 +29,7 @@ def place_panels(pg_uri: str,
                  panel_spacing_m: float,
                  min_roof_area_m: float,
                  workers: int = _panel_placement_cpu_count(),
-                 page_size: int = 1000):
+                 page_size: int = 3000):
     schema = tables.schema(job_id)
 
     panel_polygon_count = count(pg_uri, schema, tables.PANEL_POLYGON_TABLE)
@@ -106,6 +107,7 @@ def _place_panel_page(pg_uri: str,
                       page: int,
                       page_size: int = 1000):
     schema = tables.schema(job_id)
+    start_time = time.time()
 
     with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
         roofs = sql_command(
@@ -158,7 +160,7 @@ def _place_panel_page(pg_uri: str,
                                         footprint))
 
         _write_panels(pg_conn, job_id, roof_panels)
-        print(f"Finished panels page {page}")
+        print(f"Finished panels page {page}, took {round(time.time() - start_time, 2)} s.")
 
 
 def _write_panels(pg_conn, job_id: int, roofs: List[Tuple[str, str, str, float, float]]):
