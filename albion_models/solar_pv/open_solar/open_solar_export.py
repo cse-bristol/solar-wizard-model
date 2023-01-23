@@ -9,8 +9,11 @@ from typing import List, Tuple, Optional
 from psycopg2.extras import DictCursor
 
 from albion_models.db_funcs import sql_command, connection, get_max_connections
+from albion_models.ogr_helpers import get_layer_names
 from albion_models.solar_pv.open_solar import export_panelarray, export_building, export_geographies, \
     export_conservation_area, export_paf
+from albion_models.solar_pv.open_solar.export_building import L_BUILDINGS
+from albion_models.solar_pv.open_solar.export_panelarray import L_PANELS, L_INSTALLATIONS
 
 _JOB_GPKG_STEM = "job"
 _BASE_GPKG_STEM = "base_info"
@@ -61,13 +64,32 @@ def _is_all_complete(pg_conn, os_run_id: int) -> bool:
 def _export_job(pg_uri: str, gpkg_dir: str, os_run_id: int, job_id: int, regenerate: bool):
     """Job info goes into one gpkg in multiple layers
     """
-    logging.info(f"Exporting job {job_id}")
     thread = current_thread()
     thread.name = f"job_id_{job_id}"
-    gpkg_filename: str = join(gpkg_dir, f"{_JOB_GPKG_STEM}.{job_id}{_GPKG_FNAME_EXTN}")
-    with connection(pg_uri, cursor_factory=DictCursor) as pg_conn:  # Use a separate connection per call / thread
-        export_panelarray.export(pg_conn, pg_uri, gpkg_filename, os_run_id, job_id, regenerate)
-        export_building.export(pg_conn, pg_uri, gpkg_filename, os_run_id, job_id, regenerate)
+
+    gpkg_fname: str = join(gpkg_dir, f"{_JOB_GPKG_STEM}.{job_id}{_GPKG_FNAME_EXTN}")
+    gpkg_fname_exporting: str = join(gpkg_dir, f"exp.{_JOB_GPKG_STEM}.{job_id}{_GPKG_FNAME_EXTN}")
+
+    if not regenerate:
+        layer_names: List[str] = get_layer_names(gpkg_fname)
+        if L_PANELS not in layer_names or L_INSTALLATIONS not in layer_names or L_BUILDINGS not in layer_names:
+            regenerate = True
+
+    if regenerate:
+        logging.info(f"Exporting job {job_id}")
+        if os.path.isfile(gpkg_fname):
+            os.remove(gpkg_fname)
+        if os.path.isfile(gpkg_fname_exporting):  # Will be present if export failed last time
+            os.remove(gpkg_fname_exporting)
+        try:
+            with connection(pg_uri, cursor_factory=DictCursor) as pg_conn:  # Use a separate connection per call / thread
+                export_panelarray.export(pg_conn, pg_uri, gpkg_fname_exporting, os_run_id, job_id)
+                export_building.export(pg_conn, pg_uri, gpkg_fname_exporting, os_run_id, job_id)
+            os.rename(gpkg_fname_exporting, gpkg_fname)  # Rename if export succeeded, leave with "exp." prefix if fails
+            logging.info(f"Renamed {gpkg_fname_exporting} to {gpkg_fname}")
+        except Exception as e:
+            logging.exception(f"Exporting job {job_id}")
+            raise e
 
 
 def _export_base_lsoa(pg_uri: str, gpkg_dir: str, regenerate: bool):
