@@ -1,5 +1,3 @@
-import logging
-
 from psycopg2.sql import Identifier, Literal
 
 from albion_models.db_funcs import command_to_gpkg, sql_command
@@ -33,24 +31,47 @@ def export(pg_conn, pg_uri: str, gpkg_fname: str, os_run_id: int, job_id: int):
         Identifier("mb", "geom_4326"),
         {"job_id": job_id})
 
+    transformation = '+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 ' + \
+                     '+y_0=-100000 +datum=OSGB36 +nadgrids=OSTN15_NTv2_OSGBtoETRS.gsb +units=m +no_defs'
+
     if command_to_gpkg(
         pg_conn, pg_uri, gpkg_fname, "%s" % L_BUILDINGS,
         src_srs=4326, dst_srs=4326,
         overwrite=True,
         command=
-        "WITH cte AS (SELECT toid, SUM(kwp) AS kwp, SUM(kwh_year) AS kwh "
-        " FROM models.pv_panel WHERE job_id = {job_id} GROUP BY toid) "
+        """
+        WITH panels AS (
+            SELECT toid, SUM(kwp) AS kwp, SUM(kwh_year) AS kwh
+            FROM models.pv_panel 
+            WHERE job_id = {job_id} 
+            GROUP BY toid), 
+        installations AS (
+            SELECT
+                toid,
+                jsonb_agg(jsonb_build_object(
+                    'kwp', kwp,
+                    'kwh', kwh,
+                    'yield', yield
+                )) AS installations
+            FROM (
+                SELECT 
+                    toid, 
+                    toid || '_' || roof_plane_id AS installation_id,
+                    round(SUM(kwp)::numeric, 2) AS kwp, 
+                    round(SUM(kwh_year)::numeric, 2) AS kwh,
+                    round(CASE WHEN SUM(kwp) IS NULL THEN 0::numeric ELSE (SUM(kwh_year) / SUM(kwp))::numeric END, 2) AS yield
+                FROM models.pv_panel 
+                WHERE job_id = {job_id} 
+                GROUP BY toid, roof_plane_id) a
+            GROUP BY toid
+        )
+        """
         "SELECT "
         " {os_run_id} AS run_id, "
         " mp.job_id AS job_id, "
         " toid AS toid, "
         # ensure panels are aligned with buildings by putting them through the same transformation:
-        """
-        ST_Transform(mb.geom_27700,
-         '+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 '
-         '+y_0=-100000 +datum=OSGB36 +nadgrids=OSTN15_NTv2_OSGBtoETRS.gsb +units=m +no_defs',
-         4326) AS geom,
-        """
+        " ST_Transform(mb.geom_27700, {transformation}, 4326) AS geom, "
         " bt.address as address, "
         " bt.postcode as postcode, "
         """
@@ -58,42 +79,43 @@ def export(pg_conn, pg_uri: str, gpkg_fname: str, os_run_id: int, job_id: int):
             WHEN ab.num_epc_certs = 0 THEN false
             WHEN ab.num_dom_epcs >= ab.num_epc_certs / 2 THEN true
             WHEN ab.num_non_dom_epcs + ab.num_decs > ab.num_epc_certs / 2 THEN false
-        ELSE NULL END AS is_residential,
+        ELSE false END AS is_residential,
         """
         " ab.has_rooftop_pv AS has_rooftop_pv, "                # Derived from EPC and pv_installations dataset
-        " ab.pv_roof_area_pct AS pv_rooftop_area_pct, "         # EPC
-        " ab.pv_peak_power AS pv_peak_power, "                  # EPC
         " ab.listed_building_grade AS listed_building_grade, "  # Derived from Historic England listed buildings dataset.
-        " cte.kwh AS total_avg_energy_prod_kwh_per_year, "
+        " panels.kwh AS total_avg_energy_prod_kwh_per_year, "
         " ab.la AS la_code, "                                   # Derived using OSMM and OS BoundaryLine (Open government license)
         " ab.msoa_2011 AS msoa_2011, "                          # Derived using OSMM and census_boundaries (Open government license)
         " ab.lsoa_2011 AS lsoa_2011, "                          # Derived using OSMM and census_boundaries (Open government license). Can be null if OA is not in ONSPD
         " ab.oa_2011 AS oa_2011, "                              # Derived using OSMM and census_boundaries (Open government license)
         " ab.ward AS ward, "                                    # Derived using OSMM and OS BoundaryLine (Open government license)
         " ab.parish AS parish, "                                # Derived using OSMM and OS BoundaryLine (Open government license)
-        " ST_AsGeoJSON(ab.geom_4326) AS geom_str, "
-        " ST_X(ab.centroid) AS lon, "
-        " ST_Y(ab.centroid) AS lat, "
-        " ST_X(ST_Transform(ab.centroid, 27700)) AS easting, "
-        " ST_Y(ST_Transform(ab.centroid, 27700)) AS northing, "
-        " ST_AsGeoJSON(ab.centroid) AS centroid_str, "
+        " ST_AsGeoJSON(ST_Transform(mb.geom_27700, {transformation}, 4326)) AS geom_str, "
+        " ST_X(ST_Transform(ST_Centroid(mb.geom_27700), {transformation}, 4326)) AS lon, "
+        " ST_Y(ST_Transform(ST_Centroid(mb.geom_27700), {transformation}, 4326)) AS lat, "
+        " ST_X(ST_Centroid(mb.geom_27700)) AS easting, "
+        " ST_Y(ST_Centroid(mb.geom_27700)) AS northing, "
+        " ST_AsGeoJSON(ST_Centroid(ST_Transform(mb.geom_27700, {transformation}, 4326))) AS centroid_str, "
         " mp.height AS height, "
         " tt.geojson AS geom_str_simplified, "
         " CASE "
-        "  WHEN cte.kwp = 0 THEN 0 "
-        "  ELSE cte.kwh / cte.kwp "
+        "  WHEN panels.kwp = 0 THEN 0 "
+        "  ELSE panels.kwh / panels.kwp "
         " END AS kwh_per_kwp, "
-        " mp.exclusion_reason AS exclusion_reason "
+        " mp.exclusion_reason AS exclusion_reason, "
+        " insts.installations "
         "FROM aggregates.building ab "
         "LEFT JOIN paf.by_toid bt USING (toid) "
         "JOIN mastermap.building_27700 mb USING (toid) "
         "JOIN models.pv_building mp USING (toid) "
-        "LEFT JOIN cte USING (toid) "
+        "LEFT JOIN panels USING (toid) "
+        "LEFT JOIN installations insts USING (toid) "
         "JOIN {simp_table} tt ON (tt.id = toid) "
         "WHERE mp.job_id = {job_id} ",
         job_id=Literal(job_id),
         os_run_id=Literal(os_run_id),
         simp_table=simplified_building_geoms_tbl,
+        transformation=Literal(transformation),
     ) is not None:
         raise RuntimeError(f"Error running ogr2ogr")
 

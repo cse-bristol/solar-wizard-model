@@ -1,6 +1,3 @@
-import logging
-from typing import List
-
 from psycopg2.sql import Literal
 
 from albion_models.db_funcs import command_to_gpkg
@@ -25,10 +22,27 @@ def export(pg_conn, pg_uri: str, gpkg_fname: str, os_run_id: int, job_id: int):
         src_srs=4326, dst_srs=4326,
         overwrite=True,
         command=f"""
-        WITH kwh_per_kwp AS (
+        WITH panels AS (
             SELECT 
                 roof_plane_id,
-                CASE WHEN SUM(kwp) = 0 THEN 0 ELSE SUM(kwh_year) / SUM(kwp) END AS kwh_per_kwp
+                round(SUM(kwh_jan)::numeric, 2) AS kwh_jan,
+                round(SUM(kwh_feb)::numeric, 2) AS kwh_feb,
+                round(SUM(kwh_mar)::numeric, 2) AS kwh_mar,
+                round(SUM(kwh_apr)::numeric, 2) AS kwh_apr,
+                round(SUM(kwh_may)::numeric, 2) AS kwh_may,
+                round(SUM(kwh_jun)::numeric, 2) AS kwh_jun,
+                round(SUM(kwh_jul)::numeric, 2) AS kwh_jul,
+                round(SUM(kwh_aug)::numeric, 2) AS kwh_aug,
+                round(SUM(kwh_sep)::numeric, 2) AS kwh_sep,
+                round(SUM(kwh_oct)::numeric, 2) AS kwh_oct,
+                round(SUM(kwh_nov)::numeric, 2) AS kwh_nov,
+                round(SUM(kwh_dec)::numeric, 2) AS kwh_dec,
+                round(SUM(kwh_year)::numeric, 2) AS kwh_year,
+                round(SUM(kwp)::numeric, 2) AS kwp, 
+                round(SUM(area)::numeric, 2) AS area,
+                round(SUM(footprint)::numeric, 2) AS footprint,
+                round(CASE WHEN SUM(kwp) IS NULL THEN 0::numeric ELSE (SUM(kwh_year) / SUM(kwp))::numeric END, 2) AS kwh_per_kwp,
+                COUNT(*) AS panels
             FROM models.pv_panel
             WHERE job_id = {job_id} 
             GROUP BY roof_plane_id
@@ -46,10 +60,27 @@ def export(pg_conn, pg_uri: str, gpkg_fname: str, os_run_id: int, job_id: int):
             rp.y_coef AS y_coef,
             rp.intercept AS intercept,
             rp.is_flat AS is_flat,
-            kwh_per_kwp.kwh_per_kwp AS kwh_per_kwp
+            panels.kwh_jan AS jan_avg_energy_prod_kwh_per_month,
+            panels.kwh_feb AS feb_avg_energy_prod_kwh_per_month,
+            panels.kwh_mar AS mar_avg_energy_prod_kwh_per_month,
+            panels.kwh_apr AS apr_avg_energy_prod_kwh_per_month,
+            panels.kwh_may AS may_avg_energy_prod_kwh_per_month,
+            panels.kwh_jun AS jun_avg_energy_prod_kwh_per_month,
+            panels.kwh_jul AS jul_avg_energy_prod_kwh_per_month,
+            panels.kwh_aug AS aug_avg_energy_prod_kwh_per_month,
+            panels.kwh_sep AS sep_avg_energy_prod_kwh_per_month,
+            panels.kwh_oct AS oct_avg_energy_prod_kwh_per_month,
+            panels.kwh_nov AS nov_avg_energy_prod_kwh_per_month,
+            panels.kwh_dec AS dec_avg_energy_prod_kwh_per_month,
+            panels.kwh_year AS total_avg_energy_prod_kwh_per_year,
+            panels.kwp AS peak_power,
+            panels.kwh_per_kwp AS kwh_per_kwp,
+            panels.area AS area,
+            panels.footprint AS footprint,
+            panels.panels AS panels
         FROM models.pv_roof_plane rp 
-        INNER JOIN kwh_per_kwp 
-        ON rp.roof_plane_id = kwh_per_kwp.roof_plane_id 
+        INNER JOIN panels 
+        ON rp.roof_plane_id = panels.roof_plane_id 
         WHERE job_id = {job_id}
         """,  # using inner join above so that roof planes with no panels are not included (they shouldn't be in
               # pv_roof_plane, but they are)
