@@ -75,9 +75,9 @@ def _post_load(pg_uri: str, schema: str, min_roof_area_m: float):
                 FROM {panel_polygons}
                 GROUP BY roof_plane_id)
             UPDATE {roof_polygons} rp
-            SET usable = CASE WHEN usable THEN pp.area >= %(min_roof_area_m)s ELSE false END  
+            SET usable = pp.area >= %(min_roof_area_m)s
             FROM pp
-            WHERE pp.roof_plane_id = rp.roof_plane_id;
+            WHERE pp.roof_plane_id = rp.roof_plane_id AND rp.archetype = false AND rp.usable = true;
             
             UPDATE {roof_polygons} rp
             SET usable = false

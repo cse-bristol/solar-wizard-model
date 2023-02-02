@@ -1,6 +1,6 @@
 import json
 from collections import defaultdict
-from typing import List, Dict, Optional
+from typing import List, Dict
 
 import math
 from psycopg2.sql import Identifier, SQL
@@ -12,44 +12,11 @@ from shapely.validation import make_valid
 import albion_models.solar_pv.tables as tables
 from albion_models import gdal_helpers
 from albion_models.db_funcs import connection, sql_command, connect
-from albion_models.geos import azimuth, square, largest_polygon, rect
+from albion_models.geos import azimuth, square, largest_polygon
 from albion_models.solar_pv.constants import FLAT_ROOF_DEGREES_THRESHOLD, \
     FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD, AZIMUTH_ALIGNMENT_THRESHOLD
-from albion_models.solar_pv.roof_polygons.premade_roof_polygons import PREMADES
-
-
-def _construct_premade(pattern, panel_w: float, panel_h: float, portrait: bool) -> Polygon:
-    """
-    Construct a pre-made roof polygon archetype from a pattern and some info about panels
-    """
-    cells = []
-
-    for y in range(0, len(pattern)):
-        row = pattern[y]
-        for x in range(0, len(row)):
-            if row[x] == 1:
-                if portrait:
-                    cells.append(rect(x * panel_h, y * panel_w, (x + 1) * panel_h, (y + 1) * panel_w))
-                else:
-                    cells.append(rect(x * panel_w, y * panel_h, (x + 1) * panel_w, (y + 1) * panel_h))
-
-    premade = ops.unary_union(cells).buffer(0.1,
-                                            cap_style=CAP_STYLE.square,
-                                            join_style=JOIN_STYLE.mitre,
-                                            resolution=1)
-    return affinity.translate(premade, -premade.centroid.x, -premade.centroid.y)
-
-
-def _construct_premades(panel_w: float, panel_h: float) -> List[Polygon]:
-    """
-    Construct pre-made roof polygon archetypes from patterns and some info about panels
-    """
-    premades = []
-    for pattern in PREMADES:
-        premades.append(_construct_premade(pattern, panel_w, panel_h, portrait=True))
-        premades.append(_construct_premade(pattern, panel_w, panel_h, portrait=False))
-    premades.sort(key=lambda p: -p.area)
-    return premades
+from albion_models.solar_pv.roof_polygons.roof_polygon_archetypes import \
+    construct_archetypes, get_archetype
 
 
 def create_roof_polygons(pg_uri: str,
@@ -97,8 +64,8 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
                           resolution_metres: float) -> List[dict]:
     polygons_by_toid = defaultdict(list)
     roof_polygons = []
-    premades = _construct_premades(panel_width_m, panel_height_m)
-    biggest_premade_area = max(premades, key=lambda p: p.area).area
+    archetypes = construct_archetypes(panel_width_m, panel_height_m)
+    max_archetype_area = max(archetypes, key=lambda p: p.area).area
 
     # Sort planes so that southerly aspects are considered first
     # (as already-created polygons take priority when ensuring two roof planes don't overlap)
@@ -151,12 +118,15 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
                 continue
 
             # Potentially use a pre-made roof archetype instead:
-            plane['premade'] = False
-            if not is_flat and len(roof_poly.interiors) == 0 and aspect_adjusted and roof_poly.area < (biggest_premade_area * 1.5):
-                premade = _get_premade(roof_poly, premades, plane['aspect'])
-                if premade is not None:
-                    roof_poly = premade
-                    plane['premade'] = True
+            plane['archetype'] = False
+            if not is_flat \
+                    and len(roof_poly.interiors) == 0 \
+                    and aspect_adjusted \
+                    and roof_poly.area < (max_archetype_area * 1.5):
+                archetype = get_archetype(roof_poly, archetypes, plane['aspect'])
+                if archetype is not None:
+                    roof_poly = archetype
+                    plane['archetype'] = True
 
             if not roof_poly or roof_poly.is_empty:
                 continue
@@ -198,7 +168,7 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
                 plane['usable'] = False
             elif plane['aspect'] > 360 - min_roof_degrees_from_north:
                 plane['usable'] = False
-            elif roof_poly.area < min_roof_area_m:
+            elif roof_poly.area < min_roof_area_m and plane['archetype'] is False:
                 plane['usable'] = False
             else:
                 plane['usable'] = True
@@ -217,39 +187,6 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
             raise e
 
     return roof_polygons
-
-
-def _get_premade(roof_polygon: Polygon, premades: List[Polygon], aspect) -> Optional[Polygon]:
-    min_diff = 0.68
-    best_premade = None
-
-    for premade in premades:
-        # move the premade so the centroid is the same as the existing poly:
-        premade = affinity.translate(premade, roof_polygon.centroid.x, roof_polygon.centroid.y)
-        # rotate to match the aspect:
-        premade = affinity.rotate(premade, -aspect, origin=premade.centroid)
-
-        # the parts of roof_poly that do not intersect premade (not such a problem - bits of
-        # roof_poly are sticking out the sides of premade):
-        a1 = roof_polygon.difference(premade).area * 0.75
-        # the parts of premade that do not intersect roof poly (this is worse -
-        # premade is sticking out the sides of roof_poly here - so make it count more):
-        a2 = premade.difference(roof_polygon).area * 1.5
-        area_diff = a1 + a2
-        pct_diff = area_diff / roof_polygon.area
-
-        # pct_diff = premade.difference(roof_polygon).area / roof_polygon.area
-
-        if pct_diff < min_diff:
-            min_diff = pct_diff
-            best_premade = premade
-        if best_premade and round(pct_diff, 2) == round(min_diff, 2) and premade.area > best_premade.area:
-            min_diff = pct_diff
-            best_premade = premade
-
-    if best_premade:
-        print(min_diff)
-    return best_premade
 
 
 def _building_geoms(pg_uri: str, job_id: int, toids: List[str]) -> Dict[str, Polygon]:

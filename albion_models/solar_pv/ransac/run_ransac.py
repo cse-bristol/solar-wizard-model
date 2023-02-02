@@ -223,7 +223,7 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[dict]):
         plane_ids = execute_values(cursor, SQL("""
             INSERT INTO {roof_polygons} (toid, roof_geom_27700, x_coef, y_coef, 
                                          intercept, slope, aspect, sd, is_flat, usable, 
-                                         easting, northing, raw_footprint, raw_area)
+                                         easting, northing, raw_footprint, raw_area, archetype)
             VALUES %s
             RETURNING roof_plane_id;
         """).format(
@@ -232,7 +232,7 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[dict]):
             template="(%(toid)s, %(roof_geom_27700)s, %(x_coef)s,"
                      " %(y_coef)s, %(intercept)s, %(slope)s, %(aspect)s, %(sd)s, "
                      " %(is_flat)s, %(usable)s, %(easting)s, %(northing)s, "
-                     " %(raw_footprint)s, %(raw_area)s)")
+                     " %(raw_footprint)s, %(raw_area)s, %(archetype)s)")
 
         pixel_plane_data = []
         for i in range(0, len(plane_ids)):

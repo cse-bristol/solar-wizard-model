@@ -58,7 +58,8 @@ CREATE TABLE IF NOT EXISTS {roof_polygons} (
     easting double precision NOT NULL,
     northing double precision NOT NULL,
     raw_footprint double precision NOT NULL,
-    raw_area double precision NOT NULL
+    raw_area double precision NOT NULL,
+    archetype boolean NOT NULL
 );
 
 CREATE INDEX ON {roof_polygons} (toid);
