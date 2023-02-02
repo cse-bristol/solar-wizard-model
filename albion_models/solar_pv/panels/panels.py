@@ -229,8 +229,8 @@ def _roof_panels(roof: MultiPolygon,
         return None
 
     # Define grids of portrait and landscape panels:
-    portrait_grid = get_grid_cells(rotated_roof, portrait_panel_w, portrait_panel_h, spacing_x, spacing_y, grid_start='bounds-buffered')
-    landscape_grid = get_grid_cells(rotated_roof, landscape_panel_w, landscape_panel_h, spacing_x, spacing_y, grid_start='bounds-buffered')
+    portrait_grid = get_grid_cells(rotated_roof.buffer(portrait_panel_h), portrait_panel_w, portrait_panel_h, spacing_x, spacing_y, grid_start='bounds')
+    landscape_grid = get_grid_cells(rotated_roof.buffer(landscape_panel_w), landscape_panel_w, landscape_panel_h, spacing_x, spacing_y, grid_start='bounds')
 
     # Define some variations on panel row positioning to try and fit
     # more panels on each roof:

@@ -162,8 +162,6 @@ def _load_rasters_to_db(pg_uri: str,
         sql_script(
             pg_conn, 'pv/create.lidar-pixels.sql',
             lidar_pixels=Identifier(schema, lidar_pixels_table),
-            aspect_pixels=Identifier(schema, "aspect_pixels"),
-            slope_pixels=Identifier(schema, "slope_pixels"),
         )
 
         copy_rasters(pg_conn, solar_dir,
@@ -177,8 +175,6 @@ def _load_rasters_to_db(pg_uri: str,
             pg_conn, 'pv/post-load.lidar-pixels.sql',
             schema=Identifier(schema),
             lidar_pixels=Identifier(schema, lidar_pixels_table),
-            aspect_pixels=Identifier(schema, "aspect_pixels"),
-            slope_pixels=Identifier(schema, "slope_pixels"),
             buildings=Identifier(schema, tables.BUILDINGS_TABLE),
             srid=Literal(srid),
             res=Literal(res),

@@ -183,6 +183,7 @@ def _write_results_to_db(pg_conn,
     sql_command(
         pg_conn,
         """
+        DROP TABLE IF EXISTS {pixel_kwh};
         CREATE TABLE {pixel_kwh} (
             x double precision,
             y double precision,

@@ -24,6 +24,8 @@ _FLAT_ROOF_DEGREES = 10
 _LARGE_BUILDING_THRESHOLD = 200
 _MIN_DIST_TO_EDGE_M = 0.3
 _MIN_DIST_TO_EDGE_LARGE_M = 1
+_PANEL_W_M = 0.9
+_PANEL_H_M = 1.64
 
 
 def make_job_roof_polygons(pg_uri: str, job_id: int,
@@ -44,18 +46,20 @@ def make_job_roof_polygons(pg_uri: str, job_id: int,
         all_planes = []
         for toid in toids:
             planes = _load_toid_planes(pg_uri, job_id, toid)
-            _create_roof_polygons(building_geoms,
-                                  planes,
-                                  max_roof_slope_degrees=_MAX_ROOF_SLOPE_DEGREES,
-                                  min_roof_area_m=_MIN_ROOF_AREA_M,
-                                  min_roof_degrees_from_north=_MIN_ROOF_DEGREES_FROM_NORTH,
-                                  flat_roof_degrees=_FLAT_ROOF_DEGREES,
-                                  large_building_threshold=_LARGE_BUILDING_THRESHOLD,
-                                  min_dist_to_edge_m=_MIN_DIST_TO_EDGE_M,
-                                  min_dist_to_edge_large_m=_MIN_DIST_TO_EDGE_LARGE_M,
-                                  resolution_metres=resolution_metres)
-            logging.info(f"Created {len(planes)} planes for toid {toid}")
-            all_planes.extend(planes)
+            polygons = _create_roof_polygons(building_geoms,
+                                             planes,
+                                             max_roof_slope_degrees=_MAX_ROOF_SLOPE_DEGREES,
+                                             min_roof_area_m=_MIN_ROOF_AREA_M,
+                                             min_roof_degrees_from_north=_MIN_ROOF_DEGREES_FROM_NORTH,
+                                             flat_roof_degrees=_FLAT_ROOF_DEGREES,
+                                             large_building_threshold=_LARGE_BUILDING_THRESHOLD,
+                                             min_dist_to_edge_m=_MIN_DIST_TO_EDGE_M,
+                                             min_dist_to_edge_large_m=_MIN_DIST_TO_EDGE_LARGE_M,
+                                             panel_width_m=_PANEL_W_M,
+                                             panel_height_m=_PANEL_H_M,
+                                             resolution_metres=resolution_metres)
+            logging.info(f"Created {len(polygons)} planes for toid {toid}")
+            all_planes.extend(polygons)
 
         if write_test_data:
             t = int(time.time())
@@ -91,6 +95,8 @@ def make_roof_polygons(pg_uri: str, job_id: int, toid: str,
                           large_building_threshold=_LARGE_BUILDING_THRESHOLD,
                           min_dist_to_edge_m=_MIN_DIST_TO_EDGE_M,
                           min_dist_to_edge_large_m=_MIN_DIST_TO_EDGE_LARGE_M,
+                          panel_width_m=_PANEL_W_M,
+                          panel_height_m=_PANEL_H_M,
                           resolution_metres=resolution_metres)
 
     if write_test_data:
@@ -181,15 +187,15 @@ if __name__ == "__main__":
     #     1.0,
     #     roof_polys_dir)
 
-    # make_job_roof_polygons(
-    #     "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion?application_name=blah",
-    #     1620,
-    #     1.0,
-    #     "/home/neil/data/albion-models/roof-polys")
-
-    make_roof_polygons(
+    make_job_roof_polygons(
         "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion?application_name=blah",
-        1627,
-        "osgb1000000137769485",
+        1641,
         1.0,
-        roof_polys_dir,)
+        "/home/neil/data/albion-models/roof-polys")
+
+    # make_roof_polygons(
+    #     "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion?application_name=blah",
+    #     1627,
+    #     "osgb1000000137769485",
+    #     1.0,
+    #     roof_polys_dir,)

@@ -77,7 +77,9 @@ def model_solar_pv(pg_uri: str,
                large_building_threshold=large_building_threshold,
                min_dist_to_edge_m=min_dist_to_edge_m,
                min_dist_to_edge_large_m=min_dist_to_edge_large_m,
-               resolution_metres=res)
+               resolution_metres=res,
+               panel_width_m=panel_width_m,
+               panel_height_m=panel_height_m)
 
     logging.info("Adding individual PV panels...")
     place_panels(

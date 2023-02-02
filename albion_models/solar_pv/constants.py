@@ -25,6 +25,6 @@ SYSTEM_LOSS = 0.14
 # same plane):
 RANSAC_LARGE_BUILDING = 1000
 
-RANSAC_BASE_MAX_TRIALS = 1000
+RANSAC_BASE_MAX_TRIALS = 2000
 # Don't go over this number of trials, whatever size the building is:
-RANSAC_ABS_MAX_TRIALS = 15000
+RANSAC_ABS_MAX_TRIALS = 3000

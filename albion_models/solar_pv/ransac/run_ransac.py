@@ -37,6 +37,8 @@ def run_ransac(pg_uri: str,
                min_dist_to_edge_m: float,
                min_dist_to_edge_large_m: float,
                resolution_metres: float,
+               panel_width_m: float,
+               panel_height_m: float,
                workers: int = _ransac_cpu_count(),
                building_page_size: int = 50) -> None:
 
@@ -60,6 +62,8 @@ def run_ransac(pg_uri: str,
         "min_dist_to_edge_m": min_dist_to_edge_m,
         "min_dist_to_edge_large_m": min_dist_to_edge_large_m,
         "resolution_metres": resolution_metres,
+        "panel_width_m": panel_width_m,
+        "panel_height_m": panel_height_m,
     }
     with mp.Pool(workers) as pool:
         wrapped_iterable = ((pg_uri, job_id, seg, building_page_size, params)
