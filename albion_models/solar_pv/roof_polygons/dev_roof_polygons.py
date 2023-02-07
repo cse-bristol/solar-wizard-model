@@ -40,6 +40,7 @@ def make_job_roof_polygons(pg_uri: str, job_id: int,
             "SELECT toid FROM {buildings}",
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
             result_extractor=lambda rows: [row[0] for row in rows])
+        t0 = time.time()
         logging.info(f"TOIDS: {len(toids)}")
 
         building_geoms = _building_geoms(pg_uri, job_id, toids)
@@ -60,6 +61,8 @@ def make_job_roof_polygons(pg_uri: str, job_id: int,
                                              resolution_metres=resolution_metres)
             logging.info(f"Created {len(polygons)} planes for toid {toid}")
             all_planes.extend(polygons)
+
+        logging.info(f"found {len(all_planes)} planes, took {round(time.time() - t0, 2)}s")
 
         if write_test_data:
             t = int(time.time())
@@ -189,7 +192,7 @@ if __name__ == "__main__":
 
     make_job_roof_polygons(
         "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion?application_name=blah",
-        1641,
+        1643,
         1.0,
         "/home/neil/data/albion-models/roof-polys")
 

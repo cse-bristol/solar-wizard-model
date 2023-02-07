@@ -71,13 +71,15 @@ def _post_load(pg_uri: str, schema: str, min_roof_area_m: float):
             WITH pp AS (
                 SELECT 
                     roof_plane_id,
-                    SUM(area) AS area
+                    SUM(area) AS area,
+                    COUNT(*) AS num_panels
                 FROM {panel_polygons}
                 GROUP BY roof_plane_id)
             UPDATE {roof_polygons} rp
             SET usable = pp.area >= %(min_roof_area_m)s
             FROM pp
-            WHERE pp.roof_plane_id = rp.roof_plane_id AND rp.archetype = false AND rp.usable = true;
+            WHERE pp.roof_plane_id = rp.roof_plane_id AND rp.usable = true
+            AND (rp.archetype = false OR pp.num_panels < 3);
             
             UPDATE {roof_polygons} rp
             SET usable = false

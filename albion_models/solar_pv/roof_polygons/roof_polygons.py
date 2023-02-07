@@ -65,7 +65,7 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
     polygons_by_toid = defaultdict(list)
     roof_polygons = []
     archetypes = construct_archetypes(panel_width_m, panel_height_m)
-    max_archetype_area = max(archetypes, key=lambda p: p.area).area
+    max_archetype_area = max(archetypes, key=lambda a: a.polygon.area).polygon.area
 
     # Sort planes so that southerly aspects are considered first
     # (as already-created polygons take priority when ensuring two roof planes don't overlap)
@@ -125,8 +125,9 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
                     and roof_poly.area < (max_archetype_area * 1.5):
                 archetype = get_archetype(roof_poly, archetypes, plane['aspect'])
                 if archetype is not None:
-                    roof_poly = archetype
+                    roof_poly = archetype.polygon
                     plane['archetype'] = True
+                    plane['archetype_pattern'] = json.dumps(archetype.pattern)
 
             if not roof_poly or roof_poly.is_empty:
                 continue
