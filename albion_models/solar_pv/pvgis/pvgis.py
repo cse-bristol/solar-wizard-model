@@ -97,8 +97,8 @@ def pvgis(pg_uri: str,
         mask_filename=os.path.basename(mask_raster),
         flat_roof_aspect_filename=os.path.basename(flat_roof_aspect_raster) if flat_roof_aspect_raster else None,
         elevation_override_filename=os.path.basename(elevation_override_raster) if elevation_override_raster else None,
-        forced_slope_filename=slope_raster,     # Use values from GDAL for slope and aspect as aspects differ by
-        forced_aspect_filename=aspect_raster    # up to approx 3 degrees after switch to 27700
+        forced_slope_filename=slope_raster,             # Use values from GDAL for slope and aspect as aspects differ by
+        forced_aspect_filename_compass=aspect_raster    # up to approx 3 degrees after switch to 27700
     )
 
     yearly_kwh_raster = pvm.yearly_kwh_raster
