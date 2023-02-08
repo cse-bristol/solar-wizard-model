@@ -166,8 +166,9 @@ class PVMaps(GrassGISUser):
                      flat_roof_aspect_filename: Optional[str] = None,
                      elevation_override_filename: Optional[str] = None,
                      forced_slope_filename: Optional[str] = None,
-                     forced_aspect_filename: Optional[str] = None,
-                     forced_horizon_basefilename: Optional[str] = None) -> None:
+                     forced_aspect_filename_compass: Optional[str] = None,
+                     forced_aspect_filename_grass: Optional[str] = None,
+                     forced_horizon_basefilename_grass: Optional[str] = None) -> None:
         """
         Run PVMaps steps against the input elevation and mask. Raises exception if something goes wrong.
         Creates output rasters in the dir setup in the constructor.
@@ -179,14 +180,19 @@ class PVMaps(GrassGISUser):
         :param mask_filename:  Just the filename of the mask raster
         :param forced_slope_filename: (mainly for testing) None - calculate slope from elevation raster; filename - use
         instead of calculated slope raster (points in degrees, 0 = flat, 90 = vertical). Must set slope and aspect.
-        :param forced_aspect_filename: (mainly for testing) None - calculate slope from elevation raster; filename - use
+        :param forced_aspect_filename_compass: None - calculate slope from elevation raster; filename - use
+        instead of calculated aspect raster (points in degrees, north = 0, CW). Must set slope and aspect.
+        :param forced_aspect_filename_grass: (mainly for testing) None - calculate slope from elevation raster; filename - use
         instead of calculated aspect raster (points in degrees, east = 0, CCW). Must set slope and aspect.
-        :param forced_horizon_basefilename: (mainly for testing) None - calculate horizon from elevation raster;
+        :param forced_horizon_basefilename_grass: (mainly for testing) None - calculate horizon from elevation raster;
         filename - will have _<angle> appended before extension, angle = steps using horizon_step_degrees, (points in
         degrees, east = 0, CCW) - so e.g. horizon.tif becomes horizon_045.tif etc
         """
         use_flat_roof_aspects: bool = flat_roof_aspect_filename is not None
         use_elevation_override: bool = elevation_override_filename is not None
+        use_aspect_override: bool = forced_aspect_filename_compass is not None or forced_aspect_filename_grass is not None
+        use_compass_aspect_override: bool = forced_aspect_filename_compass is not None
+
         self.yearly_kwh_raster = None
         self.monthly_wh_rasters = None
         self.horizons = []
@@ -194,23 +200,25 @@ class PVMaps(GrassGISUser):
 
         self._create_temp_mapset()
         self._import_rasters(elevation_filename, mask_filename, flat_roof_aspect_filename, elevation_override_filename,
-                             forced_slope_filename, forced_aspect_filename, forced_horizon_basefilename)
+                             forced_slope_filename,
+                             forced_aspect_filename_compass, forced_aspect_filename_grass, forced_horizon_basefilename_grass)
 
-        if use_elevation_override and not forced_horizon_basefilename:
+        if use_elevation_override and not forced_horizon_basefilename_grass:
             self._set_region_to_and_zoom(ELEVATION)
             self.elevation = self._create_patched_elevation()
 
         self._mask_fix_nulls()
         self._set_region_to_and_zoom(MASK)
 
-        if not forced_horizon_basefilename:
+        if not forced_horizon_basefilename_grass:
             self._calc_horizons_p()
         self._ensure_horizon_ranges_p()
 
         self._set_mask()
-        if not (forced_slope_filename and forced_aspect_filename):
+        if not (forced_slope_filename and use_aspect_override):
             self._calc_slope_aspect()
         self._conv_flat_panel_aspects(use_flat_roof_aspects)
+        self._conv_aspect(use_compass_aspect_override)
         self._flat_panel_correction(use_flat_roof_aspects)
 
         self._pv_calcs_p()
@@ -322,8 +330,9 @@ class PVMaps(GrassGISUser):
                         flat_roof_aspect_filename: Optional[str],
                         elevation_override_filename: Optional[str],
                         forced_slope_filename: Optional[str],
-                        forced_aspect_filename: Optional[str],
-                        forced_horizon_basefilename: Optional[str]):
+                        forced_aspect_filename_compass: Optional[str],
+                        forced_aspect_filename_grass: Optional[str],
+                        forced_horizon_basefilename_grass: Optional[str]):
         rasters_to_import: List[Tuple[str, str]] = [
             (elevation_filename, ELEVATION),
             (mask_filename, MASK),
@@ -336,12 +345,16 @@ class PVMaps(GrassGISUser):
             rasters_to_import.append((elevation_override_filename, ELEVATION_OVERRIDE))
 
         ###
-        if forced_slope_filename and forced_aspect_filename:
+        if forced_slope_filename and (forced_aspect_filename_grass or forced_aspect_filename_compass):
             rasters_to_import.append((forced_slope_filename, SLOPE))
-            rasters_to_import.append((forced_aspect_filename, ASPECT_GRASS))
-        if forced_horizon_basefilename:
+            if forced_aspect_filename_compass:
+                rasters_to_import.append((forced_aspect_filename_compass, ASPECT_COMPASS))
+            elif forced_aspect_filename_grass:
+                rasters_to_import.append((forced_aspect_filename_grass, ASPECT_GRASS))
+
+        if forced_horizon_basefilename_grass:
             for grass_angle in range(0, 360, self._horizon_step):
-                h_parts: Tuple[str, str] = os.path.splitext(forced_horizon_basefilename)
+                h_parts: Tuple[str, str] = os.path.splitext(forced_horizon_basefilename_grass)
                 horizon_raster = f"{h_parts[0]}_{grass_angle:03d}{h_parts[1]}"
                 horizon_name = f"{HORIZON_BASENAME}_{grass_angle:03d}"
                 rasters_to_import.append((horizon_raster, horizon_name))
@@ -408,6 +421,11 @@ class PVMaps(GrassGISUser):
         if use_flat_roof_aspects:
             self._run_cmd(f'r.mapcalc '
                           f'expression="{FLAT_ROOF_ASPECT_GRASS} = if({FLAT_ROOF_ASPECT_COMPASS} == 0, 0, if({FLAT_ROOF_ASPECT_COMPASS} < 90, 90 - {FLAT_ROOF_ASPECT_COMPASS}, 450 - {FLAT_ROOF_ASPECT_COMPASS}))"')
+
+    def _conv_aspect(self, use_compass_aspect_override: bool):
+        if use_compass_aspect_override:
+            self._run_cmd(f'r.mapcalc '
+                          f'expression="{ASPECT_GRASS} = if({ASPECT_COMPASS} == 0, 0, if({ASPECT_COMPASS} < 90, 90 - {ASPECT_COMPASS}, 450 - {ASPECT_COMPASS}))"')
 
     def _flat_panel_correction(self, use_flat_roof_aspects: bool):
         logging.info("_flat_panel_correction")
@@ -605,7 +623,7 @@ if __name__ == '__main__':
             args.flat_roof_degrees_threshold,
             args.panel_type,
             args.num_pv_calcs_per_year)
-        pvmaps.create_pvmap(args.elevation_filename, args.mask_filename, None, None)
+        pvmaps.create_pvmap(args.elevation_filename, args.mask_filename)
     except Exception as e:
         logging.error(e)
         sys.exit(1)
