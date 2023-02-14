@@ -11,8 +11,10 @@ import albion_models.solar_pv.tables as tables
 from albion_models import paths, gdal_helpers
 from albion_models.db_funcs import sql_script, connection, \
     sql_command
+from albion_models.postgis import rasters_to_postgis, create_raster_table
 from albion_models.solar_pv.constants import FLAT_ROOF_DEGREES_THRESHOLD, SYSTEM_LOSS
 from albion_models.solar_pv.pvgis import pvmaps
+from albion_models.solar_pv.pvgis.aggregate_pixel_results import aggregate_pixel_results
 from albion_models.solar_pv.rasters import copy_rasters, \
     create_elevation_override_raster, generate_flat_roof_aspect_raster
 from albion_models.util import get_cpu_count
@@ -111,18 +113,17 @@ def pvgis(pg_uri: str,
 
     logging.info("Finished PVMAPS, loading into db...")
 
-    with connection(pg_uri) as pg_conn:
-        _write_results_to_db(
-            pg_conn=pg_conn,
-            job_id=job_id,
-            solar_dir=solar_dir,
-            resolution_metres=resolution_metres,
-            peak_power_per_m2=peak_power_per_m2,
-            yearly_kwh_raster=yearly_kwh_27700,
-            monthly_wh_rasters=monthly_wh_27700,
-            horizon_rasters=horizon_27700,
-            mask_raster=mask_27700,
-            debug_mode=debug_mode)
+    _write_results_to_db(
+        pg_uri=pg_uri,
+        job_id=job_id,
+        solar_dir=solar_dir,
+        resolution_metres=resolution_metres,
+        peak_power_per_m2=peak_power_per_m2,
+        yearly_kwh_raster=yearly_kwh_27700,
+        monthly_wh_rasters=monthly_wh_27700,
+        horizon_rasters=horizon_27700,
+        mask_raster=mask_27700,
+        debug_mode=debug_mode)
 
 
 def _generate_equal_sized_rasters(pvmaps_dir: str,
@@ -166,7 +167,7 @@ def _raster_value_transformer(data: List[float]) -> str:
     return ','.join(output_data)
 
 
-def _write_results_to_db(pg_conn,
+def _write_results_to_db(pg_uri: str,
                          job_id: int,
                          solar_dir: str,
                          resolution_metres: float,
@@ -180,53 +181,86 @@ def _write_results_to_db(pg_conn,
         raise ValueError(f"Expected 12 monthly rasters - got {len(monthly_wh_rasters)}")
 
     schema = tables.schema(job_id)
-    sql_command(
-        pg_conn,
-        """
-        DROP TABLE IF EXISTS {pixel_kwh};
-        CREATE TABLE {pixel_kwh} (
-            x double precision,
-            y double precision,
-            kwh real,
-            kwh_m01 real,
-            kwh_m02 real,
-            kwh_m03 real,
-            kwh_m04 real,
-            kwh_m05 real,
-            kwh_m06 real,
-            kwh_m07 real,
-            kwh_m08 real,
-            kwh_m09 real,
-            kwh_m10 real,
-            kwh_m11 real,
-            kwh_m12 real,
-            horizon real[],
-            PRIMARY KEY (x, y)
-        );
-        """,
-        pixel_kwh=Identifier(schema, tables.PIXEL_KWH_TABLE))
 
-    copy_rasters(
-        pg_conn, solar_dir,
-        [yearly_kwh_raster] + monthly_wh_rasters + horizon_rasters,
-        f"{schema}.{tables.PIXEL_KWH_TABLE}",
-        mask_raster,
-        value_transformer=_raster_value_transformer,
-        debug_mode=debug_mode)
+    # TODO copy to somewhere postgis can reach the file; remember to delete at the end
+    # TODO use constant for nodata val and tilesize
+    with connection(pg_uri) as pg_conn:
+        raster_tables = []
+        raster_table = f"{schema}.kwh_year"
+        create_raster_table(pg_conn, raster_table, drop=True)
+        errs = rasters_to_postgis(pg_conn, [yearly_kwh_raster], raster_table, solar_dir, 256, nodata_val=-9999, srid=27700)
+        raster_tables.append(raster_table)
 
-    sql_script(
-        pg_conn,
-        'pv/post-load.solar-pv.sql',
-        {"job_id": job_id,
-         "peak_power_per_m2": peak_power_per_m2},
-        pixel_kwh=Identifier(schema, tables.PIXEL_KWH_TABLE),
-        panel_kwh=Identifier(schema, "panel_kwh"),
-        pixels_in_panels=Identifier(schema, "pixels_in_panels"),
-        panel_polygons=Identifier(schema, tables.PANEL_POLYGON_TABLE),
-        pixels_in_roofs=Identifier(schema, "pixels_in_roofs"),
-        roof_horizons=Identifier(schema, "roof_horizons"),
-        roof_polygons=Identifier(schema, tables.ROOF_POLYGON_TABLE),
-        buildings=Identifier(schema, tables.BUILDINGS_TABLE),
-        job_view=Identifier(f"solar_pv_job_{job_id}"),
-        res=Literal(resolution_metres),
-        system_loss=Literal(SYSTEM_LOSS))
+        for i, raster in enumerate(monthly_wh_rasters):
+            raster_table = f"{schema}.month_{str(i + 1).zfill(2)}_wh"
+            create_raster_table(pg_conn, raster_table, drop=True)
+            errs += rasters_to_postgis(pg_conn, [raster], raster_table, solar_dir, 256, nodata_val=-9999, srid=27700)
+            raster_tables.append(raster_table)
+
+        for i, raster in enumerate(horizon_rasters):
+            raster_table = f"{schema}.horizon_{str(i).zfill(2)}"
+            create_raster_table(pg_conn, raster_table, drop=True)
+            errs += rasters_to_postgis(pg_conn, [raster], raster_table, solar_dir, 256, nodata_val=-9999, srid=27700)
+            raster_tables.append(raster_table)
+
+        if errs > 0:
+            raise ValueError("Failed to load at least one raster - see above")
+
+    aggregate_pixel_results(pg_uri=pg_uri,
+                            job_id=job_id,
+                            raster_tables=raster_tables,
+                            resolution=resolution_metres,
+                            peak_power_per_m2=peak_power_per_m2,
+                            system_loss=SYSTEM_LOSS)
+
+    # schema = tables.schema(job_id)
+    # sql_command(
+    #     pg_conn,
+    #     """
+    #     DROP TABLE IF EXISTS {pixel_kwh};
+    #     CREATE TABLE {pixel_kwh} (
+    #         x double precision,
+    #         y double precision,
+    #         kwh real,
+    #         kwh_m01 real,
+    #         kwh_m02 real,
+    #         kwh_m03 real,
+    #         kwh_m04 real,
+    #         kwh_m05 real,
+    #         kwh_m06 real,
+    #         kwh_m07 real,
+    #         kwh_m08 real,
+    #         kwh_m09 real,
+    #         kwh_m10 real,
+    #         kwh_m11 real,
+    #         kwh_m12 real,
+    #         horizon real[],
+    #         PRIMARY KEY (x, y)
+    #     );
+    #     """,
+    #     pixel_kwh=Identifier(schema, tables.PIXEL_KWH_TABLE))
+    #
+    # copy_rasters(
+    #     pg_conn, solar_dir,
+    #     [yearly_kwh_raster] + monthly_wh_rasters + horizon_rasters,
+    #     f"{schema}.{tables.PIXEL_KWH_TABLE}",
+    #     mask_raster,
+    #     value_transformer=_raster_value_transformer,
+    #     debug_mode=debug_mode)
+    #
+    # sql_script(
+    #     pg_conn,
+    #     'pv/post-load.solar-pv.sql',
+    #     {"job_id": job_id,
+    #      "peak_power_per_m2": peak_power_per_m2},
+    #     pixel_kwh=Identifier(schema, tables.PIXEL_KWH_TABLE),
+    #     panel_kwh=Identifier(schema, "panel_kwh"),
+    #     pixels_in_panels=Identifier(schema, "pixels_in_panels"),
+    #     panel_polygons=Identifier(schema, tables.PANEL_POLYGON_TABLE),
+    #     pixels_in_roofs=Identifier(schema, "pixels_in_roofs"),
+    #     roof_horizons=Identifier(schema, "roof_horizons"),
+    #     roof_polygons=Identifier(schema, tables.ROOF_POLYGON_TABLE),
+    #     buildings=Identifier(schema, tables.BUILDINGS_TABLE),
+    #     job_view=Identifier(f"solar_pv_job_{job_id}"),
+    #     res=Literal(resolution_metres),
+    #     system_loss=Literal(SYSTEM_LOSS))

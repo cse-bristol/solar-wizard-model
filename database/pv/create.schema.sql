@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS {buildings} AS
 SELECT
     toid,
     geom_27700,
+    -- For selecting a building 'moat' for detecting outdated LiDAR:
+    ST_Buffer(geom_27700, 5) AS geom_27700_buffered,
     NULL::models.pv_exclusion_reason AS exclusion_reason,
     NULL::real AS height
 FROM mastermap.building_27700 b
@@ -39,6 +41,7 @@ AND (NOT ST_Touches(ST_Centroid(b.geom_27700), q.bounds)
 
 CREATE UNIQUE INDEX IF NOT EXISTS buildings_toid_idx ON {buildings} (toid);
 CREATE INDEX IF NOT EXISTS buildings_geom_27700_idx ON {buildings} USING GIST (geom_27700);
+CREATE INDEX IF NOT EXISTS buildings_geom_27700_buffered_idx ON {buildings} USING GIST (geom_27700_buffered);
 
 --
 -- Create the table for storing roof planes:
@@ -79,3 +82,36 @@ CREATE TABLE IF NOT EXISTS {panel_polygons} (
 
 CREATE INDEX ON {panel_polygons} (roof_plane_id);
 CREATE INDEX ON {panel_polygons} USING GIST (panel_geom_27700);
+
+--
+-- elevation raster
+--
+CREATE TABLE IF NOT EXISTS {elevation} (
+    rid serial PRIMARY KEY,
+    rast raster NOT NULL,
+    filename text NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS elevation_idx ON {elevation} USING gist (st_convexhull(rast));
+
+--
+-- aspect raster
+--
+CREATE TABLE IF NOT EXISTS {aspect} (
+    rid serial PRIMARY KEY,
+    rast raster NOT NULL,
+    filename text NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS aspect_idx ON {aspect} USING gist (st_convexhull(rast));
+
+--
+-- mask raster
+--
+CREATE TABLE IF NOT EXISTS {mask} (
+    rid serial PRIMARY KEY,
+    rast raster NOT NULL,
+    filename text NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS mask_idx ON {mask} USING gist (st_convexhull(rast));

@@ -3,15 +3,16 @@ import time
 from collections import defaultdict
 
 import math
-from typing import List
+from typing import List, Dict
 import multiprocessing as mp
 
 from albion_models.db_funcs import count, connection, sql_command
 from albion_models.lidar.lidar import LIDAR_NODATA
+from albion_models.postgis import pixels_for_buildings
 from albion_models.solar_pv import tables
 
 from psycopg2.extras import DictCursor, execute_values
-from psycopg2.sql import SQL, Identifier
+from psycopg2.sql import SQL, Identifier, Literal
 import numpy as np
 
 from albion_models.solar_pv.constants import RANSAC_LARGE_BUILDING, \
@@ -94,9 +95,8 @@ def _ransac_building(pixels_in_building: List[dict],
                      toid: str,
                      resolution_metres: float,
                      debug: bool = False) -> List[dict]:
-    xyz = np.array([[pixel["easting"], pixel["northing"], pixel["elevation"]] for pixel in pixels_in_building])
+    xyz = np.array([[pixel["x"], pixel["y"], pixel["elevation"]] for pixel in pixels_in_building])
     aspect = np.array([pixel["aspect"] for pixel in pixels_in_building])
-    pixel_ids = np.array([pixel["pixel_id"] for pixel in pixels_in_building])
 
     if len(pixels_in_building) > RANSAC_LARGE_BUILDING / resolution_metres:
         max_trials = min(RANSAC_BASE_MAX_TRIALS + len(pixels_in_building) / resolution_metres,
@@ -142,7 +142,6 @@ def _ransac_building(pixels_in_building: List[dict],
                 "intercept": d,
                 "slope": _slope(a, b),
                 "aspect": _aspect(a, b),
-                "inliers": pixel_ids[inlier_mask],
                 "inliers_xy": XY[inlier_mask],
                 "sd": ransac.sd,
                 "aspect_circ_mean": ransac.plane_properties["aspect_circ_mean"],
@@ -151,7 +150,6 @@ def _ransac_building(pixels_in_building: List[dict],
 
             xyz = xyz[outlier_mask]
             aspect = aspect[outlier_mask]
-            pixel_ids = pixel_ids[outlier_mask]
         except RANSACValueError as e:
             if debug:
                 print("No plane found - received RANSACValueError:")
@@ -162,41 +160,16 @@ def _ransac_building(pixels_in_building: List[dict],
     return planes
 
 
-def _load(pg_uri: str, job_id: int, page: int, page_size: int):
+def _load(pg_uri: str, job_id: int, page: int, page_size: int, toids: List[str] = None) -> Dict[str, List[dict]]:
     """
     Load LIDAR pixel data for RANSAC processing. page_size is number of
     buildings rather than pixels to prevent splitting a building's pixels across
     pages.
     """
     with connection(pg_uri, cursor_factory=DictCursor) as pg_conn:
-        rows = sql_command(
-            pg_conn,
-            """
-            WITH building_page AS (
-                SELECT b.toid, b.geom_27700
-                FROM {buildings} b
-                WHERE b.exclusion_reason IS NULL
-                ORDER BY b.toid
-                OFFSET %(offset)s LIMIT %(limit)s
-            )
-            SELECT h.pixel_id, h.easting, h.northing, h.elevation, h.aspect, b.toid
-            FROM building_page b
-            LEFT JOIN {lidar_pixels} h ON h.toid = b.toid
-            WHERE h.elevation != %(lidar_nodata)s
-            ORDER BY b.toid;
-            """,
-            {
-                "offset": page * page_size,
-                "limit": page_size,
-                "lidar_nodata": LIDAR_NODATA,
-            },
-            lidar_pixels=Identifier(tables.schema(job_id), tables.LIDAR_PIXEL_TABLE),
-            buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
-            result_extractor=lambda res: res)
-
-        by_toid = defaultdict(list)
-        for row in rows:
-            by_toid[row['toid']].append(row)
+        elevation_table = f"{tables.schema(job_id)}.{tables.ELEVATION}"
+        aspect_table = f"{tables.schema(job_id)}.{tables.ASPECT}"
+        by_toid = pixels_for_buildings(pg_conn, job_id, page, page_size, [elevation_table, aspect_table], toids)
         return by_toid
 
 
@@ -213,41 +186,47 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[dict]):
     if len(planes) == 0:
         return
 
-    plane_inliers = []
     for plane in planes:
-        plane_inliers.append(plane['inliers'])
-        del plane['inliers']
         del plane['inliers_xy']
 
     with connection(pg_uri) as pg_conn, pg_conn.cursor() as cursor:
-        plane_ids = execute_values(cursor, SQL("""
-            INSERT INTO {roof_polygons} (toid, roof_geom_27700, x_coef, y_coef, 
-                                         intercept, slope, aspect, sd, is_flat, usable, 
-                                         easting, northing, raw_footprint, raw_area, archetype)
-            VALUES %s
-            RETURNING roof_plane_id;
+        execute_values(cursor, SQL("""
+            INSERT INTO {roof_polygons} (
+                toid, 
+                roof_geom_27700, 
+                x_coef, 
+                y_coef, 
+                intercept, 
+                slope, 
+                aspect, 
+                sd, 
+                is_flat, 
+                usable, 
+                easting, 
+                northing, 
+                raw_footprint, 
+                raw_area, 
+                archetype
+            ) VALUES %s;
         """).format(
             roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE),
-        ), argslist=planes, fetch=True,
-            template="(%(toid)s, %(roof_geom_27700)s, %(x_coef)s,"
-                     " %(y_coef)s, %(intercept)s, %(slope)s, %(aspect)s, %(sd)s, "
-                     " %(is_flat)s, %(usable)s, %(easting)s, %(northing)s, "
-                     " %(raw_footprint)s, %(raw_area)s, %(archetype)s)")
+        ), argslist=planes,
+           template="""(%(toid)s, 
+                        %(roof_geom_27700)s, 
+                        %(x_coef)s,
+                        %(y_coef)s, 
+                        %(intercept)s, 
+                        %(slope)s, 
+                        %(aspect)s, 
+                        %(sd)s, 
+                        %(is_flat)s, 
+                        %(usable)s, 
+                        %(easting)s, 
+                        %(northing)s, 
+                        %(raw_footprint)s, 
+                        %(raw_area)s, 
+                        %(archetype)s)""")
 
-        pixel_plane_data = []
-        for i in range(0, len(plane_ids)):
-            plane_id = plane_ids[i][0]
-            for pixel_id in plane_inliers[i]:
-                pixel_plane_data.append((int(pixel_id), plane_id))
-
-        execute_values(cursor, SQL("""
-            UPDATE {pixel_horizons}
-            SET roof_plane_id = data.roof_plane_id
-            FROM (VALUES %s) AS data (pixel_id, roof_plane_id)
-            WHERE {pixel_horizons}.pixel_id = data.pixel_id;
-        """).format(
-            pixel_horizons=Identifier(tables.schema(job_id), tables.LIDAR_PIXEL_TABLE),
-        ), argslist=pixel_plane_data)
         pg_conn.commit()
 
 

@@ -21,6 +21,21 @@ BUILDINGS_TABLE = 'buildings'
 SIMPLIFIED_BUILDING_GEOM_TABLE = 'simple_building_geoms'
 """Building geometries simplified for export to open_solar"""
 
+ELEVATION = 'elevation'
+"""Elevation raster for job"""
+
+ASPECT = 'aspect'
+"""Aspect raster for job"""
+
+MASK = 'mask'
+"""Mask raster for job"""
+
+MASKED_ELEVATION = 'masked_elevation'
+"""Masked elevation raster for job"""
+
+INVERSE_MASKED_ELEVATION = 'inverse_masked_elevation'
+"""Inverse masked elevation raster for job"""
+
 
 def schema(job_id: int) -> str:
     """Get the solar PV schema given a job_id."""

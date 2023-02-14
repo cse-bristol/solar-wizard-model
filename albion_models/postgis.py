@@ -1,14 +1,16 @@
 import logging
 
 import os
+from collections import defaultdict
 from os.path import join
 
-from psycopg2.sql import Identifier
+from psycopg2.sql import Identifier, SQL, Literal
 from typing import List, Dict
 
 from albion_models.db_funcs import sql_script, sql_command
 from albion_models.gdal_helpers import run
 from albion_models.lidar.lidar import LidarTile, Resolution
+from albion_models.solar_pv import tables
 
 
 def load_lidar(pg_conn, tiles: List[LidarTile], temp_dir: str):
@@ -37,15 +39,19 @@ def load_lidar(pg_conn, tiles: List[LidarTile], temp_dir: str):
     logging.info(f"LiDAR loaded, {errors} / {len(tiles)} ({error_pct}%) errored")
 
 
-def rasters_to_postgis(pg_conn, rasters: List[str], table: str, temp_dir: str, tile_size: int) -> int:
+def rasters_to_postgis(pg_conn, rasters: List[str], table: str, temp_dir: str, tile_size: int,
+                       nodata_val: int = None,
+                       srid: int = None) -> int:
     if len(rasters) == 0:
         return 0
 
     sql_file = join(temp_dir, "raster.sql")
     errors = 0
+    nodata = f'-N "{nodata_val}"' if nodata_val is not None else ''
+    srid = f'-s "{int(srid)}"' if srid is not None else ''
     for raster in rasters:
         try:
-            cmd = f"raster2pgsql -n filename -x -a -R -t {tile_size}x{tile_size} {raster} {table} > {sql_file}"
+            cmd = f'raster2pgsql -n filename {nodata} {srid} -x -a -R -t "{tile_size}x{tile_size}" "{raster}" "{table}" > {sql_file}'
             run(cmd)
             sql_script(pg_conn, sql_file)
         except Exception as e:
@@ -53,7 +59,7 @@ def rasters_to_postgis(pg_conn, rasters: List[str], table: str, temp_dir: str, t
             logging.warning("Failed to import raster", exc_info=e)
             errors += 1
 
-    _add_raster_constraints(pg_conn, table)
+    add_raster_constraints(pg_conn, table)
 
     try:
         os.remove(sql_file)
@@ -61,6 +67,26 @@ def rasters_to_postgis(pg_conn, rasters: List[str], table: str, temp_dir: str, t
         pass
 
     return errors
+
+
+def create_raster_table(pg_conn, raster_table: str, drop: bool = False) -> None:
+    schema, rtable = raster_table.split(".") if "." in raster_table else ("public", raster_table)
+    if drop:
+        sql_command(pg_conn, "DROP TABLE IF EXISTS {table}", table=Identifier(schema, rtable))
+
+    sql_command(
+        pg_conn,
+        """
+        CREATE TABLE IF NOT EXISTS {table} (
+            rid serial PRIMARY KEY,
+            rast raster NOT NULL,
+            filename text NOT NULL
+        );
+        
+        CREATE INDEX ON {table} USING gist (st_convexhull(rast));
+        """,
+        table=Identifier(schema, rtable)
+    )
 
 
 def _tiles_to_insert(pg_conn, paths: List[str], res: Resolution) -> List[str]:
@@ -118,10 +144,10 @@ def _has_raster_constraints(pg_conn, table: str) -> bool:
         """,
         bindings={"table": table,
                   "schema": schema},
-        result_extractor=lambda rows: rows[0][0])
+        result_extractor=lambda rows: rows[0][0] if len(rows) > 0 else False)
 
 
-def _add_raster_constraints(pg_conn, table: str):
+def add_raster_constraints(pg_conn, table: str):
     """
     Raster table constraints need to be added after there is some data in the
     table, as they're calculated from the existing files.
@@ -314,3 +340,71 @@ def raster_tile_coverage_count(pg_conn, job_id: int) -> int:
         result_extractor=lambda res: res[0][0])
 
     return count_2m + count_1m + count_50cm
+
+
+def pixels_for_buildings(pg_conn,
+                         job_id: int,
+                         page: int,
+                         page_size: int,
+                         raster_tables: List[str],
+                         toids: List[str] = None) -> Dict[str, List[dict]]:
+    """
+    Get a list of pixels by toid. Each pixel dict will have keys x, y, pixel_id and toid,
+    and one for each table in `raster_tables`, where the key will be the table name (without
+    schema).
+    """
+    if toids:
+        toid_filter = SQL("AND b.toid = ANY( {toids} )").format(toids=Literal(toids))
+    else:
+        toid_filter = SQL("")
+
+    by_pixel_id = {}
+
+    for raster_table in raster_tables:
+        schema, rtable = raster_table.split(".") if "." in raster_table else ("public", raster_table)
+        pixels = sql_command(
+            pg_conn,
+            """        
+            WITH building_page AS (
+                SELECT b.toid, b.geom_27700
+                FROM {buildings} b
+                WHERE b.exclusion_reason IS NULL
+                {toid_filter}
+                ORDER BY b.toid
+                OFFSET %(offset)s LIMIT %(limit)s
+            ),
+            raster_pixels AS (
+                SELECT
+                    b.toid,
+                    (ST_PixelAsCentroids(ST_Clip(rast, b.geom_27700))).*
+                FROM building_page b
+                LEFT JOIN {raster_table} r ON ST_Intersects(b.geom_27700, r.rast)
+            )
+            SELECT
+                toid || ':' || ST_X(geom)::text || ':' || ST_Y(geom)::text AS pixel_id,
+                val,
+                toid,
+                ST_X(geom) x,
+                ST_Y(geom) y
+            FROM raster_pixels;
+            """,
+            {
+                "offset": page * page_size,
+                "limit": page_size,
+            },
+            buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
+            raster_table=Identifier(schema, rtable),
+            toid_filter=toid_filter,
+            result_extractor=lambda rows: rows)
+
+        for pixel in pixels:
+            pixel_id = pixel['pixel_id']
+            if pixel_id not in by_pixel_id:
+                by_pixel_id[pixel_id] = dict(pixel)
+            by_pixel_id[pixel_id][rtable] = pixel['val']
+
+    by_toid = defaultdict(list)
+    for pixel in by_pixel_id.values():
+        del pixel['val']
+        by_toid[pixel['toid']].append(pixel)
+    return by_toid

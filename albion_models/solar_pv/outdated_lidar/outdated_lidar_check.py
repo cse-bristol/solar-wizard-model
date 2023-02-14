@@ -53,7 +53,7 @@ def check_lidar(pg_uri: str,
     logging.info(f"LiDAR coverage check complete")
 
 
-def _check_lidar_page(pg_uri: str, job_id: int, resolution_metres: float, page: int, page_size: int = 1000):
+def _check_lidar_page(pg_uri: str, job_id: int, resolution_metres: float, page: int, page_size: int):
     start_time = time.time()
     with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
         buildings = _load_buildings(pg_conn, job_id, page, page_size)
@@ -104,20 +104,69 @@ def _write_exclusions(pg_conn, job_id: int, to_exclude: List[Tuple[str, str, flo
         pg_conn.commit()
 
 
-def _load_buildings(pg_conn, job_id: int, page: int, page_size: int = 1000, toids: List[str] = None):
+def _load_pixels(pg_conn, job_id: int, interior: bool, page: int, page_size: int, toids: List[str] = None):
     if toids:
-        where_clause = SQL("WHERE b.toid = ANY( {toids} )") \
-            .format(toids=Literal(toids)) \
-            .as_string(pg_conn)
+        toid_filter = SQL("WHERE b.toid = ANY( {toids} )").format(toids=Literal(toids))
     else:
-        where_clause = ""
+        toid_filter = SQL("")
+
+    if interior:
+        raster_table = Identifier(tables.schema(job_id), tables.MASKED_ELEVATION)
+    else:
+        raster_table = Identifier(tables.schema(job_id), tables.INVERSE_MASKED_ELEVATION)
+
+    return sql_command(
+        pg_conn,
+        """        
+        WITH building_page AS (
+            SELECT b.toid, b.geom_27700, b.geom_27700_buffered
+            FROM {buildings} b
+            {toid_filter}
+            ORDER BY b.toid
+            OFFSET %(offset)s LIMIT %(limit)s
+        ),
+        raster_pixels AS (
+            SELECT
+                b.toid,
+                (ST_PixelAsCentroids(ST_Clip(rast, b.geom_27700_buffered))).*
+            FROM building_page b
+            LEFT JOIN {raster_table} r ON ST_Intersects(b.geom_27700_buffered, r.rast)
+        )
+        SELECT
+            ST_X(geom)::text || ':' || ST_Y(geom)::text AS pixel_id,
+            val AS elevation,
+            toid,
+            %(interior)s AS within_building,
+            %(exterior)s AS without_building,
+            ST_X(geom) x,
+            ST_Y(geom) y
+        FROM raster_pixels
+        ORDER BY toid;
+        """,
+        {
+            "offset": page * page_size,
+            "limit": page_size,
+            "interior": interior,
+            "exterior": not interior,
+        },
+        raster_table=raster_table,
+        buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
+        toid_filter=toid_filter,
+        result_extractor=lambda rows: [dict(row) for row in rows])
+
+
+def _load_buildings(pg_conn, job_id: int, page: int, page_size: int, toids: List[str] = None):
+    if toids:
+        toid_filter = SQL("WHERE b.toid = ANY({toids})").format(toids=Literal(toids))
+    else:
+        toid_filter = SQL("")
 
     buildings = sql_command(
         pg_conn,
         """
         SELECT b.toid, ST_AsText(b.geom_27700) AS geom
         FROM {buildings} b
-        """ + where_clause + """
+        {toid_filter}
         ORDER BY b.toid
         OFFSET %(offset)s LIMIT %(limit)s
         """,
@@ -126,46 +175,21 @@ def _load_buildings(pg_conn, job_id: int, page: int, page_size: int = 1000, toid
             "limit": page_size,
         },
         buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
+        toid_filter=toid_filter,
         result_extractor=lambda rows: [dict(row) for row in rows]
     )
 
-    pixels = sql_command(
-        pg_conn,
-        """
-        WITH building_page AS (
-            SELECT b.toid, b.geom_27700
-            FROM {buildings} b
-            """ + where_clause + """
-            ORDER BY b.toid
-            OFFSET %(offset)s LIMIT %(limit)s
-        )
-        SELECT
-            h.pixel_id,
-            h.elevation,
-            b.toid,
-            ST_Contains(b.geom_27700, h.en) AS within_building,
-            h.toid IS NULL AS without_building,
-            h.easting AS x,
-            h.northing AS y
-        FROM building_page b
-        LEFT JOIN {lidar_pixels} h ON ST_Contains(ST_Buffer(b.geom_27700, 5), h.en)
-        WHERE h.elevation != %(lidar_nodata)s
-        ORDER BY b.toid;
-        """,
-        {
-            "offset": page * page_size,
-            "limit": page_size,
-            "lidar_nodata": LIDAR_NODATA,
-        },
-        lidar_pixels=Identifier(tables.schema(job_id), tables.LIDAR_PIXEL_TABLE),
-        buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
-        result_extractor=lambda rows: [dict(row) for row in rows])
+    interior_pixels = _load_pixels(pg_conn, job_id, True, page, page_size, toids)
+    exterior_pixels = _load_pixels(pg_conn, job_id, False, page, page_size, toids)
 
     buildings_by_toid = {}
     for building in buildings:
         building['pixels'] = []
         buildings_by_toid[building['toid']] = building
-    for pixel in pixels:
+    for pixel in interior_pixels:
+        building = buildings_by_toid[pixel['toid']]
+        building['pixels'].append(pixel)
+    for pixel in exterior_pixels:
         building = buildings_by_toid[pixel['toid']]
         building['pixels'].append(pixel)
     return buildings

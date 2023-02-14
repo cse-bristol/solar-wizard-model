@@ -114,6 +114,7 @@ def rasterize(pg_uri: str, mask_sql: str, mask_file: str, res: float, srid: int)
         -burn 1 -tr {res} {res}
         -init 0 -ot Int16
         -of GTiff -a_srs EPSG:{srid}
+        -tap
         "PG:{pg_uri}"
         {mask_file}
         """)

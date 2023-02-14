@@ -14,7 +14,7 @@ from osgeo import ogr, gdal
 
 from albion_models.lidar.lidar import LIDAR_NODATA
 from albion_models.solar_pv import tables
-from albion_models.solar_pv.ransac.run_ransac import _ransac_building
+from albion_models.solar_pv.ransac.run_ransac import _ransac_building, _load
 
 
 def ransac_toid(pg_uri: str, job_id: int, toid: str, resolution_metres: float, out_dir: str, write_test_data: bool = True):
@@ -22,7 +22,7 @@ def ransac_toid(pg_uri: str, job_id: int, toid: str, resolution_metres: float, o
                         format='[%(asctime)s] %(levelname)s: %(message)s')
     os.makedirs(out_dir, exist_ok=True)
 
-    toid, building = _load_toid(pg_uri, job_id, toid)
+    toid, building = _load(pg_uri, job_id, page=0, page_size=1000, toids=[toid])
     planes = _ransac_building(building, toid, resolution_metres, debug=True)
 
     if len(planes) > 0:
@@ -158,32 +158,6 @@ def _write_test_data(toid, building):
         for pixel in building:
             f.write(f"{pixel['pixel_id']},{pixel['easting']},{pixel['northing']},{pixel['elevation']},{pixel['aspect']}\n")
     print(f"Wrote test data to {csv}")
-
-
-def _load_toid(pg_uri: str, job_id: int, toid: str):
-    """
-    Load LIDAR pixel data for RANSAC processing for a specific TOID.
-    """
-    with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
-        rows = sql_command(
-            pg_conn,
-            """
-            SELECT h.pixel_id, h.easting, h.northing, h.elevation, h.aspect, b.toid
-            FROM {buildings} b
-            LEFT JOIN {lidar_pixels} h ON h.toid = b.toid
-            WHERE h.elevation != %(lidar_nodata)s
-            AND b.toid = %(toid)s
-            ORDER BY b.toid;
-            """,
-            {
-                "toid": toid,
-                "lidar_nodata": LIDAR_NODATA,
-            },
-            lidar_pixels=Identifier(tables.schema(job_id), tables.LIDAR_PIXEL_TABLE),
-            buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
-            result_extractor=lambda res: res)
-
-        return toid, rows
 
 
 def thinness_ratio_experiments():
