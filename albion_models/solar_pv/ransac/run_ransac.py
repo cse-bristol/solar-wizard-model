@@ -1,22 +1,19 @@
 import logging
 import time
-from collections import defaultdict
-
 import math
 from typing import List, Dict
 import multiprocessing as mp
 
 from albion_models.db_funcs import count, connection, sql_command
-from albion_models.lidar.lidar import LIDAR_NODATA
 from albion_models.postgis import pixels_for_buildings
 from albion_models.solar_pv import tables
 
 from psycopg2.extras import DictCursor, execute_values
-from psycopg2.sql import SQL, Identifier, Literal
+from psycopg2.sql import SQL, Identifier
 import numpy as np
 
 from albion_models.solar_pv.constants import RANSAC_LARGE_BUILDING, \
-    RANSAC_BASE_MAX_TRIALS, RANSAC_ABS_MAX_TRIALS
+    RANSAC_BASE_MAX_TRIALS, RANSAC_ABS_MAX_TRIALS, FLAT_ROOF_DEGREES_THRESHOLD
 from albion_models.solar_pv.ransac.ransac import RANSACRegressorForLIDAR, _aspect, \
     _slope, RANSACValueError
 from albion_models.solar_pv.roof_polygons.roof_polygons import create_roof_polygons
@@ -120,9 +117,11 @@ def _ransac_building(pixels_in_building: List[dict],
         Z = xyz[:, 2]
         try:
             ransac = RANSACRegressorForLIDAR(residual_threshold=0.25,
+                                             flat_roof_residual_threshold=0.1,
                                              max_trials=max_trials,
                                              max_slope=75,
                                              min_slope=0,
+                                             flat_roof_threshold_degrees=FLAT_ROOF_DEGREES_THRESHOLD,
                                              min_points_per_plane=min_points_per_plane,
                                              resolution_metres=resolution_metres)
             ransac.fit(XY, Z,

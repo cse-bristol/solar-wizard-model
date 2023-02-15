@@ -31,6 +31,7 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
     def __init__(self, base_estimator=None, *,
                  min_samples=None,
                  residual_threshold=None,
+                 flat_roof_residual_threshold=None,
                  is_data_valid=None,
                  is_model_valid=None,
                  max_trials=100,
@@ -85,6 +86,7 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
         self.flat_roof_threshold_degrees = flat_roof_threshold_degrees
         self.max_aspect_circular_mean_degrees = max_aspect_circular_mean_degrees
         self.max_aspect_circular_sd = max_aspect_circular_sd
+        self.flat_roof_residual_threshold = flat_roof_residual_threshold
 
         self.sd = None
         self.plane_properties = {}
@@ -291,6 +293,11 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
                 if debug:
                     bad_sample_reasons["MIN_SLOPE"] += 1
                 continue
+
+            # RANSAC for LiDAR addition: use a more restrictive threshold for flat
+            # roofs, as they are more likely to be covered with obstacles, HVAC, pipes etc
+            if slope <= self.flat_roof_threshold_degrees:
+                residual_threshold = self.flat_roof_residual_threshold
 
             # check if estimated model is valid
             if (self.is_model_valid is not None and not

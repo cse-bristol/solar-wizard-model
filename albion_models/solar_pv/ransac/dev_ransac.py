@@ -4,16 +4,11 @@ from os.path import join
 
 import time
 
-from psycopg2.sql import Identifier
-
 from albion_models import paths
-from albion_models.db_funcs import connection, sql_command
 
-import psycopg2.extras
 from osgeo import ogr, gdal
 
 from albion_models.lidar.lidar import LIDAR_NODATA
-from albion_models.solar_pv import tables
 from albion_models.solar_pv.ransac.run_ransac import _ransac_building, _load
 
 
