@@ -66,7 +66,8 @@ RASTER_TABLES = ['kwh_year',
                  'horizon_35']
 
 
-def aggregate_toids_pixels(pg_uri: str, job_id: int, toids: List[str], write_test_data: bool):
+def aggregate_pixels(pg_uri: str, job_id: int, toids: List[str],
+                     write_test_data: bool = False, write_geojson: bool = False, out_dir: str = None):
     schema = tables.schema(job_id)
     raster_tables = [f"{schema}.{t}" for t in RASTER_TABLES]
     page = 0
@@ -77,9 +78,9 @@ def aggregate_toids_pixels(pg_uri: str, job_id: int, toids: List[str], write_tes
 
     with connection(pg_uri, cursor_factory=DictCursor) as pg_conn:
         print("loading data...")
-        all_panels = _load_panels(pg_conn, job_id, page, page_size)
-        all_roofs = _load_roof_planes(pg_conn, job_id, page, page_size)
-        all_pixels = pixels_for_buildings(pg_conn, job_id, page, page_size, raster_tables)
+        all_panels = _load_panels(pg_conn, job_id, page, page_size, toids=toids)
+        all_roofs = _load_roof_planes(pg_conn, job_id, page, page_size, toids=toids)
+        all_pixels = pixels_for_buildings(pg_conn, job_id, page, page_size, raster_tables, toids=toids)
         print("loaded data.")
         panels_to_write = []
         roofs_to_write = []
@@ -103,49 +104,11 @@ def aggregate_toids_pixels(pg_uri: str, job_id: int, toids: List[str], write_tes
                 print(json.dumps({'panels': toid_panels, 'pixels': all_pixels[toid], 'roofs': all_roofs[toid]}, sort_keys=True, default=str))
                 raise e
             if write_test_data:
-                print("Writing test data...")
-                _write_test_data(toid, {'panels': toid_panels, 'pixels': all_pixels[toid]})
+                print(f"Writing test data for TOID {toid}...")
+                _write_test_data(toid, {'panels': toid_panels, 'pixels': all_pixels[toid], 'roofs': all_roofs[toid]})
 
-
-def aggregate_job_pixels(pg_uri: str, job_id: int, out_dir: str, write_test_data: bool):
-    schema = tables.schema(job_id)
-    raster_tables = [f"{schema}.{t}" for t in RASTER_TABLES]
-    page = 0
-    page_size = 1000
-    resolution = 1.0
-    peak_power_per_m2 = 0.2
-    system_loss = SYSTEM_LOSS
-
-    with connection(pg_uri, cursor_factory=DictCursor) as pg_conn:
-        print("loading data...")
-        all_panels = _load_panels(pg_conn, job_id, page, page_size)
-        all_roofs = _load_roof_planes(pg_conn, job_id, page, page_size)
-        all_pixels = pixels_for_buildings(pg_conn, job_id, page, page_size, raster_tables)
-        print("loaded data.")
-        panels_to_write = []
-        roofs_to_write = []
-
-        for toid, toid_panels in all_panels.items():
-            try:
-                panels, roofs = _aggregate_pixel_data(
-                    panels=toid_panels,
-                    pixels=all_pixels[toid],
-                    roofs=all_roofs[toid],
-                    job_id=job_id,
-                    pixel_fields=[t.split(".")[1] for t in raster_tables],
-                    resolution=resolution,
-                    peak_power_per_m2=peak_power_per_m2,
-                    system_loss=system_loss,
-                    debug=True)
-                panels_to_write.extend(panels)
-                roofs_to_write.extend(roofs)
-            except Exception as e:
-                print(f"PVMAPS pixel data aggregation failed on building {toid}:")
-                print(json.dumps({'panels': toid_panels, 'pixels': all_pixels[toid], 'roofs': all_roofs[toid]}, sort_keys=True, default=str))
-                raise e
-
-        if write_test_data:
-            print("Writing test data...")
+        if write_geojson:
+            print("Writing whole job data...")
             t = int(time.time())
             _write_job_geojson(f"{job_id}_panels_{t}", out_dir, panels_to_write)
 
@@ -187,17 +150,17 @@ def _write_job_geojson(name: str, out_dir: str, to_write: List[dict]):
 
 if __name__ == "__main__":
 
-    # aggregate_toids_pixels(
-    #     "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion?application_name=blah",
-    #     1646,
-    #     [
-    #         "osgb1000014995063",
-    #     ],
-    #     write_test_data=True)
-
-    aggregate_job_pixels(
+    aggregate_pixels(
         "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion?application_name=blah",
-        1647,
-        "/home/neil/data/albion-models/pixel-agg",
-        write_test_data=True
-    )
+        1646,
+        [
+            "osgb1000014995063",
+        ],
+        write_test_data=True)
+
+    # aggregate_pixels(
+    #     "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion?application_name=blah",
+    #     1647,
+    #     out_dir="/home/neil/data/albion-models/pixel-agg",
+    #     write_job_geojson=True
+    # )

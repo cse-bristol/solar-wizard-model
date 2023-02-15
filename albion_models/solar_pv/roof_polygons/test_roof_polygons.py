@@ -58,7 +58,9 @@ def _create_polygons_using_test_data(toid: str,
         large_building_threshold=large_building_threshold,
         min_dist_to_edge_m=min_dist_to_edge_m,
         min_dist_to_edge_large_m=min_dist_to_edge_large_m,
-        resolution_metres=1.0)
+        resolution_metres=1.0,
+        panel_width_m=0.99,
+        panel_height_m=1.64)
     for plane in planes:
         if "roof_geom_27700" in plane:
             plane['roof_geom_27700'] = wkt.loads(plane['roof_geom_27700'])
