@@ -408,5 +408,7 @@ def pixels_for_buildings(pg_conn,
     by_toid = defaultdict(list)
     for pixel in by_pixel_id.values():
         del pixel['val']
-        by_toid[pixel['toid']].append(pixel)
+        # Only return pixels that have a value in every table:
+        if all(k in pixel for k in raster_tables):
+            by_toid[pixel['toid']].append(pixel)
     return by_toid
