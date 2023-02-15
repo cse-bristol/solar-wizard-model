@@ -323,9 +323,13 @@ def count_raster_pixels_pct(tiff: str, value, band: int = 1) -> float:
 def run(command: str):
     command = textwrap.dedent(command).replace("\n", " ").strip()
     res = subprocess.run(command, capture_output=True, text=True, shell=True)
-    print(res.stdout.strip())
+    stdout = res.stdout.strip()
+    if stdout:
+        print(stdout)
     if res.returncode != 0:
-        print(res.stderr.strip())
+        stderr = res.stderr.strip()
+        if stderr:
+            print(stderr)
         raise ValueError(res.stderr)
 
 
@@ -345,70 +349,6 @@ def check_raster_alignment(ds1, ds2) -> None:
         raise ValueError(f"rasters must be same alignment, were "
                          f"{(ulx, xres, xskew, uly, yskew, yres)} and "
                          f"{(_ulx, _xres, _xskew, _uly, _yskew, _yres)}")
-
-
-def rasters_to_csv(raster_files: List[str],
-                   csv_out: str,
-                   mask_raster: str = None,
-                   band: int = 1,
-                   mask_band: int = 1,
-                   mask_keep: int = 1,
-                   include_nans: bool = True,
-                   value_transformer: Callable[[List[float]], str] = None):
-    """
-    Adapted from https://github.com/postmates/gdal/blob/master/scripts/gdal2xyz.py
-    with the addition of an optional mask raster and ability to load multiple rasters
-    at once. All rasters (including mask) must have the same alignment.
-
-    mask_keep: if the mask raster has this value at index, it will write the row
-
-    include_nans: if true, will only check if the first raster has a NaN value, and
-    exclude the whole row if it does.
-    """
-
-    rasters = []
-    for raster_file in raster_files:
-        ds = gdal.Open(raster_file)
-        rasters.append({
-            "ds": ds,
-            "rb": ds.GetRasterBand(band),
-        })
-
-    ulx, xres, xskew, uly, yskew, yres = rasters[0]["ds"].GetGeoTransform()
-    x_size = rasters[0]["ds"].RasterXSize
-    y_size = rasters[0]["ds"].RasterYSize
-
-    for raster in rasters:
-        check_raster_alignment(rasters[0]["ds"], raster["ds"])
-
-    if mask_raster:
-        mask_ds = gdal.Open(mask_raster)
-        mb = mask_ds.GetRasterBand(mask_band)
-        check_raster_alignment(rasters[0]["ds"], mask_ds)
-
-    with open(csv_out, 'w') as f:
-        for y in range(y_size):
-            if mask_raster:
-                mask_data = mb.ReadAsArray(0, y, x_size, 1)
-                mask_data = np.reshape(mask_data, (x_size,))
-
-            all_data = []
-            for raster in rasters:
-                data = raster["rb"].ReadAsArray(0, y, x_size, 1)
-                all_data.append(np.reshape(data, (x_size,)))
-
-            for x in range(0, x_size):
-                if (not mask_raster or int(mask_data[x]) == mask_keep) \
-                        and (include_nans or not np.isnan(all_data[0][x])):
-                    geo_x = ulx + (x + 0.5) * xres + (y + 0.5) * xskew
-                    geo_y = uly + (x + 0.5) * yskew + (y + 0.5) * yres
-                    f.write(f"{float(geo_x)},{float(geo_y)},")
-                    if not value_transformer:
-                        vals = ','.join([f"{float(data[x]):.2f}" for data in all_data])
-                    else:
-                        vals = value_transformer([float(data[x]) for data in all_data])
-                    f.write(vals)
-                    f.write("\n")
 
 
 if __name__ == '__main__':

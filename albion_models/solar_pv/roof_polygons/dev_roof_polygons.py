@@ -17,14 +17,14 @@ from albion_models.solar_pv import tables
 from albion_models.solar_pv.roof_polygons.roof_polygons import _building_geoms, \
     _create_roof_polygons, _to_test_data
 
-_MAX_ROOF_SLOPE_DEGREES = 80
+_MAX_ROOF_SLOPE_DEGREES = 70
 _MIN_ROOF_AREA_M = 8
 _MIN_ROOF_DEGREES_FROM_NORTH = 45
 _FLAT_ROOF_DEGREES = 10
 _LARGE_BUILDING_THRESHOLD = 200
-_MIN_DIST_TO_EDGE_M = 0.3
+_MIN_DIST_TO_EDGE_M = 0.4
 _MIN_DIST_TO_EDGE_LARGE_M = 1
-_PANEL_W_M = 0.9
+_PANEL_W_M = 0.99
 _PANEL_H_M = 1.64
 
 
@@ -145,7 +145,7 @@ def _load_toid_planes(pg_uri: str, job_id: int, toid: str):
         planes = sql_command(
             pg_conn,
             """
-            SELECT toid, roof_plane_id, slope, aspect 
+            SELECT toid, roof_plane_id, slope, aspect, inliers_xy
             FROM {roof_polygons} 
             WHERE toid = %(toid)s
             ORDER BY roof_plane_id
@@ -154,24 +154,6 @@ def _load_toid_planes(pg_uri: str, job_id: int, toid: str):
             roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE),
             result_extractor=lambda res: [dict(row) for row in res])
 
-        pixels = sql_command(
-            pg_conn,
-            """
-            SELECT roof_plane_id, easting, northing 
-            FROM {lidar_pixels} 
-            WHERE toid = %(toid)s AND roof_plane_id IS NOT NULL
-            """,
-            {"toid": toid},
-            lidar_pixels=Identifier(tables.schema(job_id), tables.LIDAR_PIXEL_TABLE),
-            result_extractor=lambda res: res)
-
-        by_id = {}
-        for plane in planes:
-            plane['inliers_xy'] = []
-            by_id[plane['roof_plane_id']] = plane
-        for pixel in pixels:
-            roof_plane_id = pixel['roof_plane_id']
-            by_id[roof_plane_id]['inliers_xy'].append([pixel['easting'], pixel['northing']])
         for plane in planes:
             plane['inliers_xy'] = np.array(plane['inliers_xy'])
         return planes
@@ -190,15 +172,15 @@ if __name__ == "__main__":
     #     1.0,
     #     roof_polys_dir)
 
-    make_job_roof_polygons(
+    # make_job_roof_polygons(
+    #     "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion?application_name=blah",
+    #     1648,
+    #     1.0,
+    #     "/home/neil/data/albion-models/roof-polys")
+
+    make_roof_polygons(
         "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion?application_name=blah",
-        1643,
+        1648,
+        "osgb1000014916349",
         1.0,
         "/home/neil/data/albion-models/roof-polys")
-
-    # make_roof_polygons(
-    #     "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion?application_name=blah",
-    #     1627,
-    #     "osgb1000000137769485",
-    #     1.0,
-    #     roof_polys_dir,)

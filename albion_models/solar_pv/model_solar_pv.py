@@ -19,6 +19,7 @@ from albion_models.solar_pv.rasters import generate_rasters
 
 def model_solar_pv(pg_uri: str,
                    root_solar_dir: str,
+                   lidar_dir: str,
                    job_id: int,
                    horizon_search_radius: int,
                    horizon_slices: int,
@@ -57,10 +58,14 @@ def model_solar_pv(pg_uri: str,
     if _skip(pg_uri, job_id):
         return
 
+    job_lidar_dir = join(lidar_dir, f"job_{job_id}")
+    os.makedirs(job_lidar_dir, exist_ok=True)
+
     logging.info("Generating and loading rasters...")
     elevation_raster_27700, mask_raster_27700, slope_raster_27700, aspect_raster_27700, res = generate_rasters(
         pg_uri=pg_uri,
         job_id=job_id,
+        job_lidar_dir=job_lidar_dir,
         solar_dir=solar_dir,
         horizon_search_radius=horizon_search_radius,
         debug_mode=debug_mode)
@@ -94,6 +99,7 @@ def model_solar_pv(pg_uri: str,
     pvgis(pg_uri=pg_uri,
           job_id=job_id,
           solar_dir=solar_dir,
+          job_lidar_dir=job_lidar_dir,
           resolution_metres=res,
           pv_tech=pv_tech,
           horizon_search_radius=horizon_search_radius,
@@ -111,6 +117,8 @@ def model_solar_pv(pg_uri: str,
         shutil.rmtree(solar_dir)
         logging.info("Dropping schema...")
         _drop_schema(pg_uri, job_id)
+        logging.info("Removing job LiDAR dir...")
+        shutil.rmtree(job_lidar_dir)
     else:
         logging.info("Debug mode: not removing temp dir or dropping schema.")
 

@@ -27,19 +27,20 @@ def load_lidar(pg_conn, tiles: List[LidarTile], temp_dir: str):
     # This is relied on by functionality in the lidar coverage model and the lidar
     # tile preparation for the heat demand model
     r = _tiles_to_insert(pg_conn, tiles_by_res[Resolution.R_50CM], Resolution.R_50CM)
-    errors += rasters_to_postgis(pg_conn, r, "models.lidar_50cm", temp_dir, tile_size=1000)
+    errors += rasters_to_postgis(pg_conn, r, "models.lidar_50cm", temp_dir, tile_size=1000, allow_errs=True)
 
     r = _tiles_to_insert(pg_conn, tiles_by_res[Resolution.R_1M], Resolution.R_1M)
-    errors += rasters_to_postgis(pg_conn, r, "models.lidar_1m", temp_dir, tile_size=500)
+    errors += rasters_to_postgis(pg_conn, r, "models.lidar_1m", temp_dir, tile_size=500, allow_errs=True)
 
     r = _tiles_to_insert(pg_conn, tiles_by_res[Resolution.R_2M], Resolution.R_2M)
-    errors += rasters_to_postgis(pg_conn, r, "models.lidar_2m", temp_dir, tile_size=250)
+    errors += rasters_to_postgis(pg_conn, r, "models.lidar_2m", temp_dir, tile_size=250, allow_errs=True)
 
     error_pct = round(errors / len(tiles) * 100, 2)
     logging.info(f"LiDAR loaded, {errors} / {len(tiles)} ({error_pct}%) errored")
 
 
 def rasters_to_postgis(pg_conn, rasters: List[str], table: str, temp_dir: str, tile_size: int,
+                       allow_errs: bool = False,
                        nodata_val: int = None,
                        srid: int = None) -> int:
     if len(rasters) == 0:
@@ -58,6 +59,8 @@ def rasters_to_postgis(pg_conn, rasters: List[str], table: str, temp_dir: str, t
             pg_conn.rollback()
             logging.warning("Failed to import raster", exc_info=e)
             errors += 1
+            if not allow_errs:
+                raise e
 
     add_raster_constraints(pg_conn, table)
 
@@ -153,7 +156,6 @@ def add_raster_constraints(pg_conn, table: str):
     table, as they're calculated from the existing files.
     """
     if not _has_raster_constraints(pg_conn, table):
-        logging.info(f"No raster constraints detected for {table}, adding them")
         schema, table = tuple(table.split('.')) if "." in table else (None, table)
         sql_command(
             pg_conn,

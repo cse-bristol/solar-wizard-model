@@ -240,6 +240,7 @@ def _handle_job(pg_conn, job: dict) -> bool:
             model_solar_pv(
                 pg_uri=pg_uri,
                 root_solar_dir=os.environ.get("SOLAR_DIR"),
+                lidar_dir=os.environ.get("LIDAR_DIR"),
                 job_id=job_id,
                 horizon_search_radius=horizon_search_radius,
                 horizon_slices=horizon_slices,

@@ -10,9 +10,11 @@ import albion_models.solar_pv.tables as tables
 import psycopg2.extras
 from albion_models import gdal_helpers
 from albion_models.db_funcs import sql_script, copy_csv, count, connection, sql_command
+from albion_models.lidar.lidar import LIDAR_NODATA
 from albion_models.postgis import get_merged_lidar_tiles, rasters_to_postgis, \
     add_raster_constraints
 from albion_models.solar_pv import mask
+from albion_models.solar_pv.constants import POSTGIS_TILESIZE
 from albion_models.solar_pv.raster_names import MASK_27700_BUF1_TIF, MASK_27700_BUF0_TIF, ELEVATION_27700_TIF, SLOPE_27700_TIF, \
     ASPECT_27700_TIF
 from albion_models.solar_pv.roof_polygons.roof_polygons import get_flat_roof_aspect_sql, create_flat_roof_aspect, \
@@ -22,6 +24,7 @@ from albion_models.transformations import _7_PARAM_SHIFT
 
 def generate_rasters(pg_uri: str,
                      job_id: int,
+                     job_lidar_dir: str,
                      solar_dir: str,
                      horizon_search_radius: int,
                      debug_mode: bool = False) -> Tuple[str, str, str, str, float]:
@@ -94,8 +97,7 @@ def generate_rasters(pg_uri: str,
         solar_dir, srid, elevation_raster, mask_raster_buf1, mask_raster_buf0, slope_raster, aspect_raster)
 
     logging.info("Loading raster data...")
-    _load_rasters_to_db(pg_uri, job_id, srid, res, solar_dir, elevation_raster,
-                        aspect_raster, slope_raster, mask_raster_buf0, debug_mode)
+    _load_rasters_to_db(pg_uri, job_id, job_lidar_dir, solar_dir, elevation_raster, aspect_raster, mask_raster_buf0)
 
     return elevation_raster, mask_raster_buf1, slope_raster, aspect_raster, res
 
@@ -145,16 +147,19 @@ def _get_dst_srs_for_reproject(src_srid: int) -> str:
     return dst_srs
 
 
+def _copy_to_dir(src: str, dst_dir: str):
+    dst_filepath = join(dst_dir, os.path.basename(src))
+    shutil.copyfile(src, dst_filepath)
+    return dst_filepath
+
+
 def _load_rasters_to_db(pg_uri: str,
                         job_id: int,
-                        srid: int,
-                        res: float,
+                        job_lidar_dir: str,
                         solar_dir: str,
                         cropped_lidar: str,
                         aspect_raster: str,
-                        slope_raster: str,
-                        mask_raster: str,
-                        debug_mode: bool):
+                        mask_raster: str):
     with connection(pg_uri) as pg_conn:
         elevation_table = f"{tables.schema(job_id)}.{tables.ELEVATION}"
         aspect_table = f"{tables.schema(job_id)}.{tables.ASPECT}"
@@ -162,20 +167,17 @@ def _load_rasters_to_db(pg_uri: str,
         masked_elevation_table = f"{tables.schema(job_id)}.{tables.MASKED_ELEVATION}"
         inverse_masked_elevation_table = f"{tables.schema(job_id)}.{tables.INVERSE_MASKED_ELEVATION}"
 
-        # TODO copy to somewhere postgis can reach the file; remember to delete at the end
-        # TODO use constant for nodata val
-        errs = rasters_to_postgis(pg_conn, [cropped_lidar], elevation_table, solar_dir, 256, nodata_val=-9999)
-        errs += rasters_to_postgis(pg_conn, [aspect_raster], aspect_table, solar_dir, 256, nodata_val=-9999)
-        errs += rasters_to_postgis(pg_conn, [mask_raster], mask_table, solar_dir, 256, nodata_val=0)
+        (cropped_lidar, aspect_raster, mask_raster) = [_copy_to_dir(r, job_lidar_dir) for r in (cropped_lidar, aspect_raster, mask_raster)]
 
-        if errs > 0:
-            raise ValueError("Failed to load at least one raster - see above")
+        rasters_to_postgis(pg_conn, [cropped_lidar], elevation_table, solar_dir, POSTGIS_TILESIZE, nodata_val=LIDAR_NODATA)
+        rasters_to_postgis(pg_conn, [aspect_raster], aspect_table, solar_dir, POSTGIS_TILESIZE, nodata_val=LIDAR_NODATA)
+        rasters_to_postgis(pg_conn, [mask_raster], mask_table, solar_dir, POSTGIS_TILESIZE, nodata_val=0)
 
         sql_command(
             pg_conn,
             """
             CREATE TABLE IF NOT EXISTS {masked_elevation} AS 
-            SELECT ST_MapAlgebra(e.rast, m.rast, '[rast1.val]', '32BF', 'INTERSECTION', '-9999', '-9999', -9999) rast
+            SELECT ST_MapAlgebra(e.rast, m.rast, '[rast1.val]', '32BF', 'INTERSECTION', %(nodata_str)s, %(nodata_str)s, %(nodata)s ) rast
             FROM {elevation} e
             LEFT JOIN {mask} m
             ON ST_Intersects(e.rast, m.rast);
@@ -183,13 +185,14 @@ def _load_rasters_to_db(pg_uri: str,
             CREATE INDEX IF NOT EXISTS masked_elevation_idx ON {masked_elevation} USING gist (st_convexhull(rast));
             
             CREATE TABLE IF NOT EXISTS {inverse_masked_elevation} AS 
-            SELECT ST_MapAlgebra(e.rast, m.rast, '-9999', '32BF', 'INTERSECTION', '-9999', '[rast1.val]', -9999) rast
+            SELECT ST_MapAlgebra(e.rast, m.rast, %(nodata_str)s, '32BF', 'INTERSECTION', %(nodata_str)s, '[rast1.val]', %(nodata)s ) rast
             FROM {elevation} e
             LEFT JOIN {mask} m
             ON ST_Intersects(e.rast, m.rast);
             
             CREATE INDEX IF NOT EXISTS inverse_masked_elevation_idx ON {inverse_masked_elevation} USING gist (st_convexhull(rast));
             """,
+            {'nodata': LIDAR_NODATA, 'nodata_str': str(LIDAR_NODATA)},
             elevation=Identifier(tables.schema(job_id), tables.ELEVATION),
             mask=Identifier(tables.schema(job_id), tables.MASK),
             masked_elevation=Identifier(tables.schema(job_id), tables.MASKED_ELEVATION),
@@ -198,53 +201,6 @@ def _load_rasters_to_db(pg_uri: str,
 
         add_raster_constraints(pg_conn, masked_elevation_table)
         add_raster_constraints(pg_conn, inverse_masked_elevation_table)
-
-        # schema = tables.schema(job_id)
-        # lidar_pixels_table = tables.LIDAR_PIXEL_TABLE
-        #
-        # sql_script(
-        #     pg_conn, 'pv/create.lidar-pixels.sql',
-        #     lidar_pixels=Identifier(schema, lidar_pixels_table),
-        # )
-        #
-        # copy_rasters(pg_conn, solar_dir,
-        #              rasters=[cropped_lidar, aspect_raster, slope_raster],
-        #              table=f"{schema}.{lidar_pixels_table}",
-        #              mask_raster=mask_raster,
-        #              include_nans=False,
-        #              debug_mode=debug_mode)
-        #
-        # sql_script(
-        #     pg_conn, 'pv/post-load.lidar-pixels.sql',
-        #     schema=Identifier(schema),
-        #     lidar_pixels=Identifier(schema, lidar_pixels_table),
-        #     buildings=Identifier(schema, tables.BUILDINGS_TABLE),
-        #     srid=Literal(srid),
-        #     res=Literal(res),
-        # )
-
-
-def copy_rasters(pg_conn,
-                 solar_dir: str,
-                 rasters: List[str],
-                 table: str,
-                 mask_raster: str = None,
-                 include_nans: bool = True,
-                 value_transformer: Callable[[List[float]], str] = None,
-                 debug_mode: bool = False,):
-    csv_file = join(solar_dir, f'temp-{table}.csv')
-    gdal_helpers.rasters_to_csv(
-        raster_files=rasters,
-        csv_out=csv_file,
-        mask_raster=mask_raster,
-        include_nans=include_nans,
-        value_transformer=value_transformer)
-    copy_csv(pg_conn, csv_file, table)
-    if not debug_mode:
-        try:
-            os.remove(csv_file)
-        except OSError:
-            pass
 
 
 def generate_flat_roof_aspect_raster(pg_uri: str,

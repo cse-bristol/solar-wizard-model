@@ -187,7 +187,7 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[dict]):
         return
 
     for plane in planes:
-        del plane['inliers_xy']
+        plane['inliers_xy'] = plane['inliers_xy'].tolist()
 
     with connection(pg_uri) as pg_conn, pg_conn.cursor() as cursor:
         execute_values(cursor, SQL("""
@@ -206,7 +206,8 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[dict]):
                 northing, 
                 raw_footprint, 
                 raw_area, 
-                archetype
+                archetype,
+                inliers_xy
             ) VALUES %s;
         """).format(
             roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE),
@@ -225,7 +226,8 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[dict]):
                         %(northing)s, 
                         %(raw_footprint)s, 
                         %(raw_area)s, 
-                        %(archetype)s)""")
+                        %(archetype)s,
+                        %(inliers_xy)s )""")
 
         pg_conn.commit()
 

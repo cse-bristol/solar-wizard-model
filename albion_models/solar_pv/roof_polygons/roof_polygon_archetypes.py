@@ -219,7 +219,7 @@ def _weighted_pct_sym_difference(p1: Polygon, p2: Polygon, w1: float, w2: float)
 # Various magic numbers reached via trial and error:
 
 # Don't use an archetype that is this much bigger or smaller than the roof polygon:
-_MAX_ABS_AREA_DIFF = 3.0
+_MAX_ABS_AREA_DIFF = 4.0
 # Don't use an archetype whose weighted symmetric % difference from the roof polygon is >= this:
 _MIN_PCT_AREA_DIFF = 0.68
 # weight for parts of roof_poly that do not intersect archetype (not such a problem - bits of

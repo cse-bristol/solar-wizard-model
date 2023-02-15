@@ -1,22 +1,21 @@
 import logging
-from calendar import mdays
+import shutil
 from os.path import join
 from typing import List, Optional
 
 import os
 
-from psycopg2.sql import Identifier, Literal
 
 import albion_models.solar_pv.tables as tables
 from albion_models import paths, gdal_helpers
-from albion_models.db_funcs import sql_script, connection, \
-    sql_command
+from albion_models.db_funcs import connection
+from albion_models.lidar.lidar import LIDAR_NODATA
 from albion_models.postgis import rasters_to_postgis, create_raster_table
-from albion_models.solar_pv.constants import FLAT_ROOF_DEGREES_THRESHOLD, SYSTEM_LOSS
+from albion_models.solar_pv.constants import FLAT_ROOF_DEGREES_THRESHOLD, SYSTEM_LOSS, \
+    POSTGIS_TILESIZE
 from albion_models.solar_pv.pvgis import pvmaps
 from albion_models.solar_pv.pvgis.aggregate_pixel_results import aggregate_pixel_results
-from albion_models.solar_pv.rasters import copy_rasters, \
-    create_elevation_override_raster, generate_flat_roof_aspect_raster
+from albion_models.solar_pv.rasters import create_elevation_override_raster, generate_flat_roof_aspect_raster
 from albion_models.util import get_cpu_count
 
 
@@ -28,6 +27,7 @@ def _pvmaps_cpu_count():
 def pvgis(pg_uri: str,
           job_id: int,
           solar_dir: str,
+          job_lidar_dir: str,
           resolution_metres: float,
           pv_tech: str,
           horizon_search_radius: int,
@@ -46,9 +46,6 @@ def pvgis(pg_uri: str,
         panel_type = pvmaps.CDTE
     else:
         raise ValueError(f"Unsupported panel type '{pv_tech}' for PVMAPS")
-
-    pvmaps_dir = join(solar_dir, "pvmaps")
-    os.makedirs(pvmaps_dir, exist_ok=True)
 
     # GRASS needs the user to have a home directory that exists
     # (not always the case for prod deployments in containers):
@@ -81,7 +78,7 @@ def pvgis(pg_uri: str,
     pvm = pvmaps.PVMaps(
         grass_dbase_dir=os.environ.get("PVGIS_GRASS_DBASE_DIR", None),
         input_dir=solar_dir,
-        output_dir=pvmaps_dir,
+        output_dir=job_lidar_dir,
         pvgis_data_tar_file=join(os.environ.get("PVGIS_DATA_TAR_FILE_DIR", None), "pvgis_data.tar"),
         pv_model_coeff_file_dir=paths.RESOURCES_DIR,
         keep_temp_mapset=debug_mode,
@@ -108,8 +105,8 @@ def pvgis(pg_uri: str,
     # horizons are CCW from East
     horizon_rasters = pvm.horizons
 
-    yearly_kwh_27700, mask_27700, monthly_wh_27700, horizon_27700 = _generate_equal_sized_rasters(
-        pvmaps_dir, yearly_kwh_raster, mask_raster, monthly_wh_rasters, horizon_rasters)
+    # yearly_kwh_27700, mask_27700, monthly_wh_27700, horizon_27700 = _generate_equal_sized_rasters(
+    #     job_lidar_dir, yearly_kwh_raster, mask_raster, monthly_wh_rasters, horizon_rasters)
 
     logging.info("Finished PVMAPS, loading into db...")
 
@@ -119,14 +116,12 @@ def pvgis(pg_uri: str,
         solar_dir=solar_dir,
         resolution_metres=resolution_metres,
         peak_power_per_m2=peak_power_per_m2,
-        yearly_kwh_raster=yearly_kwh_27700,
-        monthly_wh_rasters=monthly_wh_27700,
-        horizon_rasters=horizon_27700,
-        mask_raster=mask_27700,
-        debug_mode=debug_mode)
+        yearly_kwh_raster=yearly_kwh_raster,
+        monthly_wh_rasters=monthly_wh_rasters,
+        horizon_rasters=horizon_rasters)
 
 
-def _generate_equal_sized_rasters(pvmaps_dir: str,
+def _generate_equal_sized_rasters(job_lidar_dir: str,
                                   yearly_kwh_raster: str,
                                   mask_raster: str,
                                   monthly_wh_rasters: List[str],
@@ -136,35 +131,19 @@ def _generate_equal_sized_rasters(pvmaps_dir: str,
     if len(monthly_wh_rasters) != 12:
         raise ValueError(f"Expected 12 monthly rasters - got {len(monthly_wh_rasters)}")
 
-    yearly_kwh_27700 = join(pvmaps_dir, "kwh_year_27700.tif")
+    yearly_kwh_27700 = join(job_lidar_dir, "kwh_year_27700.tif")
 
     gdal_helpers.crop_or_expand(yearly_kwh_raster, mask_raster, yearly_kwh_27700, True)
 
-    monthly_wh_27700 = [join(pvmaps_dir, f"wh_m{str(i).zfill(2)}_27700.tif") for i in range(1, 13)]
+    monthly_wh_27700 = [join(job_lidar_dir, f"wh_m{str(i).zfill(2)}_27700.tif") for i in range(1, 13)]
     for r_in, r_out in zip(monthly_wh_rasters, monthly_wh_27700):
         gdal_helpers.crop_or_expand(r_in, mask_raster, r_out, True)
 
-    horizon_27700 = [join(pvmaps_dir, f"horizon_{str(i).zfill(2)}_27700.tif") for i, _ in enumerate(horizon_rasters)]
+    horizon_27700 = [join(job_lidar_dir, f"horizon_{str(i).zfill(2)}_27700.tif") for i, _ in enumerate(horizon_rasters)]
     for r_in, r_out in zip(horizon_rasters, horizon_27700):
         gdal_helpers.crop_or_expand(r_in, mask_raster, r_out, True)
 
     return yearly_kwh_27700, mask_raster, monthly_wh_27700, horizon_27700
-
-
-def _raster_value_transformer(data: List[float]) -> str:
-    kwh_year = data[0]
-    wh_month = data[1:13]
-    horizons = data[13:]
-
-    output_data = [f"{kwh_year:.2f}"]
-    for i, wh_monthday in enumerate(wh_month):
-        kwh_month = wh_monthday * 0.001 * mdays[i + 1]
-        output_data.append(f"{kwh_month:.2f}")
-
-    horizon_array = '"{' + ','.join([f"{val:.2f}" for val in horizons]) + '}"'
-    output_data.append(horizon_array)
-
-    return ','.join(output_data)
 
 
 def _write_results_to_db(pg_uri: str,
@@ -174,37 +153,31 @@ def _write_results_to_db(pg_uri: str,
                          peak_power_per_m2: float,
                          yearly_kwh_raster: str,
                          monthly_wh_rasters: List[str],
-                         horizon_rasters: List[str],
-                         mask_raster: str,
-                         debug_mode: bool):
+                         horizon_rasters: List[str]):
     if len(monthly_wh_rasters) != 12:
         raise ValueError(f"Expected 12 monthly rasters - got {len(monthly_wh_rasters)}")
 
     schema = tables.schema(job_id)
 
-    # TODO copy to somewhere postgis can reach the file; remember to delete at the end
-    # TODO use constant for nodata val and tilesize
     with connection(pg_uri) as pg_conn:
         raster_tables = []
         raster_table = f"{schema}.kwh_year"
+
         create_raster_table(pg_conn, raster_table, drop=True)
-        errs = rasters_to_postgis(pg_conn, [yearly_kwh_raster], raster_table, solar_dir, 256, nodata_val=-9999, srid=27700)
+        rasters_to_postgis(pg_conn, [yearly_kwh_raster], raster_table, solar_dir, POSTGIS_TILESIZE, nodata_val=LIDAR_NODATA, srid=27700)
         raster_tables.append(raster_table)
 
         for i, raster in enumerate(monthly_wh_rasters):
             raster_table = f"{schema}.month_{str(i + 1).zfill(2)}_wh"
             create_raster_table(pg_conn, raster_table, drop=True)
-            errs += rasters_to_postgis(pg_conn, [raster], raster_table, solar_dir, 256, nodata_val=-9999, srid=27700)
+            rasters_to_postgis(pg_conn, [raster], raster_table, solar_dir, POSTGIS_TILESIZE, nodata_val=LIDAR_NODATA, srid=27700)
             raster_tables.append(raster_table)
 
         for i, raster in enumerate(horizon_rasters):
             raster_table = f"{schema}.horizon_{str(i).zfill(2)}"
             create_raster_table(pg_conn, raster_table, drop=True)
-            errs += rasters_to_postgis(pg_conn, [raster], raster_table, solar_dir, 256, nodata_val=-9999, srid=27700)
+            rasters_to_postgis(pg_conn, [raster], raster_table, solar_dir, POSTGIS_TILESIZE, nodata_val=LIDAR_NODATA, srid=27700)
             raster_tables.append(raster_table)
-
-        if errs > 0:
-            raise ValueError("Failed to load at least one raster - see above")
 
     aggregate_pixel_results(pg_uri=pg_uri,
                             job_id=job_id,
@@ -212,55 +185,3 @@ def _write_results_to_db(pg_uri: str,
                             resolution=resolution_metres,
                             peak_power_per_m2=peak_power_per_m2,
                             system_loss=SYSTEM_LOSS)
-
-    # schema = tables.schema(job_id)
-    # sql_command(
-    #     pg_conn,
-    #     """
-    #     DROP TABLE IF EXISTS {pixel_kwh};
-    #     CREATE TABLE {pixel_kwh} (
-    #         x double precision,
-    #         y double precision,
-    #         kwh real,
-    #         kwh_m01 real,
-    #         kwh_m02 real,
-    #         kwh_m03 real,
-    #         kwh_m04 real,
-    #         kwh_m05 real,
-    #         kwh_m06 real,
-    #         kwh_m07 real,
-    #         kwh_m08 real,
-    #         kwh_m09 real,
-    #         kwh_m10 real,
-    #         kwh_m11 real,
-    #         kwh_m12 real,
-    #         horizon real[],
-    #         PRIMARY KEY (x, y)
-    #     );
-    #     """,
-    #     pixel_kwh=Identifier(schema, tables.PIXEL_KWH_TABLE))
-    #
-    # copy_rasters(
-    #     pg_conn, solar_dir,
-    #     [yearly_kwh_raster] + monthly_wh_rasters + horizon_rasters,
-    #     f"{schema}.{tables.PIXEL_KWH_TABLE}",
-    #     mask_raster,
-    #     value_transformer=_raster_value_transformer,
-    #     debug_mode=debug_mode)
-    #
-    # sql_script(
-    #     pg_conn,
-    #     'pv/post-load.solar-pv.sql',
-    #     {"job_id": job_id,
-    #      "peak_power_per_m2": peak_power_per_m2},
-    #     pixel_kwh=Identifier(schema, tables.PIXEL_KWH_TABLE),
-    #     panel_kwh=Identifier(schema, "panel_kwh"),
-    #     pixels_in_panels=Identifier(schema, "pixels_in_panels"),
-    #     panel_polygons=Identifier(schema, tables.PANEL_POLYGON_TABLE),
-    #     pixels_in_roofs=Identifier(schema, "pixels_in_roofs"),
-    #     roof_horizons=Identifier(schema, "roof_horizons"),
-    #     roof_polygons=Identifier(schema, tables.ROOF_POLYGON_TABLE),
-    #     buildings=Identifier(schema, tables.BUILDINGS_TABLE),
-    #     job_view=Identifier(f"solar_pv_job_{job_id}"),
-    #     res=Literal(resolution_metres),
-    #     system_loss=Literal(SYSTEM_LOSS))
