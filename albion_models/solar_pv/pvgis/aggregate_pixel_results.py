@@ -3,6 +3,7 @@ import json
 import logging
 import multiprocessing as mp
 import time
+import traceback
 from calendar import mdays
 from collections import defaultdict
 from typing import List, Dict, Tuple
@@ -104,6 +105,7 @@ def _aggregate_results_page(pg_uri: str,
                 roofs_to_write.extend(roofs)
             except Exception as e:
                 print(f"PVMAPS pixel data aggregation failed on building {toid}:")
+                traceback.print_exc()
                 print(json.dumps({'panels': toid_panels, 'pixels': all_pixels[toid], 'roofs': all_roofs[toid]}, sort_keys=True, default=str))
                 raise e
 

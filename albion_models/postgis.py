@@ -361,9 +361,11 @@ def pixels_for_buildings(pg_conn,
         toid_filter = SQL("")
 
     by_pixel_id = {}
+    fields = []
 
     for raster_table in raster_tables:
         schema, rtable = raster_table.split(".") if "." in raster_table else ("public", raster_table)
+        fields.append(rtable)
         pixels = sql_command(
             pg_conn,
             """        
@@ -409,6 +411,6 @@ def pixels_for_buildings(pg_conn,
     for pixel in by_pixel_id.values():
         del pixel['val']
         # Only return pixels that have a value in every table:
-        if all(k in pixel for k in raster_tables):
+        if all(field in pixel for field in fields):
             by_toid[pixel['toid']].append(pixel)
     return by_toid

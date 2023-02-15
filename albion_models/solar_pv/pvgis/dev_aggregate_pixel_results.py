@@ -66,7 +66,7 @@ RASTER_TABLES = ['kwh_year',
                  'horizon_35']
 
 
-def aggregate_pixels(pg_uri: str, job_id: int, toids: List[str],
+def aggregate_pixels(pg_uri: str, job_id: int, toids: List[str] = None,
                      write_test_data: bool = False, write_geojson: bool = False, out_dir: str = None):
     schema = tables.schema(job_id)
     raster_tables = [f"{schema}.{t}" for t in RASTER_TABLES]
@@ -150,17 +150,17 @@ def _write_job_geojson(name: str, out_dir: str, to_write: List[dict]):
 
 if __name__ == "__main__":
 
-    aggregate_pixels(
-        "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion?application_name=blah",
-        1646,
-        [
-            "osgb1000014995063",
-        ],
-        write_test_data=True)
-
     # aggregate_pixels(
     #     "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion?application_name=blah",
-    #     1647,
-    #     out_dir="/home/neil/data/albion-models/pixel-agg",
-    #     write_job_geojson=True
-    # )
+    #     1646,
+    #     [
+    #         "osgb1000014995063",
+    #     ],
+    #     write_test_data=True)
+
+    aggregate_pixels(
+        "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion?application_name=blah",
+        1647,
+        out_dir="/home/neil/data/albion-models/pixel-agg",
+        write_geojson=True
+    )
