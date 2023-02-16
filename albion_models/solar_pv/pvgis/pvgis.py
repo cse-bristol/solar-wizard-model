@@ -105,9 +105,6 @@ def pvgis(pg_uri: str,
     # horizons are CCW from East
     horizon_rasters = pvm.horizons
 
-    # yearly_kwh_27700, mask_27700, monthly_wh_27700, horizon_27700 = _generate_equal_sized_rasters(
-    #     job_lidar_dir, yearly_kwh_raster, mask_raster, monthly_wh_rasters, horizon_rasters)
-
     logging.info("Finished PVMAPS, loading into db...")
 
     _write_results_to_db(
@@ -119,31 +116,6 @@ def pvgis(pg_uri: str,
         yearly_kwh_raster=yearly_kwh_raster,
         monthly_wh_rasters=monthly_wh_rasters,
         horizon_rasters=horizon_rasters)
-
-
-def _generate_equal_sized_rasters(job_lidar_dir: str,
-                                  yearly_kwh_raster: str,
-                                  mask_raster: str,
-                                  monthly_wh_rasters: List[str],
-                                  horizon_rasters: List[str]):
-    """Generate rasters the same size as mask_raster
-    """
-    if len(monthly_wh_rasters) != 12:
-        raise ValueError(f"Expected 12 monthly rasters - got {len(monthly_wh_rasters)}")
-
-    yearly_kwh_27700 = join(job_lidar_dir, "kwh_year_27700.tif")
-
-    gdal_helpers.crop_or_expand(yearly_kwh_raster, mask_raster, yearly_kwh_27700, True)
-
-    monthly_wh_27700 = [join(job_lidar_dir, f"wh_m{str(i).zfill(2)}_27700.tif") for i in range(1, 13)]
-    for r_in, r_out in zip(monthly_wh_rasters, monthly_wh_27700):
-        gdal_helpers.crop_or_expand(r_in, mask_raster, r_out, True)
-
-    horizon_27700 = [join(job_lidar_dir, f"horizon_{str(i).zfill(2)}_27700.tif") for i, _ in enumerate(horizon_rasters)]
-    for r_in, r_out in zip(horizon_rasters, horizon_27700):
-        gdal_helpers.crop_or_expand(r_in, mask_raster, r_out, True)
-
-    return yearly_kwh_27700, mask_raster, monthly_wh_27700, horizon_27700
 
 
 def _write_results_to_db(pg_uri: str,

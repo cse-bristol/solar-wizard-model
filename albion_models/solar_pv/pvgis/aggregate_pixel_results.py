@@ -304,7 +304,7 @@ def _write_results(pg_conn, job_id: int, panels: List[dict], roofs: List[dict]):
 
 def _load_panels(pg_conn, job_id: int, page: int, page_size: int, toids: List[str] = None) -> Dict[str, List[dict]]:
     if toids:
-        toid_filter = SQL("WHERE b.toid = ANY({toids})").format(toids=Literal(toids))
+        toid_filter = SQL("AND b.toid = ANY({toids})").format(toids=Literal(toids))
     else:
         toid_filter = SQL("")
 
@@ -314,6 +314,7 @@ def _load_panels(pg_conn, job_id: int, page: int, page_size: int, toids: List[st
         WITH building_page AS (
             SELECT b.toid
             FROM {buildings} b
+            WHERE b.exclusion_reason IS NULL
             {toid_filter}
             ORDER BY b.toid
             OFFSET %(offset)s LIMIT %(limit)s
@@ -345,12 +346,12 @@ def _load_panels(pg_conn, job_id: int, page: int, page_size: int, toids: List[st
     for panel in panels:
         by_toid[panel['toid']].append(dict(panel))
 
-    return by_toid
+    return dict(by_toid)
 
 
 def _load_roof_planes(pg_conn, job_id: int, page: int, page_size: int, toids: List[str] = None) -> Dict[str, List[dict]]:
     if toids:
-        toid_filter = SQL("WHERE b.toid = ANY({toids})").format(toids=Literal(toids))
+        toid_filter = SQL("AND b.toid = ANY({toids})").format(toids=Literal(toids))
     else:
         toid_filter = SQL("")
 
@@ -360,6 +361,7 @@ def _load_roof_planes(pg_conn, job_id: int, page: int, page_size: int, toids: Li
         WITH building_page AS (
             SELECT b.toid
             FROM {buildings} b
+            WHERE b.exclusion_reason IS NULL
             {toid_filter}
             ORDER BY b.toid
             OFFSET %(offset)s LIMIT %(limit)s
@@ -391,4 +393,4 @@ def _load_roof_planes(pg_conn, job_id: int, page: int, page_size: int, toids: Li
     for roof in roofs:
         by_toid[roof['toid']].append(dict(roof))
 
-    return by_toid
+    return dict(by_toid)

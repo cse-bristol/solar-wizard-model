@@ -413,4 +413,4 @@ def pixels_for_buildings(pg_conn,
         # Only return pixels that have a value in every table:
         if all(field in pixel for field in fields):
             by_toid[pixel['toid']].append(pixel)
-    return by_toid
+    return dict(by_toid)
