@@ -196,7 +196,7 @@ def _aggregate_pixel_data(panels, pixels, roofs,
             if debug:
                 print(f"panel {panel['panel_id']} kWh: {panel['kwh_year']}")
         else:
-            raise ValueError(f"Panel intersected no pixels: panel_id {panel['panel_id']}, toid {panel['toid']}")
+            print(f"Panel intersected no pixels: panel_id {panel['panel_id']}, toid {panel['toid']}")
 
     # roof-level horizon aggregation:
     # (any other roof-level aggregates needed downstream can be done easily in SQL)]
@@ -233,7 +233,7 @@ def _aggregate_pixel_data(panels, pixels, roofs,
             roof['job_id'] = job_id
             roofs_to_write.append(roof)
         else:
-            raise ValueError(f"Roof intersected no pixels: roof_plane_id {roof['roof_plane_id']}, toid {roof['toid']}")
+            print(f"Roof intersected no pixels: roof_plane_id {roof['roof_plane_id']}, toid {roof['toid']}")
 
     return panels_to_write, roofs_to_write
 
