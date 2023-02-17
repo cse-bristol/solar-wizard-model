@@ -66,13 +66,17 @@ def run_ransac(pg_uri: str,
         "panel_height_m": panel_height_m,
     }
     with mp.Pool(workers) as pool:
-        def handle_err(e):
-            pool.terminate()
-            traceback.print_exception(e)
         wrapped_iterable = ((pg_uri, job_id, seg, building_page_size, params)
                             for seg in range(0, segments))
-        res = pool.starmap_async(_handle_building_page, wrapped_iterable, error_callback=handle_err)
-        res.wait()
+        res = pool.starmap_async(_handle_building_page, wrapped_iterable)
+        # Hacky way to poll for failures in workers, doesn't seem to be a nicer way
+        # of doing this:
+        while not res.ready():
+            if not res._success:
+                pool.terminate()
+                pool.join()
+                raise ValueError('Cancelling RANSAC due to failure in worker')
+            time.sleep(1)
 
     _mark_buildings_with_no_planes(pg_uri, job_id)
     logging.info(f"RANSAC for {building_count} roofs took {round(time.time() - start_time, 2)} s.")

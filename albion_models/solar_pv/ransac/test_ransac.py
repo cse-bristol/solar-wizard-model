@@ -11,12 +11,12 @@ _RANSAC_DATA = join(TEST_DATA, "ransac")
 
 def _load_data(filename: str) -> List[dict]:
     with open(filename) as f:
-        return [{k: float(v) if k != 'pixel_id' else int(v) for k, v in row.items()}
+        return [{k: float(v) if k != 'pixel_id' else v for k, v in row.items()}
                 for row in csv.DictReader(f)]
 
 
 def _ransac(filename: str, res: float):
-    return len(_ransac_building(_load_data(join(_RANSAC_DATA, filename)), filename, res, debug=False))
+    return len(_ransac_building(_load_data(join(_RANSAC_DATA, filename)), filename, res, debug=True))
 
 
 class RansacTestCase(unittest.TestCase):
@@ -39,4 +39,7 @@ class RansacTestCase(unittest.TestCase):
             ('osgb1000020002724.csv', 1.0, 3),
             ('osgb5000005156974578.csv', 1.0, (3, 4)),
             ('osgb1000020002610.csv', 1.0, 2),
+            # Occasional flat roof detected where after final fit-to-plane, no points
+            # are within the min distance:
+            ('osgb1000011999905.csv', 1.0, (3, 4, 5, 6)),
         ], _ransac)
