@@ -1,3 +1,5 @@
+# This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
+# Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 from shapely import wkt
 
 from solar_model.geos import get_grid_refs, square, get_grid_cells, project, \

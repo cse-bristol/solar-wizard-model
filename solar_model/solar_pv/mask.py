@@ -1,3 +1,5 @@
+# This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
+# Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 import psycopg2.extras
 from psycopg2.sql import SQL, Identifier, Literal
 

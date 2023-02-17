@@ -1,3 +1,5 @@
+# This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
+# Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 
 # Better than the GDAL default for 27700<->4326 (EN<->lonlat):
 _7_PARAM_SHIFT = "+proj=tmerc +lat_0=49 +lon_0=-2 " \

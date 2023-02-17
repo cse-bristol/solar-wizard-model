@@ -1,3 +1,5 @@
+# This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
+# Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 """
 Create some simulated test data for a range of aspects, slopes and horizons then compare local pv o/p values with the
 values from the pvgis api for the same aspects, slopes and horizons.

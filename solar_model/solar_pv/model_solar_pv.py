@@ -1,3 +1,5 @@
+# This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
+# Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 import logging
 import os
 import shutil
@@ -127,7 +129,7 @@ def _init_schema(pg_uri: str, job_id: int):
     with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
         sql_script(pg_conn, 'create.db.sql')
         sql_script(
-            pg_conn, 'pv/create.schema.sql', {"job_id": job_id},
+            pg_conn, 'create.schema.sql', {"job_id": job_id},
             schema=Identifier(tables.schema(job_id)),
             bounds_4326=Identifier(tables.schema(job_id), tables.BOUNDS_TABLE),
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
@@ -140,9 +142,10 @@ def _init_schema(pg_uri: str, job_id: int):
 
 
 def _drop_schema(pg_uri: str, job_id: int):
-    with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
-        sql_script(
-            pg_conn, 'pv/drop.schema.sql', {"job_id": job_id},
+    with connection(pg_uri) as pg_conn:
+        sql_command(
+            pg_conn,
+            'DROP SCHEMA IF EXISTS {schema} CASCADE',
             schema=Identifier(tables.schema(job_id)),
         )
 

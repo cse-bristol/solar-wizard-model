@@ -1,3 +1,5 @@
+-- This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
+-- Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 -- Create the schema for this job.
 
 CREATE SCHEMA IF NOT EXISTS {schema} AUTHORIZATION CURRENT_USER;

@@ -1,4 +1,7 @@
--- Should be idempotent as runs every time
+-- This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
+-- Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
+--
+-- Should be idempotent as runs every time:
 CREATE SCHEMA IF NOT EXISTS models AUTHORIZATION CURRENT_USER;
 
 DO $$ BEGIN

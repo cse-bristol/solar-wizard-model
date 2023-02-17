@@ -1,3 +1,5 @@
+# This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
+# Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 from solar_model.lidar.en_to_grid_ref import en_to_grid_ref, round_down_to, \
     is_in_range
 from solar_model.test_utils.test_funcs import ParameterisedTestCase

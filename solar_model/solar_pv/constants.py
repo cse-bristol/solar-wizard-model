@@ -1,3 +1,5 @@
+# This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
+# Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 
 # A roof is considered to be flat if it's slope is less than this. Not to be confused
 # with the model parameter `flat_roof_degrees`, which is the slope at which panels
