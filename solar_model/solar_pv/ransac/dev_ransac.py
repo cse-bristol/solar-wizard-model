@@ -193,10 +193,11 @@ def thinness_ratio_experiments():
 
 
 if __name__ == "__main__":
+    import os
     # thinness_ratio_experiments()
     ransac_toid(
-        "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion?application_name=blah",
+        os.getenv("PGW_URI"),
         1194,
         "osgb1000020005464",
         1.0,
-        "/home/neil/data/albion-models/ransac")
+        f"{os.getenv('DEV_DATA_DIR')}/ransac")

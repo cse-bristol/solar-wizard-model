@@ -37,8 +37,9 @@ def load_roof_plane(pg_uri: str, job_id: int, roof_plane_id: int) -> dict:
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO,
                         format='[%(asctime)s] %(levelname)s: %(message)s')
+    import os
     roof = load_roof_plane(
-        'postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion?application_name=blah',
+        os.getenv("PGW_URI"),
         1617, 4564)
     panels = _roof_panels(
         roof=wkt.loads(roof['roof']),

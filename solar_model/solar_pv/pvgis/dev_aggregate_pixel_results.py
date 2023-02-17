@@ -185,9 +185,9 @@ def write_testdata_geojson(toid: str, out_dir: str):
 
 
 if __name__ == "__main__":
-
+    import os
     # aggregate_pixels(
-    #     "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion?application_name=blah",
+    #     os.getenv("PGW_URI"),
     #     1646,
     #     [
     #         "osgb1000014995063",
@@ -195,9 +195,9 @@ if __name__ == "__main__":
     #     write_test_data=True)
 
     # aggregate_pixels(
-    #     "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion?application_name=blah",
+    #     os.getenv("PGW_URI"),
     #     1647,
-    #     out_dir="/home/neil/data/albion-models/pixel-agg",
+    #     out_dir=f"{os.getenv('DEV_DATA_DIR')}/pixel-agg",
     #     write_geojson=True
     # )
-    write_testdata_geojson("osgb1000016884534", "/home/neil/data/albion-models/pixel-agg")
+    write_testdata_geojson("osgb1000016884534", f"{os.getenv('DEV_DATA_DIR')}/pixel-agg")

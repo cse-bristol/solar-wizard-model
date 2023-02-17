@@ -17,6 +17,7 @@ pkgs.stdenv.mkDerivation rec {
       pps.scikitlearn
       pps.scikitimage
       pps.shapely
+      pps.pytest
     ]))
     pkgs.postgis
     pkgs.py-spy  # for profiling

@@ -42,8 +42,9 @@ def _write_test_data(toid, building):
 
 
 if __name__ == "__main__":
+    import os
     # check_toids_lidar(
-    #     "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion?application_name=blah",
+    #     os.getenv("PGW_URI"),
     #     1617,
     #     [
     #         "osgb5000005134753286",
@@ -68,7 +69,7 @@ if __name__ == "__main__":
     #     write_test_data=False)
 
     # check_toids_lidar(
-    #     "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion?application_name=blah",
+    #     os.getenv("PGW_URI"),
     #     1618,
     #     [
     #         "osgb5000005262593487",
@@ -80,7 +81,7 @@ if __name__ == "__main__":
     #     write_test_data=False)
 
     check_toids_lidar(
-        "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion?application_name=blah",
+        os.getenv("PGW_URI"),
         1623,
         [
             "osgb1000002085437860",
@@ -88,7 +89,7 @@ if __name__ == "__main__":
         write_test_data=True)
 
     # check_toids_lidar(
-    #     "postgresql://albion_webapp:ydBbE3JCnJ4@localhost:5432/albion?application_name=blah",
+    #     os.getenv("PGW_URI"),
     #     1622,
     #     [
     #         # All keep:
