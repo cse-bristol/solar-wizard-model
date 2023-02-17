@@ -54,10 +54,10 @@ def _write_tiff(filepath: str, res: float, building, planes):
 
     gdal.UseExceptions()
 
-    ulx = min(building, key=lambda p: p['easting'])['easting']
-    uly = max(building, key=lambda p: p['northing'])['northing']
-    lrx = max(building, key=lambda p: p['easting'])['easting']
-    lry = min(building, key=lambda p: p['northing'])['northing']
+    ulx = min(building, key=lambda p: p['x'])['x']
+    uly = max(building, key=lambda p: p['y'])['y']
+    lrx = max(building, key=lambda p: p['x'])['x']
+    lry = min(building, key=lambda p: p['y'])['y']
 
     xmax = int((lrx - ulx) / res) + 1
     ymax = int((uly - lry) / res) + 1
@@ -77,16 +77,16 @@ def _write_tiff(filepath: str, res: float, building, planes):
     for pixel in building:
         by_pixel_id[pixel['pixel_id']] = pixel
         # this sets all non-nodata pixels that aren't in a plane to 0:
-        # x = int(pixel["easting"] - ulx)
-        # y = int(uly - pixel["northing"])
+        # x = int(pixel["x"] - ulx)
+        # y = int(uly - pixel["y"])
         # data[y, x] = 0
 
     for plane_id, plane in enumerate(planes):
         plane_id += 1
         for inlier in plane["inliers"]:
             pixel = by_pixel_id[inlier]
-            x = int(pixel["easting"] - ulx)
-            y = int(uly - pixel["northing"])
+            x = int(pixel["x"] - ulx)
+            y = int(uly - pixel["y"])
             data[y, x] = plane_id
 
     band.WriteArray(data, 0, 0)
@@ -151,9 +151,9 @@ def _write_test_data(toid, building):
     ransac_test_data_dir = join(paths.TEST_DATA, "ransac")
     csv = join(ransac_test_data_dir, f"{toid}.csv")
     with open(csv, 'w') as f:
-        f.write("pixel_id,easting,northing,elevation,aspect\n")
+        f.write("pixel_id,x,y,elevation,aspect\n")
         for pixel in building:
-            f.write(f"{pixel['pixel_id']},{pixel['easting']},{pixel['northing']},{pixel['elevation']},{pixel['aspect']}\n")
+            f.write(f"{pixel['pixel_id']},{pixel['x']},{pixel['y']},{pixel['elevation']},{pixel['aspect']}\n")
     print(f"Wrote test data to {csv}")
 
 

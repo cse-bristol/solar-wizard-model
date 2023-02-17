@@ -1,4 +1,4 @@
-pixel_id,easting,northing,elevation,aspect
+pixel_id,x,y,elevation,aspect
 1,359856.500,171181.500,-9999,-9999
 2,359857.500,171181.500,-9999,-9999
 3,359858.500,171181.500,-9999,350.181

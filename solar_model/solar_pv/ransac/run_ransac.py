@@ -1,8 +1,10 @@
+
 # This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 import logging
 import time
 import math
+import traceback
 from typing import List, Dict
 import multiprocessing as mp
 
@@ -68,8 +70,15 @@ def run_ransac(pg_uri: str,
     with mp.Pool(workers) as pool:
         wrapped_iterable = ((pg_uri, job_id, seg, building_page_size, params)
                             for seg in range(0, segments))
-        for res in pool.starmap(_handle_building_page, wrapped_iterable):
-            pass
+        res = pool.starmap_async(_handle_building_page, wrapped_iterable)
+        # Hacky way to poll for failures in workers, doesn't seem to be a nicer way
+        # of doing this:
+        while not res.ready():
+            if not res._success:
+                pool.terminate()
+                pool.join()
+                raise ValueError('Cancelling RANSAC due to failure in worker')
+            time.sleep(1)
 
     _mark_buildings_with_no_planes(pg_uri, job_id)
     logging.info(f"RANSAC for {building_count} roofs took {round(time.time() - start_time, 2)} s.")
@@ -81,9 +90,15 @@ def _handle_building_page(pg_uri: str, job_id: int, page: int, page_size: int, p
 
     planes = []
     for toid, building in by_toid.items():
-        found = _ransac_building(building, toid, params['resolution_metres'])
-        if len(found) > 0:
-            planes.extend(found)
+        try:
+            found = _ransac_building(building, toid, params['resolution_metres'])
+            if len(found) > 0:
+                planes.extend(found)
+        except Exception as e:
+            print(f"Exception during RANSAC for TOID {toid}:")
+            traceback.print_exception(e)
+            _print_test_data(building)
+            raise e
 
     planes = create_roof_polygons(pg_uri, job_id, planes, **params)
     _save_planes(pg_uri, job_id, planes)
@@ -246,3 +261,10 @@ def _mark_buildings_with_no_planes(pg_uri: str, job_id: int):
             """,
             roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE),
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE))
+
+
+def _print_test_data(building: List[dict]):
+    """Print data for building in the format that the RANSAC tests expect"""
+    print("pixel_id,x,y,elevation,aspect\n")
+    for pixel in building:
+        print(f"{pixel['pixel_id']},{pixel['x']},{pixel['y']},{pixel['elevation']},{pixel['aspect']}")

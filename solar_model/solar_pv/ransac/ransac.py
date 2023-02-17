@@ -518,6 +518,10 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
         y_pred = base_estimator.predict(X)
         residuals_subset = loss_function(y, y_pred)
         inlier_mask_best = residuals_subset < residual_threshold
+        if np.sum(inlier_mask_best) < self.min_points_per_plane:
+            raise RANSACValueError(f"Less than {self.min_points_per_plane} points within "
+                                   f"{residual_threshold} of plane after final fit")
+
         mask_without_excluded = _exclude_unconnected(X, min_X, inlier_mask_best, res=self.resolution_metres)
 
         self.estimator_ = base_estimator
