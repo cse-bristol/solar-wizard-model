@@ -1,5 +1,0 @@
-scotland-gov/lidar/phase-1/dsm
-scotland-gov/lidar/phase-2/dsm
-scotland-gov/lidar/phase-3/dsm
-scotland-gov/lidar/phase-4/dsm
-scotland-gov/lidar/phase-5/dsm

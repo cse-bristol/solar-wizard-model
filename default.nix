@@ -1,9 +1,11 @@
+# For development
+
 let
   pkgs = (import (fetchTarball "https://github.com/NixOS/nixpkgs/archive/22.05.tar.gz") {});
   grass_pvmaps = pkgs.callPackage ./nix/grass-8.2.0-pvmaps.nix {};
 in
 pkgs.stdenv.mkDerivation rec {
-  name = "albion-models";
+  name = "solar-wizard-model";
   version = "0.1";
 
   buildInputs = [

@@ -13,18 +13,18 @@ import shapely.wkt
 from osgeo import gdal, ogr
 import numpy as np
 
-from albion_models import paths, gdal_helpers, geos
-from albion_models.db_funcs import connection, sql_command
-from albion_models.geos import project_geom, from_geojson
-from albion_models.lidar.bulk_lidar_client import LidarSource
-from albion_models.lidar.en_to_grid_ref import en_to_grid_ref
-from albion_models.lidar.lidar import LidarTile, Resolution, zip_to_geotiffs, \
+from solar_model import paths, gdal_helpers, geos
+from solar_model.db_funcs import connection, sql_command
+from solar_model.geos import project_geom, from_geojson
+from solar_model.lidar.bulk_lidar_client import LidarSource
+from solar_model.lidar.en_to_grid_ref import en_to_grid_ref
+from solar_model.lidar.lidar import LidarTile, Resolution, zip_to_geotiffs, \
     ZippedTiles
-from albion_models.postgis import load_lidar
-from albion_models.solar_pv.constants import FLAT_ROOF_DEGREES_THRESHOLD, SYSTEM_LOSS
-from albion_models.solar_pv.mask import create_mask
-from albion_models.solar_pv.pvgis import pvmaps
-from albion_models.transformations import _7_PARAM_SHIFT
+from solar_model.postgis import load_lidar
+from solar_model.solar_pv.constants import FLAT_ROOF_DEGREES_THRESHOLD, SYSTEM_LOSS
+from solar_model.solar_pv.mask import create_mask
+from solar_model.solar_pv.pvgis import pvmaps
+from solar_model.transformations import _7_PARAM_SHIFT
 
 
 def _mask_sql(pg_uri: str, wkt: str) -> str:

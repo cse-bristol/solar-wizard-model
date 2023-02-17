@@ -6,7 +6,7 @@ from typing import List
 
 import requests
 
-from albion_models.solar_pv.pvgis_old.flatten import flatten
+from solar_model.solar_pv.pvgis_old.flatten import flatten
 
 
 def pv_gis(lon: float, lat: float, peakpower: float, slope: float, aspect: float, horizon: List[float]):

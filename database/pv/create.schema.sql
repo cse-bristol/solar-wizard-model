@@ -1,10 +1,15 @@
 -- Create the schema for this job.
 
-CREATE SCHEMA IF NOT EXISTS {schema} AUTHORIZATION albion_webapp;
-GRANT USAGE ON SCHEMA {schema} TO research;
-GRANT USAGE ON SCHEMA {schema} TO albion_ddl;
-ALTER DEFAULT PRIVILEGES IN SCHEMA {schema} GRANT SELECT ON TABLES TO research;
-ALTER DEFAULT PRIVILEGES IN SCHEMA {schema} GRANT ALL ON TABLES TO albion_ddl;
+CREATE SCHEMA IF NOT EXISTS {schema} AUTHORIZATION CURRENT_USER;
+
+DO $$ BEGIN
+    GRANT USAGE ON SCHEMA models TO research;
+    ALTER DEFAULT PRIVILEGES IN SCHEMA models GRANT SELECT ON TABLES TO research;
+    GRANT USAGE ON SCHEMA models TO albion_ddl;
+    ALTER DEFAULT PRIVILEGES IN SCHEMA models GRANT SELECT ON TABLES TO albion_ddl;
+EXCEPTION
+    WHEN undefined_object THEN null;
+END $$;
 
 --
 -- Create the bounds table in 4326 for quick intersection with mastermap buildings:
