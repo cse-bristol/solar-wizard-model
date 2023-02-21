@@ -14,14 +14,14 @@ EXCEPTION
 END $$;
 
 --
--- Create the bounds table in 4326 for quick intersection with mastermap buildings:
+-- Create the bounds table in 27700 for quick intersection with mastermap buildings:
 --
-CREATE TABLE IF NOT EXISTS {bounds_4326} AS
-SELECT job_id, ST_Transform(bounds, 4326) AS bounds
-FROM models.job_queue
-WHERE job_id = %(job_id)s;
+CREATE TABLE IF NOT EXISTS {bounds_27700} AS
+SELECT
+    %(job_id)s AS job_id,
+    ST_Multi(ST_GeomFromText(%(job_bounds_27700)s, 27700))::geometry(multipolygon, 27700) AS bounds_27700;
 
-CREATE INDEX IF NOT EXISTS bounds_4326_bounds_idx ON {bounds_4326} using gist (bounds);
+CREATE INDEX IF NOT EXISTS bounds_27700_bounds_idx ON {bounds_27700} using gist (bounds_27700);
 
 --
 -- Extract the buildings that fall within the job bounds:
@@ -35,16 +35,16 @@ SELECT
     NULL::models.pv_exclusion_reason AS exclusion_reason,
     NULL::real AS height
 FROM mastermap.building_27700 b
-LEFT JOIN models.job_queue q ON ST_Intersects(b.geom_27700, q.bounds)
+LEFT JOIN {bounds_27700} q ON ST_Intersects(b.geom_27700, q.bounds_27700)
 WHERE q.job_id=%(job_id)s
 -- Only take buildings where the centroid is within the bounds
 -- or, if the centroid touches the bounds, the bbox cannot overlap the bounds
--- above or to the left, so that buildings that overlap multiple tiles for
--- open solar runs don't get run twice:
-AND ST_Intersects(ST_Centroid(b.geom_27700), q.bounds)
-AND (NOT ST_Touches(ST_Centroid(b.geom_27700), q.bounds)
-     OR b.geom_27700 &<| q.bounds
-     OR b.geom_27700 &>  q.bounds);
+-- above or to the left, so that buildings that overlap multiple tiles if bounds
+-- have been created in a tiled layout don't get run twice:
+AND ST_Intersects(ST_Centroid(b.geom_27700), q.bounds_27700)
+AND (NOT ST_Touches(ST_Centroid(b.geom_27700), q.bounds_27700)
+     OR b.geom_27700 &<| q.bounds_27700
+     OR b.geom_27700 &>  q.bounds_27700);
 
 CREATE UNIQUE INDEX IF NOT EXISTS buildings_toid_idx ON {buildings} (toid);
 CREATE INDEX IF NOT EXISTS buildings_geom_27700_idx ON {buildings} USING GIST (geom_27700);

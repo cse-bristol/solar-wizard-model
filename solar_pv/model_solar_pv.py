@@ -4,6 +4,7 @@ import logging
 import os
 import shutil
 from os.path import join
+from typing import List
 
 import psycopg2.extras
 from psycopg2.sql import Identifier
@@ -23,6 +24,7 @@ def model_solar_pv(pg_uri: str,
                    root_solar_dir: str,
                    lidar_dir: str,
                    job_id: int,
+                   job_bounds_27700: str,
                    horizon_search_radius: int,
                    horizon_slices: int,
                    max_roof_slope_degrees: int,
@@ -39,23 +41,35 @@ def model_solar_pv(pg_uri: str,
                    min_dist_to_edge_large_m: float,
                    debug_mode: bool):
 
+    pg_uri = _validate_str(pg_uri, "pg_uri")
+    root_solar_dir = _validate_str(root_solar_dir, "root_solar_dir")
+    lidar_dir = _validate_str(lidar_dir, "lidar_dir")
+    pv_tech = _validate_str(pv_tech, "pv_tech", allowed=["crystSi", "CdTe"])
+    job_id = _validate_int(job_id, "job_id")
+    horizon_search_radius = _validate_int(horizon_search_radius, "horizon_search_radius", 0, 10000)
+    horizon_slices = _validate_int(horizon_slices, "horizon_slices", 8, 128)
+    max_roof_slope_degrees = _validate_int(max_roof_slope_degrees, "max_roof_slope_degrees", 0, 90)
+    min_roof_area_m = _validate_int(min_roof_area_m, "min_roof_area_m", 0)
+    min_roof_degrees_from_north = _validate_int(min_roof_degrees_from_north, "min_roof_degrees_from_north", 0, 180)
+    flat_roof_degrees = _validate_int(flat_roof_degrees, "flat_roof_degrees", 0, 90)
+    peak_power_per_m2 = _validate_float(peak_power_per_m2, "peak_power_per_m2", 0)
+    panel_width_m = _validate_float(panel_width_m, "panel_width_m", 0.01)
+    panel_height_m = _validate_float(panel_height_m, "panel_height_m", 0.01)
+    panel_spacing_m = _validate_float(panel_spacing_m, "panel_spacing_m", 0)
+    large_building_threshold = _validate_float(large_building_threshold, "large_building_threshold", 0)
+    min_dist_to_edge_m = _validate_float(min_dist_to_edge_m, "min_dist_to_edge_m", 0)
+    min_dist_to_edge_large_m = _validate_float(min_dist_to_edge_large_m, "min_dist_to_edge_large_m", 0)
+
+    _validate_env_var("PVGIS_DATA_TAR_FILE_DIR")
+    _validate_env_var("PVGIS_GRASS_DBASE_DIR")
+
     pg_uri = process_pg_uri(pg_uri)
-    _validate_params(
-        horizon_search_radius=horizon_search_radius,
-        horizon_slices=horizon_slices,
-        max_roof_slope_degrees=max_roof_slope_degrees,
-        min_roof_area_m=min_roof_area_m,
-        min_roof_degrees_from_north=min_roof_degrees_from_north,
-        flat_roof_degrees=flat_roof_degrees,
-        peak_power_per_m2=peak_power_per_m2,
-        panel_width_m=panel_width_m,
-        panel_height_m=panel_height_m)
 
     solar_dir = join(root_solar_dir, f"job_{job_id}")
     os.makedirs(solar_dir, exist_ok=True)
 
     logging.info("Initialising postGIS schema...")
-    _init_schema(pg_uri, job_id)
+    _init_schema(pg_uri, job_id, job_bounds_27700)
 
     if _skip(pg_uri, job_id):
         return
@@ -125,13 +139,15 @@ def model_solar_pv(pg_uri: str,
         logging.info("Debug mode: not removing temp dir or dropping schema.")
 
 
-def _init_schema(pg_uri: str, job_id: int):
+def _init_schema(pg_uri: str, job_id: int, job_bounds_27700: str):
     with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
         sql_script(pg_conn, 'create.db.sql')
         sql_script(
-            pg_conn, 'create.schema.sql', {"job_id": job_id},
+            pg_conn,
+            'create.schema.sql',
+            {"job_id": job_id, "job_bounds_27700": job_bounds_27700},
             schema=Identifier(tables.schema(job_id)),
-            bounds_4326=Identifier(tables.schema(job_id), tables.BOUNDS_TABLE),
+            bounds_27700=Identifier(tables.schema(job_id), tables.BOUNDS_TABLE),
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
             roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE),
             panel_polygons=Identifier(tables.schema(job_id), tables.PANEL_POLYGON_TABLE),
@@ -180,34 +196,37 @@ def _skip(pg_uri: str, job_id: int) -> bool:
         return False
 
 
-def _validate_params(horizon_search_radius: int,
-                     horizon_slices: int,
-                     max_roof_slope_degrees: int,
-                     min_roof_area_m: int,
-                     min_roof_degrees_from_north: int,
-                     flat_roof_degrees: int,
-                     peak_power_per_m2: float,
-                     panel_width_m: float,
-                     panel_height_m: float):
-    if horizon_search_radius < 0 or horizon_search_radius > 10000:
-        raise ValueError(f"horizon search radius must be between 0 and 10000, was {horizon_search_radius}")
-    if horizon_slices > 64 or horizon_slices < 8:
-        raise ValueError(f"horizon slices must be between 8 and 64, was {horizon_slices}")
-    if max_roof_slope_degrees < 0 or max_roof_slope_degrees > 90:
-        raise ValueError(f"max_roof_slope_degrees must be between 0 and 90, was {max_roof_slope_degrees}")
-    if min_roof_area_m < 0:
-        raise ValueError(f"min_roof_area_m must be greater than or equal to 0, was {min_roof_area_m}")
-    if min_roof_degrees_from_north < 0 or min_roof_degrees_from_north > 180:
-        raise ValueError(f"min_roof_degrees_from_north must be between 0 and 180, was {min_roof_degrees_from_north}")
-    if flat_roof_degrees < 0 or flat_roof_degrees > 90:
-        raise ValueError(f"flat_roof_degrees must be between 0 and 90, was {flat_roof_degrees}")
-    if peak_power_per_m2 < 0:
-        raise ValueError(f"peak_power_per_m2 must be greater than or equal to 0, was {peak_power_per_m2}")
-    if panel_width_m <= 0:
-        raise ValueError(f"panel_width_m must be greater than 0, was {panel_width_m}")
-    if panel_height_m <= 0:
-        raise ValueError(f"panel_height_m must be greater than 0, was {panel_height_m}")
-    if os.environ.get("PVGIS_DATA_TAR_FILE_DIR", None) is None:
-        raise ValueError(f"env var PVGIS_DATA_TAR_FILE_DIR must be set")
-    if os.environ.get("PVGIS_GRASS_DBASE_DIR", None) is None:
-        raise ValueError(f"env var PVGIS_GRASS_DBASE_DIR must be set")
+def _validate_str(val: str, name: str, allowed: List[str] = None) -> str:
+    if val is None:
+        raise ValueError(f"parameter {name} was None")
+    val = str(val)
+    if allowed is not None and val not in allowed:
+        raise ValueError(f"parameter {name} not in {allowed}, was {val}")
+    return val
+
+
+def _validate_int(val: int, name: str, minval: int = None, maxval: int = None) -> int:
+    if val is None:
+        raise ValueError(f"parameter {name} was None")
+    val = int(val)
+    if minval is not None and val < minval:
+        raise ValueError(f"parameter {name} must be greater or equal to {minval}, was {val}")
+    if maxval is not None and val > maxval:
+        raise ValueError(f"parameter {name} must be less than or equal to {maxval}, was {val}")
+    return val
+
+
+def _validate_float(val: float, name: str, minval: float = None, maxval: float = None) -> float:
+    if val is None:
+        raise ValueError(f"parameter {name} was None")
+    val = float(val)
+    if minval is not None and val < minval:
+        raise ValueError(f"parameter {name} must be greater or equal to {minval}, was {val}")
+    if maxval is not None and val > maxval:
+        raise ValueError(f"parameter {name} must be less than or equal to {maxval}, was {val}")
+    return val
+
+
+def _validate_env_var(name: str):
+    if os.environ.get(name, None) is None:
+        raise ValueError(f"env var {name} must be set")
