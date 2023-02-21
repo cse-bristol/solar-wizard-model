@@ -7,7 +7,7 @@ files under `database`.
 import os
 import textwrap
 from glob import glob
-from solar_model import paths
+from solar_pv import paths
 from datetime import datetime
 
 year = datetime.now().year

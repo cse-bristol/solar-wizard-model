@@ -10,7 +10,7 @@ from typing import List
 
 import requests
 
-from solar_model.solar_pv.pvgis_old.flatten import flatten
+from solar_pv.solar_pv.pvgis_old.flatten import flatten
 
 
 def pv_gis(lon: float, lat: float, peakpower: float, slope: float, aspect: float, horizon: List[float]):

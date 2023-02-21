@@ -1,32 +1,30 @@
 # This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
-import json
 import logging
 import os
 import re
 from calendar import mdays
 from os.path import join
-from typing import List
 
 import psycopg2
 from psycopg2.extras import Json
 from psycopg2.sql import SQL, Literal
 import shapely.wkt
-from osgeo import gdal, ogr
+from osgeo import gdal
 import numpy as np
 
-from solar_model import paths, gdal_helpers, geos
-from solar_model.db_funcs import connection, sql_command
-from solar_model.geos import project_geom, from_geojson
-from solar_model.lidar.bulk_lidar_client import LidarSource
-from solar_model.lidar.en_to_grid_ref import en_to_grid_ref
-from solar_model.lidar.lidar import LidarTile, Resolution, zip_to_geotiffs, \
+from solar_pv import paths, gdal_helpers, geos
+from solar_pv.db_funcs import connection, sql_command
+from solar_pv.geos import project_geom, from_geojson
+from solar_pv.lidar.bulk_lidar_client import LidarSource
+from solar_pv.lidar.en_to_grid_ref import en_to_grid_ref
+from solar_pv.lidar.lidar import Resolution, zip_to_geotiffs, \
     ZippedTiles
-from solar_model.postgis import load_lidar
-from solar_model.solar_pv.constants import FLAT_ROOF_DEGREES_THRESHOLD, SYSTEM_LOSS
-from solar_model.solar_pv.mask import create_mask
-from solar_model.solar_pv.pvgis import pvmaps
-from solar_model.transformations import _7_PARAM_SHIFT
+from solar_pv.postgis import load_lidar
+from constants import FLAT_ROOF_DEGREES_THRESHOLD, SYSTEM_LOSS
+from mask import create_mask
+from pvgis import pvmaps
+from solar_pv.transformations import _7_PARAM_SHIFT
 
 
 def _mask_sql(pg_uri: str, wkt: str) -> str:
