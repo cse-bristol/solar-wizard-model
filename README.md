@@ -1,26 +1,23 @@
-# Albion models
+# Solar wizard PV model
 
-This repository contains code for
-* Hard/soft dig modelling
-* LIDAR downloading
-* Heat demand modelling
-* Solar PV modelling
+The rooftop solar PV suitability model backing [solarwizard.org.uk](https://solarwizard.org.uk).
 
-This project uses [git-lfs](https://git-lfs.github.com/) for large file storage (currently just the thermos jar for heat demand estimation), so install that and run `git lfs pull` in the root of this repo after cloning.
+## Dependencies and setup
 
-See also [320-albion-import](https://github.com/cse-bristol/320-albion), [320-albion-webapp](https://github.com/cse-bristol/320-albion-webapp). This repository is a git submodule of `320-albion-webapp`.
+The main entrypoint of the model is the function `model_solar_pv` in module `solar_pv.model_solar_pv`.
 
-I'm not totally happy with the split across 320-albion-webapp and 320-albion-models - currently the database schema is handled by 320-albion-webapp which is sometimes annoying. It's possible that they shouldn't actually be separate things.
+The model has the following software dependencies:
+* various python libraries (see `requirements.txt`, can also be installed using nix - see `default.nix`)
+* postgreSQL and postGIS
+* PVMAPS (a GRASS GIS plugin written in C) - this can be installed using `default.nix` using nix
 
-## Development
+The model has the following data dependencies:
+* building footprint geometries
+* LiDAR elevation rasters
 
-`default.nix` contains the dependencies required to setup a dev environment. The `default.nix` in this repo also has the dependencies required for the repositories `320-albion` and `320-albion-webapp`.
+We have tried to make the model as independent as possible from our internal infrastructure where it runs, but this has not been our main priority when developing and you may find things that don't work, or design decisions that don't make sense when viewed without the context of knowing how we run the model.
 
-Run `nix-build default.nix -o nixenv` to create something equivalent to a python virtualenv that you can tell your IDE to use as a virtualenv. 
-
-I also start pycharm from a nix-shell (command plain `nix-shell`, will use `default.nix`) using `/opt/pycharm-community-2020.3.3/bin/pycharm.sh  > /dev/null 2>&1 &` so that it can understand the dependencies properly. This isn't ideal as you have to rebuild nixenv and restart the nix-shell and pycharm whenever you change a dependency, but that doesn't happen often.
-
-## Dependencies
+### postgres and postGIS
 
 You will need a postGIS (postgres version >= 12; postGIS version >=3) database with some Albion data in it (see below).
 
@@ -44,43 +41,47 @@ SELECT  ST_AsText(
 
 If the `proj` being used by postGIS doesn't have the datum grids, the result will be way off. It will only be correct if the file `OSTN15_NTv2_OSGBtoETRS.gsb` is in the directory indicated by the environment variable `PROJ_LIB` (or its default location of `/usr/share/proj` or `/usr/local/share/proj`, depending on distro, if `PROJ_LIB` is unset). If your proj version is < 7, this file is found in the project [proj-datumgrid](https://github.com/OSGeo/proj-datumgrid). If it is >=7, it is found in the project [proj-data](https://github.com/OSGeo/PROJ-data). Run `SELECT PostGIS_PROJ_Version();` To get the proj version.
 
-It seems that the postGIS in my distro package manager (debian-based) does include the datum grids by default; however the nixpkgs postGIS does not. See [shared-pg](https://github.com/cse-bristol/shared-pg/blob/master/machine-configuration.nix#L10-L14) for an example of how to get a nixpkgs postGIS to detect the datum grids. Also, [dev-db-shell.nix](https://github.com/cse-bristol/320-albion/blob/master/dev/db-shell.nix) will setup a shell which includes this, see [dev-notes](https://github.com/cse-bristol/320-albion/blob/master/dev/dev-notes.md) for more info. I don't know if the docker postGIS includes them or not.
+The postGIS in some distro package managers (e.g. debian-based ones) do include the datum grids by default; however the nixpkgs postGIS does not.
 
-### Albion dependencies
+There will need to be at least the following table in the postGIS install:
 
-At least some bits of the albion database must have been created locally using scripts from [320-albion-import](https://github.com/cse-bristol/320-albion). Currently, the bits required by all are:
-* local dev setup: `database/local-dev-setup.sql` - run manually
-* basic setup: `database/setup.db.sql` - will be run whenever any import job is run, or can be run manually
+* schema: `mastermap`
+* table: `building_27700`
+* columns: `toid TEXT`, `geom_27700 geometry(Polygon,27700)`. It can have others but these are the only ones required.
 
-Each model also needs some bits of Albion at least partially loaded:
+Optionally, this table will also be used if present. It is only used to burn in buildings missing from the LiDAR as obstacles to be used when detecting the horizon profiles of present buildings.
 
-#### solar PV:
-* OSMM
-* OSMM heights
+* schema: `mastermap`
+* table: `height`
+* columns: `toid TEXT`, `abs_hmax`, `abs_h2`. It can have others but these are the only ones required.
 
-#### heat demand:
-* buildings aggregate
+We use the unique building ID (TOID) and building footprint geometry from OS mastermap (hence the table names) - however this is not necessarily required: as long as the polygons align properly with the LiDAR used, any building geometry and height data could be used. TOIDs are open-licensed data but height and geometry are not.
 
-#### hard/soft dig:
-* OSMM highways
-* OS Greenspace
-* OS natural land
+### LiDAR
 
-## Environment variables
+The model can use LiDAR in geoTIFF format at resolutions 50cm, 1m or 2m. 1m is ideal as 2m is too low-resolution to pick up many features and 50cm increases the time taken to fit planes to LiDAR. The model expects LiDAR tiles to be pre-loaded as out-of-band rasters into postGIS in the tables `models.lidar_50cm`, `models.lidar_1m`, and `models.lidar_2m`. 
+
+Two Python modules are included which perform this task in different ways - see `solar_pv.lidar.bulk_lidar_client` and `solar_pv.lidar.defra_lidar_api_client`, but as long as the LiDAR ends up in the right tables any other method is fine too.
+
+### Environment variables
 
 * `LIDAR_DIR` - dir to store downloaded LiDAR tiles and tiles that have been extracted and processed from the raw format
-* `BULK_LIDAR_DIR` - directory containing bulk LiDAR for England, Scotland and Wales. This should have the following directory structure:
+* `BULK_LIDAR_DIR` - This can be ignored unless using `solar_pv.lidar.bulk_lidar_client` to load LiDAR. This is the directory containing bulk LiDAR for England, Scotland and Wales. This should have the following directory structure:
   * 206817_LIDAR_Comp_DSM
     * LIDAR-DSM-50CM-ENGLAND-EA
     * LIDAR-DSM-1M-ENGLAND-EA
     * LIDAR-DSM-2M-ENGLAND-EA
   * scotland
   * wales
-* `HEAT_DEMAND_DIR` - dir to store intermediate stages of heat demand modelling. Final outputs are in the database.
 * `SOLAR_DIR` - dir to store outputs and intermediate stages of solar PV modelling. Final outputs are in the database.
 * `PVGIS_DATA_TAR_FILE_DIR` - The directory containing the `pvgis_data.tar` file
 * `PVGIS_GRASS_DBASE_DIR` - where to create the GRASS dbase for PVMAPS
-* `SMTP_FROM` - (optional) email to send notifications from
-* `SMTP_PASS` - (optional) password for email to send notifications from
-* `EMAIL_TO_NOTIFY_ON_FAILURE` - (optional) email to notify if jobs or result extraction fails
 * `USE_LIDAR_FROM_API` - (optional) if set to a value Python will coerce to True, allow falling back to the DEFRA LiDAR API if relevant LiDAR tiles are not found in the bulk LiDAR. This can be left unset, in which case the API will never be used.
+
+## Development
+
+`default.nix` contains the dependencies required to setup a dev environment. The `default.nix` in this repo also has the dependencies required for the repositories `320-albion` and `320-albion-webapp`.
+
+Run `nix-build default.nix -o nixenv` to create something equivalent to a python virtualenv that you can tell your IDE to use as a virtualenv. 
+
+I also start pycharm from a nix-shell (command plain `nix-shell`, will use `default.nix`) using `/opt/pycharm-community-2020.3.3/bin/pycharm.sh  > /dev/null 2>&1 &` so that it can understand the dependencies properly. This isn't ideal as you have to rebuild nixenv and restart the nix-shell and pycharm whenever you change a dependency, but that doesn't happen often.

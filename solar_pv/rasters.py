@@ -225,7 +225,7 @@ def create_elevation_override_raster(pg_uri: str,
                                      job_id: int,
                                      solar_dir: str,
                                      elevation_raster_27700_filename: str) -> Optional[str]:
-    if has_outdated_lidar(pg_uri, job_id):
+    if has_outdated_lidar(pg_uri, job_id) and count(pg_uri, "mastermap", "height") > 0:
         srid = gdal_helpers.get_srid(elevation_raster_27700_filename, fallback=27700)
         res = gdal_helpers.get_xres_yres(elevation_raster_27700_filename)
 
