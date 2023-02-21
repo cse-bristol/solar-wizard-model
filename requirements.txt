@@ -1,4 +1,5 @@
-psycopg2-binary==2.9.3
+# versions match nix channel nixos-22.05:
+psycopg2==2.9.3
 requests==2.27.1
 gdal==3.4.2
 numpy==1.21.5

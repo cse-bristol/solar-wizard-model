@@ -18,7 +18,7 @@ def _load_data(filename: str) -> List[dict]:
 
 
 def _ransac(filename: str, res: float):
-    return len(_ransac_building(_load_data(join(_RANSAC_DATA, filename)), filename, res, debug=True))
+    return len(_ransac_building(_load_data(join(_RANSAC_DATA, filename)), filename, res, debug=False))
 
 
 class RansacTestCase(unittest.TestCase):
