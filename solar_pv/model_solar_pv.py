@@ -8,15 +8,15 @@ from os.path import join
 import psycopg2.extras
 from psycopg2.sql import Identifier
 
-import tables as tables
+from solar_pv import tables
 from solar_pv.db_funcs import process_pg_uri, \
     connection, sql_command, sql_script
 from solar_pv.postgis import raster_tile_coverage_count
-from outdated_lidar.outdated_lidar_check import check_lidar
-from panels.panels import place_panels
-from pvgis.pvgis import pvgis
-from ransac.run_ransac import run_ransac
-from rasters import generate_rasters
+from solar_pv.outdated_lidar.outdated_lidar_check import check_lidar
+from solar_pv.panels.panels import place_panels
+from solar_pv.pvgis.pvgis import pvgis
+from solar_pv.ransac.run_ransac import run_ransac
+from solar_pv.rasters import generate_rasters
 
 
 def model_solar_pv(pg_uri: str,

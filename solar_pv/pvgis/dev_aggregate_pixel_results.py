@@ -11,9 +11,9 @@ from shapely import geometry, wkt
 from solar_pv import paths
 from solar_pv.db_funcs import connection
 from solar_pv.postgis import pixels_for_buildings
-import tables
-from constants import SYSTEM_LOSS
-from pvgis.aggregate_pixel_results import _aggregate_pixel_data, \
+from solar_pv import tables
+from solar_pv.constants import SYSTEM_LOSS
+from solar_pv.pvgis.aggregate_pixel_results import _aggregate_pixel_data, \
     _load_panels, _load_roof_planes
 
 PIXEL_DATA = join(paths.TEST_DATA, "pixel_aggregation")

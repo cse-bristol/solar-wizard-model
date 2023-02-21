@@ -20,7 +20,7 @@ from shapely.strtree import STRtree
 from solar_pv.db_funcs import count, sql_command, connection
 from solar_pv.geos import square
 from solar_pv.postgis import pixels_for_buildings
-import tables
+from solar_pv import tables
 from solar_pv.util import get_cpu_count
 
 

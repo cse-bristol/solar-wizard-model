@@ -14,8 +14,8 @@ from datetime import date
 from os.path import join
 from typing import List, Tuple, Optional
 
-from pvgis.grass_gis_user import GrassGISUser
-from pvgis.pvmaps_setup import PVMapsSetup
+from solar_pv.pvgis.grass_gis_user import GrassGISUser
+from solar_pv.pvgis.pvmaps_setup import PVMapsSetup
 
 ##
 # Raster names used in grass db

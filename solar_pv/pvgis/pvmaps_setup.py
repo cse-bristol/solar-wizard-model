@@ -11,7 +11,7 @@ from os.path import join
 from typing import Dict, List, Set, Tuple
 
 from solar_pv import gdal_helpers
-from pvgis.grass_gis_user import GrassGISUser
+from solar_pv.pvgis.grass_gis_user import GrassGISUser
 from solar_pv.transformations import _7_PARAM_SHIFT
 
 BOUNDS_OF_27700: str = "bounds_of_27700"

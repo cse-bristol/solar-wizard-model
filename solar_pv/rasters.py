@@ -8,18 +8,18 @@ import os
 from psycopg2.sql import Identifier
 from typing import Tuple, Optional
 
-import tables as tables
 import psycopg2.extras
+from solar_pv import tables
 from solar_pv import gdal_helpers
 from solar_pv.db_funcs import count, connection, sql_command
 from solar_pv.lidar.lidar import LIDAR_NODATA
 from solar_pv.postgis import get_merged_lidar_tiles, rasters_to_postgis, \
     add_raster_constraints
-import mask
-from constants import POSTGIS_TILESIZE
-from raster_names import MASK_27700_BUF1_TIF, MASK_27700_BUF0_TIF, ELEVATION_27700_TIF, SLOPE_27700_TIF, \
+from solar_pv import mask
+from solar_pv.constants import POSTGIS_TILESIZE
+from solar_pv.raster_names import MASK_27700_BUF1_TIF, MASK_27700_BUF0_TIF, ELEVATION_27700_TIF, SLOPE_27700_TIF, \
     ASPECT_27700_TIF
-from roof_polygons.roof_polygons import get_flat_roof_aspect_sql, create_flat_roof_aspect, \
+from solar_pv.roof_polygons.roof_polygons import get_flat_roof_aspect_sql, create_flat_roof_aspect, \
     has_flat_roof, get_outdated_lidar_building_h_sql_27700, has_outdated_lidar
 from solar_pv.transformations import _7_PARAM_SHIFT
 

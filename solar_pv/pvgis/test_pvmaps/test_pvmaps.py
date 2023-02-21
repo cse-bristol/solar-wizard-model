@@ -14,15 +14,16 @@ import math
 
 from osgeo import osr, ogr
 
-from pvgis.pvmaps import PVMaps, CSI, OUT_DIRECT_RAD_BASENAME, OUT_DIFFUSE_RAD_BASENAME, \
+from solar_pv.pvgis.pvmaps import PVMaps, CSI, OUT_DIRECT_RAD_BASENAME, OUT_DIFFUSE_RAD_BASENAME, \
     HORIZON090_BASENAME, SLOPE_ADJUSTED, ASPECT_GRASS_ADJUSTED, OUT_PV_POWER_WIND_SPECTRAL_BASENAME
 from solar_pv.paths import RESOURCES_DIR, TEST_DATA
+from solar_pv.test_utils.test_funcs import ParameterisedTestCase
 
 TEST_DATA_DIR: str = f"{TEST_DATA}/pvmaps"
 GRASS_DBASE: str = f"{TEST_DATA_DIR}/grass_dbase"
 
 
-class TestPVMaps:
+class TestPVMaps(ParameterisedTestCase):
     instance: PVMaps
     INPUT_DIR: str
     DATA_INPUT_DIR: str

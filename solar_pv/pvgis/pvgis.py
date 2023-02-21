@@ -7,16 +7,15 @@ from typing import List, Optional
 import os
 
 
-import tables as tables
-from solar_pv import paths
+from solar_pv import tables, paths
 from solar_pv.db_funcs import connection
 from solar_pv.lidar.lidar import LIDAR_NODATA
 from solar_pv.postgis import rasters_to_postgis, create_raster_table
-from constants import FLAT_ROOF_DEGREES_THRESHOLD, SYSTEM_LOSS, \
+from solar_pv.constants import FLAT_ROOF_DEGREES_THRESHOLD, SYSTEM_LOSS, \
     POSTGIS_TILESIZE
-from pvgis import pvmaps
-from pvgis.aggregate_pixel_results import aggregate_pixel_results
-from rasters import create_elevation_override_raster, generate_flat_roof_aspect_raster
+from solar_pv.pvgis import pvmaps
+from solar_pv.pvgis.aggregate_pixel_results import aggregate_pixel_results
+from solar_pv.rasters import create_elevation_override_raster, generate_flat_roof_aspect_raster
 from solar_pv.util import get_cpu_count
 
 

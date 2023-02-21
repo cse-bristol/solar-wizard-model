@@ -4,10 +4,10 @@ import json
 from os.path import join
 
 from solar_pv.paths import TEST_DATA
-import tables
-from constants import SYSTEM_LOSS
-from pvgis.aggregate_pixel_results import _aggregate_pixel_data
-from pvgis.dev_aggregate_pixel_results import RASTER_TABLES
+from solar_pv import tables
+from solar_pv.constants import SYSTEM_LOSS
+from solar_pv.pvgis.aggregate_pixel_results import _aggregate_pixel_data
+from solar_pv.pvgis.dev_aggregate_pixel_results import RASTER_TABLES
 from solar_pv.test_utils.test_funcs import ParameterisedTestCase
 
 _PIXEL_DATA = join(TEST_DATA, "pixel_aggregation")

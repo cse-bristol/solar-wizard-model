@@ -11,13 +11,13 @@ from shapely import wkt, affinity, ops
 from shapely.geometry import LineString, Polygon, CAP_STYLE, JOIN_STYLE
 from shapely.validation import make_valid
 
-import tables as tables
+from solar_pv import tables
 from solar_pv import gdal_helpers
 from solar_pv.db_funcs import connection, sql_command, connect
 from solar_pv.geos import azimuth, square, largest_polygon
-from constants import FLAT_ROOF_DEGREES_THRESHOLD, \
+from solar_pv.constants import FLAT_ROOF_DEGREES_THRESHOLD, \
     FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD, AZIMUTH_ALIGNMENT_THRESHOLD
-from roof_polygons.roof_polygon_archetypes import \
+from solar_pv.roof_polygons.roof_polygon_archetypes import \
     construct_archetypes, get_archetype
 
 

@@ -5,7 +5,7 @@ from solar_pv.lidar.en_to_grid_ref import en_to_grid_ref, round_down_to, \
 from solar_pv.test_utils.test_funcs import ParameterisedTestCase
 
 
-class GridRefTest(ParameterisedTestCase):
+class EnToGridRefTest(ParameterisedTestCase):
 
     def test_en_to_grid_ref(self):
         self.parameterised_test([

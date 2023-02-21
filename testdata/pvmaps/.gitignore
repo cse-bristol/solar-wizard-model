@@ -1,4 +1,5 @@
 grass_dbase
 pvgis_data_tar/pvgis_data.tar
-test_pvmaps_real_data/outputs
+outputs
 test_pvmaps_test_data/generated_test_inputs
+test_pvmaps_functions/_create_patched_elevation/out

@@ -5,7 +5,7 @@ from os.path import join
 from typing import List
 
 from solar_pv.paths import TEST_DATA
-from outdated_lidar.outdated_lidar_check import _check_building
+from solar_pv.outdated_lidar.outdated_lidar_check import _check_building
 from solar_pv.test_utils.test_funcs import ParameterisedTestCase
 
 _PIXEL_DATA = join(TEST_DATA, "outdated_lidar")

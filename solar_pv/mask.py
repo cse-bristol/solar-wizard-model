@@ -3,7 +3,7 @@
 import psycopg2.extras
 from psycopg2.sql import SQL, Identifier, Literal
 
-import tables as tables
+from solar_pv import tables
 from solar_pv.db_funcs import connection
 from solar_pv import gdal_helpers
 

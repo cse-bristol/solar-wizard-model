@@ -8,19 +8,18 @@ import traceback
 from typing import List, Dict
 import multiprocessing as mp
 
-from solar_pv.db_funcs import count, connection, sql_command
-from solar_pv.postgis import pixels_for_buildings
-import tables
-
 from psycopg2.extras import DictCursor, execute_values
 from psycopg2.sql import SQL, Identifier
 import numpy as np
 
-from constants import RANSAC_LARGE_BUILDING, \
+from solar_pv.db_funcs import count, connection, sql_command
+from solar_pv.postgis import pixels_for_buildings
+from solar_pv import tables
+from solar_pv.constants import RANSAC_LARGE_BUILDING, \
     RANSAC_BASE_MAX_TRIALS, RANSAC_ABS_MAX_TRIALS, FLAT_ROOF_DEGREES_THRESHOLD
-from ransac.ransac import RANSACRegressorForLIDAR, _aspect, \
+from solar_pv.ransac.ransac import RANSACRegressorForLIDAR, _aspect, \
     _slope, RANSACValueError
-from roof_polygons.roof_polygons import create_roof_polygons
+from solar_pv.roof_polygons.roof_polygons import create_roof_polygons
 from solar_pv.util import get_cpu_count
 
 

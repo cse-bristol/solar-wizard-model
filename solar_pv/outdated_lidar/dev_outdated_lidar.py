@@ -8,7 +8,7 @@ from psycopg2.extras import DictCursor
 
 from solar_pv import paths
 from solar_pv.db_funcs import connection
-from outdated_lidar.outdated_lidar_check import _load_buildings, \
+from solar_pv.outdated_lidar.outdated_lidar_check import _load_buildings, \
     _check_building
 
 

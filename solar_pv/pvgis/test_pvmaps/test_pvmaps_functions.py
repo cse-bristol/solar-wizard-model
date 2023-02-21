@@ -5,9 +5,9 @@ import subprocess
 import unittest
 from os.path import join
 
-from pvgis.pvmaps import PVMaps, CSI, ELEVATION_OVERRIDE, ELEVATION, ELEVATION_PATCHED
+from solar_pv.pvgis.pvmaps import PVMaps, CSI, ELEVATION_OVERRIDE, ELEVATION, ELEVATION_PATCHED
 from solar_pv.paths import RESOURCES_DIR, TEST_DATA
-from pvgis.test_pvmaps.test_pvmaps import TestPVMaps
+from solar_pv.pvgis.test_pvmaps.test_pvmaps import TestPVMaps
 
 TEST_DATA_DIR: str = f"{TEST_DATA}/pvmaps"
 GRASS_DBASE: str = f"{TEST_DATA_DIR}/grass_dbase"

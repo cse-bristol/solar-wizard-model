@@ -8,11 +8,10 @@ import os
 from typing import List, Tuple, Optional
 
 import numpy as np
-import pytest
 from osgeo import gdal
 
-from pvgis.pvmaps import SLOPE, ASPECT_GRASS
-from pvgis.test_pvmaps.test_pvmaps import TestPVMaps, TEST_DATA_DIR
+from solar_pv.pvgis.pvmaps import SLOPE, ASPECT_GRASS
+from solar_pv.pvgis.test_pvmaps.test_pvmaps import TestPVMaps, TEST_DATA_DIR
 
 
 # Run pytest with this to see results while running and see logging outputs
@@ -34,31 +33,29 @@ class TestPVMapsRealData(TestPVMaps):
     FLAT_ROOF_RASTER_FILENAME: str = "flat_roof_nan_27700.tif"
 
     @classmethod
-    def setup_class(cls):
+    def setUpClass(cls):
         super()._run_pvmaps()
 
-    @pytest.mark.parametrize(
-        "exp, day",
-        [
+    def test_get_solar_declination(self):
+        def _dotest(exp: float, day: int):
+            act = self.instance._calc_solar_declination(day)
+            print(f"{act} {exp} {abs(act-exp)}")
+            assert abs(act-exp) < 0.005
+        self.parameterised_test([
             # Below are the values from PVMAPS script - totpv_incl.sh
-            (-0.36146, 17),
-            (-0.22358, 46),
-            (-0.03141, 75),
-            (0.17052, 105),
-            (0.32864, 135),
-            (0.40265, 162),
-            (0.36931, 198),
-            (0.23823, 228),
-            (0.04695, 259),
-            (-0.15219, 289),
-            (-0.32062, 319),
-            (-0.40125, 345)
-        ],
-    )
-    def test_get_solar_declination(self, day, exp):
-        act = self.instance._calc_solar_declination(day)
-        print(f"{act} {exp} {abs(act-exp)}")
-        assert abs(act-exp) < 0.005
+            (-0.36146, 17, None),
+            (-0.22358, 46, None),
+            (-0.03141, 75, None),
+            (0.17052, 105, None),
+            (0.32864, 135, None),
+            (0.40265, 162, None),
+            (0.36931, 198, None),
+            (0.23823, 228, None),
+            (0.04695, 259, None),
+            (-0.15219, 289, None),
+            (-0.32062, 319, None),
+            (-0.40125, 345, None),
+        ], _dotest)
 
     def test_slope_raster(self):
         # From: "gdaldem slope elevation_27700.tif slope_27700.tif"

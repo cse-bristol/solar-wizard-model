@@ -4,7 +4,7 @@ import math
 
 from shapely import wkt
 
-from panels.panels import _roof_panels
+from solar_pv.panels.panels import _roof_panels
 from solar_pv.test_utils.test_funcs import ParameterisedTestCase
 
 _failed = {"roof_plane_id": 4564,

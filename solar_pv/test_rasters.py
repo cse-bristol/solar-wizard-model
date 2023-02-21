@@ -6,11 +6,15 @@ import unittest
 from os.path import join
 from statistics import mean
 
-import testing.postgresql
+try:
+    import testing.postgresql
+except ModuleNotFoundError:
+    pass
+
 import psycopg2
 import psycopg2.extras
 
-from rasters import create_elevation_override_raster
+from solar_pv.rasters import create_elevation_override_raster
 
 _TEST_ELEVATION_RASTER: str = os.path.realpath(
     "../testdata/solar_pv/rasters/inputs/elevation_4326.tif")
@@ -25,6 +29,7 @@ _HEIGHTS = {
 }
 
 
+@unittest.skip("db test")
 class RastersTests(unittest.TestCase):
     def setUp(self):
         self.postgresql = testing.postgresql.Postgresql()

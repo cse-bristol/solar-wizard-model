@@ -13,11 +13,7 @@ from typing import List, Optional, Tuple
 from osgeo import gdal
 import numpy as np
 
-from pvgis.test_pvmaps.test_pvmaps import TestPVMaps, TEST_DATA_DIR
-
-
-# Run pytest with this to see results while running and see logging outputs
-# --capture=no --log-cli-level=INFO
+from solar_pv.pvgis.test_pvmaps.test_pvmaps import TestPVMaps, TEST_DATA_DIR
 
 
 class TestPVMapsTestData(TestPVMaps):
@@ -74,7 +70,7 @@ class TestPVMapsTestData(TestPVMaps):
     }
 
     @classmethod
-    def setup_class(cls):
+    def setUpClass(cls):
         cls.test_locns = cls.create_test_rasters()
 
     def test_outputs(self):

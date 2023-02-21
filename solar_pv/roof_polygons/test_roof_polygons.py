@@ -7,8 +7,8 @@ import numpy as np
 from shapely import wkt
 
 from solar_pv import paths
-from constants import FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD
-from roof_polygons.roof_polygons import _building_orientations, \
+from solar_pv.constants import FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD
+from solar_pv.roof_polygons.roof_polygons import _building_orientations, \
     _create_roof_polygons
 from solar_pv.test_utils.test_funcs import ParameterisedTestCase
 

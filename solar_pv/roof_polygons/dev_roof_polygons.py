@@ -15,8 +15,8 @@ from shapely.geometry import Polygon
 
 from solar_pv import paths
 from solar_pv.db_funcs import connection, sql_command
-import tables
-from roof_polygons.roof_polygons import _building_geoms, \
+from solar_pv import tables
+from solar_pv.roof_polygons.roof_polygons import _building_geoms, \
     _create_roof_polygons, _to_test_data
 
 _MAX_ROOF_SLOPE_DEGREES = 70

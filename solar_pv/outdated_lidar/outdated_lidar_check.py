@@ -11,8 +11,8 @@ import psycopg2.extras
 from psycopg2.sql import SQL, Identifier, Literal
 
 from solar_pv.db_funcs import count, sql_command, connection
-import tables
-from outdated_lidar.perimeter_gradient import \
+from solar_pv import tables
+from solar_pv.outdated_lidar.perimeter_gradient import \
     check_perimeter_gradient, HeightAggregator
 from solar_pv.util import get_cpu_count
 

@@ -7,7 +7,7 @@ from psycopg2.sql import Identifier
 from shapely import wkt
 
 from solar_pv.db_funcs import connection, sql_command
-import tables
+from solar_pv import tables
 from panels.panels import _roof_panels
 
 

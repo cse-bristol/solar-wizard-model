@@ -8,12 +8,13 @@ The main entrypoint of the model is the function `model_solar_pv` in module `sol
 
 The model has the following software dependencies:
 * various python libraries (see `requirements.txt`, can also be installed using nix - see `default.nix`)
-* postgreSQL and postGIS
-* PVMAPS (a GRASS GIS plugin written in C) - this can be installed using `default.nix` using nix
+* [postgreSQL](https://www.postgresql.org/) and [postGIS](https://postgis.net/)
+* [PVMAPS](https://joint-research-centre.ec.europa.eu/pvgis-online-tool/pvgis-data-download/pvmaps_en) (a GRASS GIS plugin written in C) - this can be installed using `default.nix` using nix
 
 The model has the following data dependencies:
 * building footprint geometries
 * LiDAR elevation rasters
+* irradiation raster data, which can be downloaded from the PVMAPS link above, or from https://re.jrc.ec.europa.eu/pvmaps/pvgis_data.tar
 
 We have tried to make the model as independent as possible from our internal infrastructure where it runs, but this has not been our main priority when developing and you may find things that don't work, or design decisions that don't make sense when viewed without the context of knowing how we run the model.
 
@@ -76,7 +77,13 @@ Two Python modules are included which perform this task in different ways - see 
 * `SOLAR_DIR` - dir to store outputs and intermediate stages of solar PV modelling. Final outputs are in the database.
 * `PVGIS_DATA_TAR_FILE_DIR` - The directory containing the `pvgis_data.tar` file
 * `PVGIS_GRASS_DBASE_DIR` - where to create the GRASS dbase for PVMAPS
-* `USE_LIDAR_FROM_API` - (optional) if set to a value Python will coerce to True, allow falling back to the DEFRA LiDAR API if relevant LiDAR tiles are not found in the bulk LiDAR. This can be left unset, in which case the API will never be used.
+* `USE_LIDAR_FROM_API` - This can be ignored unless using `solar_pv.lidar.bulk_lidar_client` to load LiDAR. If set to a value Python will coerce to True, allow falling back to the DEFRA LiDAR API if relevant LiDAR tiles are not found in the bulk LiDAR. This can be left unset, in which case the API will never be used.
+
+## Tests
+
+Some of the tests require the PVMAPS irradiation data.
+* Download the 10GB tar file from https://re.jrc.ec.europa.eu/pvmaps/pvgis_data.tar and either place it at, or symlink to it from, `test_data/pvmaps/pvgis_data_dir/pvgis_data.tar`
+* run `python3 -m unittest`
 
 ## Development
 

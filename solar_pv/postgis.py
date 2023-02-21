@@ -12,7 +12,7 @@ from typing import List, Dict
 from solar_pv.db_funcs import sql_script, sql_command
 from solar_pv.gdal_helpers import run
 from solar_pv.lidar.lidar import LidarTile, Resolution
-import tables
+from solar_pv import tables
 
 
 def load_lidar(pg_conn, tiles: List[LidarTile], temp_dir: str):

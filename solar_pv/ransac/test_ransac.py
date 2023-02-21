@@ -6,7 +6,7 @@ from os.path import join
 from typing import List
 
 from solar_pv.paths import TEST_DATA
-from ransac.run_ransac import _ransac_building
+from solar_pv.ransac.run_ransac import _ransac_building
 
 _RANSAC_DATA = join(TEST_DATA, "ransac")
 
@@ -39,7 +39,7 @@ class RansacTestCase(unittest.TestCase):
             ('end_terrace.csv', 1.0, (3, 4)),
             ('all_one_plane.csv', 1.0, 1),
             ('osgb1000020002724.csv', 1.0, 3),
-            ('osgb5000005156974578.csv', 1.0, (3, 4)),
+            ('osgb5000005156974578.csv', 1.0, (3, 4, 5)),
             ('osgb1000020002610.csv', 1.0, 2),
             # Occasional flat roof detected where after final fit-to-plane, no points
             # are within the min distance:

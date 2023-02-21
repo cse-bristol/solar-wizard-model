@@ -13,7 +13,7 @@ from shapely.errors import ShapelyError
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.validation import make_valid
 
-import tables as tables
+from solar_pv import tables
 from solar_pv.db_funcs import sql_command, connection, count
 from solar_pv.geos import get_grid_cells, largest_polygon
 from solar_pv.util import get_cpu_count
