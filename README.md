@@ -2,14 +2,19 @@
 
 The rooftop solar PV suitability model backing [solarwizard.org.uk](https://solarwizard.org.uk).
 
+The model is documented at [documents/pv_model.md](documents/pv_model.md).
+
 ## Dependencies and setup
 
-The main entrypoint of the model is the function `model_solar_pv` in module `solar_pv.model_solar_pv`.
+The main entrypoint of the model is the function `model_solar_pv` in module `solar_pv.model_solar_pv`. Results are inserted into 3 postgres tables:
+* `models.pv_building` contains LiDAR-derived building height, and a reason (if any) why the building has been skipped in PV modelling, which can be one of 4 things: `NO_LIDAR_COVERAGE`, `OUTDATED_LIDAR_COVERAGE`, `NO_ROOF_PLANES_DETECTED`, or `ALL_ROOF_PLANES_UNUSABLE`.
+* `models.pv_roof_plane` contains the slope and aspect or the roof plane. A building can have 0 to many of these.
+* `models.pv_panel` contains per-modelled-panel monthly and yearly predicted kWh and a horizon profile. A roof plane can have 1 to many of these.
 
 The model has the following software dependencies:
 * various python libraries (see `requirements.txt`, can also be installed using nix - see `default.nix`)
 * [postgreSQL](https://www.postgresql.org/) and [postGIS](https://postgis.net/)
-* [PVMAPS](https://joint-research-centre.ec.europa.eu/pvgis-online-tool/pvgis-data-download/pvmaps_en) (a GRASS GIS plugin written in C) - this can be installed using `default.nix` using nix
+* [PVMAPS](https://joint-research-centre.ec.europa.eu/pvgis-online-tool/pvgis-data-download/pvmaps_en) (a [GRASS GIS](https://grass.osgeo.org/) plugin written in C) - this can be installed using `default.nix` using nix
 
 The model has the following data dependencies:
 * building footprint geometries
@@ -66,7 +71,13 @@ Two Python modules are included which perform this task in different ways - see 
 
 ### Environment variables
 
-* `LIDAR_DIR` - dir to store downloaded LiDAR tiles and tiles that have been extracted and processed from the raw format
+Required variables:
+
+* `PVGIS_DATA_TAR_FILE_DIR` - The directory containing the `pvgis_data.tar` file
+* `PVGIS_GRASS_DBASE_DIR` - where to create the GRASS dbase for PVMAPS
+
+Optional variables:
+
 * `BULK_LIDAR_DIR` - This can be ignored unless using `solar_pv.lidar.bulk_lidar_client` to load LiDAR. This is the directory containing bulk LiDAR for England, Scotland and Wales. This should have the following directory structure:
   * 206817_LIDAR_Comp_DSM
     * LIDAR-DSM-50CM-ENGLAND-EA
@@ -74,9 +85,6 @@ Two Python modules are included which perform this task in different ways - see 
     * LIDAR-DSM-2M-ENGLAND-EA
   * scotland
   * wales
-* `SOLAR_DIR` - dir to store outputs and intermediate stages of solar PV modelling. Final outputs are in the database.
-* `PVGIS_DATA_TAR_FILE_DIR` - The directory containing the `pvgis_data.tar` file
-* `PVGIS_GRASS_DBASE_DIR` - where to create the GRASS dbase for PVMAPS
 * `USE_LIDAR_FROM_API` - This can be ignored unless using `solar_pv.lidar.bulk_lidar_client` to load LiDAR. If set to a value Python will coerce to True, allow falling back to the DEFRA LiDAR API if relevant LiDAR tiles are not found in the bulk LiDAR. This can be left unset, in which case the API will never be used.
 
 ## Tests
