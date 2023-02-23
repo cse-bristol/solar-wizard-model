@@ -78,12 +78,6 @@ def get_grid_cells(poly, cell_w, cell_h, spacing_w=0, spacing_h=0, grid_start: s
         ymin = round_down_to(ymin, cell_h + spacing_h)
         xmax = round_up_to(xmax, cell_w + spacing_w)
         ymax = round_up_to(ymax, cell_h + spacing_h)
-    elif grid_start == 'bounds-buffered':
-        # add a 1-cell buffer:
-        xmin -= cell_w + spacing_w
-        ymin -= cell_h + spacing_h
-        xmax += cell_w + spacing_w
-        ymax += cell_h + spacing_h
     elif grid_start != 'bounds':
         raise ValueError(f"Unrecognised grid_start: {grid_start}")
 
