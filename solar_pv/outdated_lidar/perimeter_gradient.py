@@ -1,7 +1,7 @@
 # This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 from dataclasses import dataclass
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any, Tuple, Optional, List
 
 from shapely import wkt, strtree
 from shapely.geometry import LineString, Point
@@ -15,7 +15,7 @@ class HeightAggregator:
     within_elevation_sum: float = 0.0
     without_elevation_sum: float = 0.0
 
-    def __init__(self, pixels, debug: bool = False) -> None:
+    def __init__(self, pixels: List[dict], debug: bool = False) -> None:
         self.debug = debug
         for pixel in pixels:
             self._process_pixel(pixel)

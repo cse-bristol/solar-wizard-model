@@ -74,14 +74,14 @@ def _check_lidar_page(pg_uri: str, job_id: int, resolution_metres: float, page: 
         print(f"Checked page {page} of LiDAR, took {round(time.time() - start_time, 2)} s.")
 
 
-def _check_building(building, resolution_metres: float, debug: bool = False):
+def _check_building(building: dict, resolution_metres: float, debug: bool = False):
     reason = _check_coverage(building)
     if not reason:
         reason = check_perimeter_gradient(building, resolution_metres, debug=debug)
     return reason
 
 
-def _check_coverage(building):
+def _check_coverage(building: dict):
     for pixel in building['pixels']:
         if pixel['within_building']:
             return None
@@ -156,7 +156,7 @@ def _load_pixels(pg_conn, job_id: int, interior: bool, page: int, page_size: int
         result_extractor=lambda rows: [dict(row) for row in rows])
 
 
-def _load_buildings(pg_conn, job_id: int, page: int, page_size: int, toids: List[str] = None):
+def _load_buildings(pg_conn, job_id: int, page: int, page_size: int, toids: List[str] = None) -> List[dict]:
     if toids:
         toid_filter = SQL("WHERE b.toid = ANY({toids})").format(toids=Literal(toids))
     else:
