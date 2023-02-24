@@ -118,6 +118,22 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
             if not roof_poly or roof_poly.is_empty:
                 continue
 
+            # constrain roof polygons to building geometry, enforcing min dist to edge:
+            roof_poly = _constrain_to_building(building_geom,
+                                               roof_poly,
+                                               large_building_threshold,
+                                               min_dist_to_edge_large_m,
+                                               min_dist_to_edge_m)
+
+            if not roof_poly or roof_poly.is_empty:
+                continue
+
+            # remove overlaps :
+            roof_poly = _remove_overlaps(toid, roof_poly, polygons_by_toid)
+
+            if not roof_poly or roof_poly.is_empty:
+                continue
+
             # Potentially use a pre-made roof archetype instead:
             plane['archetype'] = False
             if not is_flat \
@@ -130,35 +146,21 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
                     plane['archetype'] = True
                     plane['archetype_pattern'] = json.dumps(archetype.pattern)
 
-            if not roof_poly or roof_poly.is_empty:
-                continue
+                    # constrain roof polygons (again):
+                    roof_poly = _constrain_to_building(building_geom,
+                                                       roof_poly,
+                                                       large_building_threshold,
+                                                       min_dist_to_edge_large_m,
+                                                       min_dist_to_edge_m)
 
-            # constrain roof polygons to building geometry, enforcing min dist to edge:
-            if building_geom.area < large_building_threshold:
-                neg_buffer = -min_dist_to_edge_m
-            else:
-                neg_buffer = -min_dist_to_edge_large_m
-            building_geom_shrunk = building_geom.buffer(
-                neg_buffer, cap_style=CAP_STYLE.square, join_style=JOIN_STYLE.mitre)
-            roof_poly = roof_poly.intersection(building_geom_shrunk)
-            roof_poly = largest_polygon(roof_poly)
+                    if not roof_poly or roof_poly.is_empty:
+                        continue
 
-            if not roof_poly or roof_poly.is_empty:
-                continue
+                    # remove overlaps (again):
+                    roof_poly = _remove_overlaps(toid, roof_poly, polygons_by_toid)
 
-            # don't allow overlapping roof polygons:
-            intersecting_polys = [p for p in polygons_by_toid[toid] if p.intersects(roof_poly)]
-            if len(intersecting_polys) > 0:
-                other_polys = ops.unary_union(intersecting_polys).buffer(0.1,
-                                                                         cap_style=CAP_STYLE.square,
-                                                                         join_style=JOIN_STYLE.mitre,
-                                                                         resolution=1)
-                roof_poly = roof_poly.difference(other_polys)
-                roof_poly = largest_polygon(roof_poly)
-            roof_poly = make_valid(roof_poly)
-
-            if not roof_poly or roof_poly.is_empty:
-                continue
+                    if not roof_poly or roof_poly.is_empty:
+                        continue
 
             # any other planes in the same toid will now not be allowed to overlap this one:
             polygons_by_toid[toid].append(roof_poly)
@@ -189,6 +191,35 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
             raise e
 
     return roof_polygons
+
+
+def _remove_overlaps(toid: str, roof_poly: Polygon, polygons_by_toid: Dict[str, List[Polygon]]):
+    intersecting_polys = [p for p in polygons_by_toid[toid] if p.intersects(roof_poly)]
+    if len(intersecting_polys) > 0:
+        other_polys = ops.unary_union(intersecting_polys).buffer(0.1,
+                                                                 cap_style=CAP_STYLE.square,
+                                                                 join_style=JOIN_STYLE.mitre,
+                                                                 resolution=1)
+        roof_poly = roof_poly.difference(other_polys)
+        roof_poly = largest_polygon(roof_poly)
+    roof_poly = make_valid(roof_poly)
+    return roof_poly
+
+
+def _constrain_to_building(building_geom: Polygon,
+                           roof_poly: Polygon,
+                           large_building_threshold: float,
+                           min_dist_to_edge_large_m: float,
+                           min_dist_to_edge_m: float):
+    if building_geom.area < large_building_threshold:
+        neg_buffer = -min_dist_to_edge_m
+    else:
+        neg_buffer = -min_dist_to_edge_large_m
+    building_geom_shrunk = building_geom.buffer(
+        neg_buffer, cap_style=CAP_STYLE.square, join_style=JOIN_STYLE.mitre)
+    roof_poly = roof_poly.intersection(building_geom_shrunk)
+    roof_poly = largest_polygon(roof_poly)
+    return roof_poly
 
 
 def _building_geoms(pg_uri: str, job_id: int, toids: List[str]) -> Dict[str, Polygon]:
