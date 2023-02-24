@@ -31,7 +31,7 @@ class TestPVMaps(ParameterisedTestCase):
 
     ELEVATION_RASTER_FILENAME: str
     MASK_RASTER_FILENAME: str
-    FLAT_ROOF_RASTER_FILENAME: Optional[str]
+    ASPECT_OVERRIDE_RASTER_FILENAME: Optional[str]
 
     FORCED_SLOPE_FILENAME: Optional[str] = None
     FORCED_ASPECT_FILENAME: Optional[str] = None
@@ -80,7 +80,7 @@ class TestPVMaps(ParameterisedTestCase):
                 cls._clean_test_mapsets()
             print("Running create_pvmap for tests")
             cls.instance.create_pvmap(cls.ELEVATION_RASTER_FILENAME, cls.MASK_RASTER_FILENAME,
-                                      flat_roof_aspect_filename=cls.FLAT_ROOF_RASTER_FILENAME,
+                                      aspect_override_raster=cls.ASPECT_OVERRIDE_RASTER_FILENAME,
                                       elevation_override_filename=None,
                                       forced_slope_filename=cls.FORCED_SLOPE_FILENAME,
                                       forced_aspect_filename_compass=None,

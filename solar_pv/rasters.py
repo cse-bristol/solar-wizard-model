@@ -5,7 +5,7 @@ from os.path import join
 
 import logging
 import os
-from psycopg2.sql import Identifier
+from psycopg2.sql import Identifier, SQL
 from typing import Tuple, Optional
 
 import psycopg2.extras
@@ -19,8 +19,6 @@ from solar_pv import mask
 from solar_pv.constants import POSTGIS_TILESIZE
 from solar_pv.raster_names import MASK_27700_BUF1_TIF, MASK_27700_BUF0_TIF, ELEVATION_27700_TIF, SLOPE_27700_TIF, \
     ASPECT_27700_TIF
-from solar_pv.roof_polygons.roof_polygons import get_flat_roof_aspect_sql, create_flat_roof_aspect, \
-    has_flat_roof, get_outdated_lidar_building_h_sql_27700, has_outdated_lidar
 from solar_pv.transformations import _7_PARAM_SHIFT
 
 
@@ -204,21 +202,55 @@ def _load_rasters_to_db(pg_uri: str,
         add_raster_constraints(pg_conn, inverse_masked_elevation_table)
 
 
-def generate_flat_roof_aspect_raster(pg_uri: str,
-                                     job_id: int,
-                                     solar_dir: str,
-                                     mask_raster_27700_filename: str) -> Optional[str]:
-    if has_flat_roof(pg_uri, job_id):
-        srid = gdal_helpers.get_srid(mask_raster_27700_filename, fallback=27700)
-        res = gdal_helpers.get_res(mask_raster_27700_filename)
+def generate_aspect_override_raster(pg_uri: str,
+                                    job_id: int,
+                                    solar_dir: str,
+                                    mask_raster_27700_filename: str) -> str:
+    srid = gdal_helpers.get_srid(mask_raster_27700_filename, fallback=27700)
+    res = gdal_helpers.get_res(mask_raster_27700_filename)
+    aspect_raster_filename = join(solar_dir, 'aspect_override.tif')
 
-        flat_roof_aspect_raster_filename = join(solar_dir, 'flat_roof_aspect.tif')
-        flat_roof_aspect_sql = get_flat_roof_aspect_sql(pg_uri=pg_uri, job_id=job_id)
-        create_flat_roof_aspect(flat_roof_aspect_sql, flat_roof_aspect_raster_filename, pg_uri, res=res, srid=srid)
+    with connection(pg_uri) as pg_conn:
+        mask_sql = SQL(
+            "SELECT ST_Force3D(roof_geom_27700, aspect) FROM {roof_polygons} WHERE usable"
+        ).format(
+            roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE)
+        ).as_string(pg_conn)
+    gdal_helpers.rasterize_3d(pg_uri, mask_sql, aspect_raster_filename, res, srid)
 
-        return flat_roof_aspect_raster_filename
+    return aspect_raster_filename
 
-    return None
+
+def generate_slope_override_raster(pg_uri: str,
+                                   job_id: int,
+                                   solar_dir: str,
+                                   mask_raster_27700_filename: str) -> str:
+    srid = gdal_helpers.get_srid(mask_raster_27700_filename, fallback=27700)
+    res = gdal_helpers.get_res(mask_raster_27700_filename)
+    slope_raster_filename = join(solar_dir, 'slope_override.tif')
+
+    with connection(pg_uri) as pg_conn:
+        mask_sql = SQL(
+            "SELECT ST_Force3D(roof_geom_27700, slope) FROM {roof_polygons} WHERE usable"
+        ).format(
+            roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE)
+        ).as_string(pg_conn)
+    gdal_helpers.rasterize_3d(pg_uri, mask_sql, slope_raster_filename, res, srid)
+
+    return slope_raster_filename
+
+
+def has_outdated_lidar(pg_uri: str, job_id: int) -> bool:
+    """
+    :return: true if there is one or more buildings that aren't seen in the LiDAR
+    """
+    with connection(pg_uri) as pg_conn:
+        return sql_command(
+            pg_conn,
+            "SELECT COUNT(*) > 0 FROM {buildings} "
+            "WHERE exclusion_reason = 'OUTDATED_LIDAR_COVERAGE'::models.pv_exclusion_reason",
+            buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
+            result_extractor=lambda rows: rows[0][0])
 
 
 def create_elevation_override_raster(pg_uri: str,
@@ -228,9 +260,17 @@ def create_elevation_override_raster(pg_uri: str,
     if has_outdated_lidar(pg_uri, job_id) and count(pg_uri, "mastermap", "height") > 0:
         srid = gdal_helpers.get_srid(elevation_raster_27700_filename, fallback=27700)
         res = gdal_helpers.get_xres_yres(elevation_raster_27700_filename)
-
         patch_raster_filename: str = join(solar_dir, 'elevation_override.tif')
-        outdated_lidar_building_h_sql: str = get_outdated_lidar_building_h_sql_27700(pg_uri=pg_uri, job_id=job_id)
+
+        with connection(pg_uri) as pg_conn:
+            outdated_lidar_building_h_sql = SQL(
+                "SELECT ST_Force3D(e.geom_27700, (h.abs_hmax + h.abs_h2) / 2) "
+                "FROM {buildings} e "
+                "JOIN mastermap.height h USING (toid) "
+                "WHERE e.exclusion_reason = 'OUTDATED_LIDAR_COVERAGE'::models.pv_exclusion_reason"
+            ).format(
+                buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE)
+            ).as_string(pg_conn)
         gdal_helpers.rasterize_3d(pg_uri, outdated_lidar_building_h_sql, patch_raster_filename, res, srid, "Float32")
 
         return patch_raster_filename

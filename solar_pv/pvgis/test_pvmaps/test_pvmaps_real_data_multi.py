@@ -12,7 +12,7 @@ import numpy as np
 from osgeo import gdal
 
 from solar_pv.pvgis.pvmaps import SLOPE, \
-    FLAT_ROOF_ASPECT_COMPASS, ASPECT_GRASS_ADJUSTED
+    ASPECT_OVERRIDE_COMPASS, ASPECT_GRASS_ADJUSTED
 from solar_pv.pvgis.test_pvmaps.test_pvmaps import TestPVMaps, TEST_DATA_DIR
 
 
@@ -33,13 +33,13 @@ class TestPVMapsRealDataMulti(TestPVMaps):
         cls.INPUT_DIR = cls.DATA_INPUT_DIR
         cls.DATA_OUTPUT_DIR = os.path.realpath(f"{TEST_DATA_DIR}/test_pvmaps_real_data_{name}/outputs")
         if os.path.exists(os.path.join(cls.DATA_INPUT_DIR, "flat_roof_aspect_27700.tif")):
-            cls.FLAT_ROOF_RASTER_FILENAME = "flat_roof_aspect_27700.tif"
+            cls.ASPECT_OVERRIDE_RASTER_FILENAME = "flat_roof_aspect_27700.tif"
         else:
-            cls.FLAT_ROOF_RASTER_FILENAME = None
+            cls.ASPECT_OVERRIDE_RASTER_FILENAME = None
 
     @classmethod
     def is_flat_roof_aspects(cls):
-        return cls.FLAT_ROOF_RASTER_FILENAME is not None
+        return cls.ASPECT_OVERRIDE_RASTER_FILENAME is not None
 
     def test_pv_output(self):
         """Test the PV results for randomly sampled locations that are not masked against API results
@@ -83,7 +83,7 @@ class TestPVMapsRealDataMulti(TestPVMaps):
             # Get available test points from either flat roof mask (if there is one) or full mask - flat roof area is
             # always inside the full mask area
             if self.is_flat_roof_aspects():
-                raster_ds: Optional[gdal.Dataset] = gdal.Open(f"{self.DATA_INPUT_DIR}/{self.FLAT_ROOF_RASTER_FILENAME}")
+                raster_ds: Optional[gdal.Dataset] = gdal.Open(f"{self.DATA_INPUT_DIR}/{self.ASPECT_OVERRIDE_RASTER_FILENAME}")
                 gt = raster_ds.GetGeoTransform()
                 raster_band = raster_ds.GetRasterBand(1)
                 band_vals = raster_band.ReadAsArray(0, 0, raster_band.XSize, raster_band.YSize)
@@ -111,7 +111,7 @@ class TestPVMapsRealDataMulti(TestPVMaps):
                     if self.is_flat_roof_aspects():
                         # Select test points that also allow checking flat roof aspects have been transferred
                         flat_roof_ok = \
-                            not isnan(self._get_raster_val(FLAT_ROOF_ASPECT_COMPASS, lrx, lry)) and \
+                            not isnan(self._get_raster_val(ASPECT_OVERRIDE_COMPASS, lrx, lry)) and \
                             self._get_raster_val(SLOPE, lrx, lry) < self.FLAT_ROOF_DEGREES_THRESHOLD
 
                     if userhorizon.find("nan") == -1 and \
@@ -135,7 +135,7 @@ class TestPVMapsRealDataMulti(TestPVMaps):
     def _test_aspects_used(self, test_locns: List[Tuple[float, float]]):
         print("_test_aspects_used")
         aspects_grass = self._read_aspect_data(ASPECT_GRASS_ADJUSTED, test_locns)  # Adjustments include applying the flat roof aspects
-        flat_roof_aspects_compass = self._read_aspect_data(FLAT_ROOF_ASPECT_COMPASS, test_locns)
+        flat_roof_aspects_compass = self._read_aspect_data(ASPECT_OVERRIDE_COMPASS, test_locns)
 
         print("Checking results...")
         for aspect_grass, flat_roof_aspect_compass in zip(aspects_grass, flat_roof_aspects_compass):

@@ -26,7 +26,7 @@ class TestPVMapsTestData(TestPVMaps):
 
     ELEVATION_RASTER_FILENAME: str = "elevation.tif"
     MASK_RASTER_FILENAME: str = "mask.tif"
-    FLAT_ROOF_RASTER_FILENAME: str = "flat_roof_aspect_nan.tif"
+    ASPECT_OVERRIDE_RASTER_FILENAME: str = "flat_roof_aspect_nan.tif"
     FORCED_SLOPE_FILENAME: Optional[str] = "slope.tif"
     FORCED_ASPECT_FILENAME: Optional[str] = "aspect.tif"
     FORCED_HORIZON_BASEFILENAME: Optional[str] = "horizon"
@@ -95,6 +95,10 @@ class TestPVMapsTestData(TestPVMaps):
         """
         :return: list of (long, lat) tuples of the points in the raster
         """
+        if True in np.isnan(values):
+            print("vals to write to raster contain NaNs: GDAL will write them as 0 - converting to -9999")
+            values[np.isnan(values)] = -9999
+
         driver = gdal.GetDriverByName("GTiff")
         driver.Register()
 
@@ -103,7 +107,7 @@ class TestPVMapsTestData(TestPVMaps):
         ds.SetProjection(pr)
         ds_band: gdal.Band = ds.GetRasterBand(1)
         ds_band.WriteArray(values)
-        ds_band.SetNoDataValue(np.nan)
+        ds_band.SetNoDataValue(-9999)
         ds_band.FlushCache()
 
         return ds
@@ -144,8 +148,8 @@ class TestPVMapsTestData(TestPVMaps):
         cls.create_raster(gt, pr, f"{cls.INPUT_DIR}/{cls.MASK_RASTER_FILENAME}", mask, gdal.GDT_Int32)
 
         # Flat roof aspect values
-        mask = np.full((total_ysize, cls.XSIZE), math.nan)
-        cls.create_raster(gt, pr, f"{cls.INPUT_DIR}/{cls.FLAT_ROOF_RASTER_FILENAME}", mask, gdal.GDT_Int32)
+        mask = np.full((total_ysize, cls.XSIZE), -9999)
+        cls.create_raster(gt, pr, f"{cls.INPUT_DIR}/{cls.ASPECT_OVERRIDE_RASTER_FILENAME}", mask, gdal.GDT_Int32)
 
         # Slope
         vals = np.zeros((total_ysize, cls.XSIZE))

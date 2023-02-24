@@ -5,15 +5,14 @@ from collections import defaultdict
 from typing import List, Dict
 
 import math
-from psycopg2.sql import Identifier, SQL
+from psycopg2.sql import Identifier
 import psycopg2.extras
 from shapely import wkt, affinity, ops
 from shapely.geometry import LineString, Polygon, CAP_STYLE, JOIN_STYLE
 from shapely.validation import make_valid
 
 from solar_pv import tables
-from solar_pv import gdal_helpers
-from solar_pv.db_funcs import connection, sql_command, connect
+from solar_pv.db_funcs import connection, sql_command
 from solar_pv.geos import azimuth, square, largest_polygon
 from solar_pv.constants import FLAT_ROOF_DEGREES_THRESHOLD, \
     FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD, AZIMUTH_ALIGNMENT_THRESHOLD
@@ -227,71 +226,6 @@ def _building_orientations(building_geom):
             (most_common_az + 90) % 360,
             (most_common_az + 180) % 360,
             (most_common_az + 270) % 360)
-
-
-def has_flat_roof(pg_uri: str, job_id: int) -> bool:
-    """
-    :return: true if there is one or more flat roof in the job
-    """
-    pg_conn = connect(pg_uri)
-    try:
-        return sql_command(
-            pg_conn,
-            "SELECT COUNT(*) > 0 FROM {roof_polygons} WHERE is_flat = true",
-            roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE),
-            result_extractor=lambda rows: rows[0][0]
-        )
-    finally:
-        pg_conn.close()
-
-
-def get_flat_roof_aspect_sql(pg_uri: str, job_id: int) -> str:
-    with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
-        return SQL(
-            "SELECT ST_Force3D(roof_geom_27700, aspect) FROM {roof_polygons} WHERE is_flat = true"
-        ).format(
-            roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE)
-        ).as_string(pg_conn)
-
-
-def create_flat_roof_aspect(mask_sql: str,
-                mask_out: str,
-                pg_uri: str,
-                res: float,
-                srid: int):
-    gdal_helpers.rasterize_3d(pg_uri, mask_sql, mask_out, res, srid)
-
-
-def has_outdated_lidar(pg_uri: str, job_id: int) -> bool:
-    """
-    :return: true if there is one or more buildings that aren't seen in the LiDAR
-    """
-    pg_conn = connect(pg_uri)
-    try:
-        return sql_command(
-            pg_conn,
-            "SELECT COUNT(*) > 0 FROM {buildings} "
-            "WHERE exclusion_reason = 'OUTDATED_LIDAR_COVERAGE'::models.pv_exclusion_reason",
-            buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
-            result_extractor=lambda rows: rows[0][0]
-        )
-    finally:
-        pg_conn.close()
-
-
-def get_outdated_lidar_building_h_sql_27700(pg_uri: str, job_id: int) -> str:
-    """
-    A query to get the heights of buildings with outdated lidar as the Z value of their 27700 polygons
-    """
-    with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
-        return SQL(
-            "SELECT ST_Force3D(e.geom_27700, (h.abs_hmax + h.abs_h2) / 2) "
-            "FROM {buildings} e "
-            "JOIN mastermap.height h USING (toid) "
-            "WHERE e.exclusion_reason = 'OUTDATED_LIDAR_COVERAGE'::models.pv_exclusion_reason"
-        ).format(
-            buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE)
-        ).as_string(pg_conn)
 
 
 def _to_test_data(toid: str, planes: List[dict], building_geom: Polygon) -> dict:

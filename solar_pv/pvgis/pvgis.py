@@ -15,7 +15,8 @@ from solar_pv.constants import FLAT_ROOF_DEGREES_THRESHOLD, SYSTEM_LOSS, \
     POSTGIS_TILESIZE
 from solar_pv.pvgis import pvmaps
 from solar_pv.pvgis.aggregate_pixel_results import aggregate_pixel_results
-from solar_pv.rasters import create_elevation_override_raster, generate_flat_roof_aspect_raster
+from solar_pv.rasters import create_elevation_override_raster, \
+    generate_aspect_override_raster, generate_slope_override_raster
 from solar_pv.util import get_cpu_count
 
 
@@ -68,8 +69,15 @@ def pvgis(pg_uri: str,
         solar_dir=solar_dir,
         elevation_raster_27700_filename=elevation_raster)
 
-    logging.info("Generating flat roof raster")
-    flat_roof_aspect_raster: Optional[str] = generate_flat_roof_aspect_raster(
+    logging.info("Generating roof aspect raster")
+    aspect_override_raster: str = generate_aspect_override_raster(
+        pg_uri=pg_uri,
+        job_id=job_id,
+        solar_dir=solar_dir,
+        mask_raster_27700_filename=mask_raster)
+
+    logging.info("Generating roof slope raster")
+    slope_override_raster: str = generate_slope_override_raster(
         pg_uri=pg_uri,
         job_id=job_id,
         solar_dir=solar_dir,
@@ -94,7 +102,8 @@ def pvgis(pg_uri: str,
     pvm.create_pvmap(
         elevation_filename=os.path.basename(elevation_raster),
         mask_filename=os.path.basename(mask_raster),
-        flat_roof_aspect_filename=os.path.basename(flat_roof_aspect_raster) if flat_roof_aspect_raster else None,
+        aspect_override_raster=os.path.basename(aspect_override_raster),
+        slope_override_raster=os.path.basename(slope_override_raster),
         elevation_override_filename=os.path.basename(elevation_override_raster) if elevation_override_raster else None,
         forced_slope_filename=slope_raster,             # Use values from GDAL for slope and aspect as aspects differ by
         forced_aspect_filename_compass=aspect_raster    # up to approx 3 degrees after switch to 27700

@@ -23,8 +23,9 @@ ELEVATION = "elevation"
 ELEVATION_OVERRIDE = "elevation_override"
 ELEVATION_PATCHED = "elevation_patched"
 MASK = "mask"
-FLAT_ROOF_ASPECT_COMPASS = "flat_roof_aspect_compass"
-FLAT_ROOF_ASPECT_GRASS = "flat_roof_aspect_grass"
+ASPECT_OVERRIDE_COMPASS = "aspect_override_compass"
+ASPECT_OVERRIDE_GRASS = "aspect_override_grass"
+SLOPE_OVERRIDE = "slope_override"
 SLOPE = "slope"
 ASPECT_GRASS = "aspect_grass"
 ASPECT_COMPASS = "aspect_compass"
@@ -165,7 +166,8 @@ class PVMaps(GrassGISUser):
         self._executor.shutdown()
 
     def create_pvmap(self, elevation_filename: str, mask_filename: str,
-                     flat_roof_aspect_filename: Optional[str] = None,
+                     aspect_override_raster: Optional[str] = None,
+                     slope_override_raster: Optional[str] = None,
                      elevation_override_filename: Optional[str] = None,
                      forced_slope_filename: Optional[str] = None,
                      forced_aspect_filename_compass: Optional[str] = None,
@@ -174,8 +176,8 @@ class PVMaps(GrassGISUser):
         """
         Run PVMaps steps against the input elevation and mask. Raises exception if something goes wrong.
         Creates output rasters in the dir setup in the constructor.
-        :param flat_roof_aspect_filename: Values to use for the aspects of arrays installed on flat roofs, None if
-        there are no flat roofs
+        :param aspect_override_raster: Values to use to override aspect raster at specific pixels
+        :param slope_override_raster: Values to use to override slope raster at specific pixels
         :param elevation_override_filename: Heights from different sources to the LiDAR that should be used instead of
         the heights in the elevation raster
         :param elevation_filename: Just the filename of the elevation raster
@@ -190,10 +192,12 @@ class PVMaps(GrassGISUser):
         filename - will have _<angle> appended before extension, angle = steps using horizon_step_degrees, (points in
         degrees, east = 0, CCW) - so e.g. horizon.tif becomes horizon_045.tif etc
         """
-        use_flat_roof_aspects: bool = flat_roof_aspect_filename is not None
+        use_specific_aspect_overrides: bool = aspect_override_raster is not None
+        use_specific_slope_overrides: bool = slope_override_raster is not None
         use_elevation_override: bool = elevation_override_filename is not None
-        use_aspect_override: bool = forced_aspect_filename_compass is not None or forced_aspect_filename_grass is not None
-        use_compass_aspect_override: bool = forced_aspect_filename_compass is not None
+        generate_aspect = forced_aspect_filename_compass is None and forced_aspect_filename_grass is None
+        generate_slope = forced_slope_filename is None
+        convert_compass_aspect: bool = forced_aspect_filename_compass is not None
 
         self.yearly_kwh_raster = None
         self.monthly_wh_rasters = None
@@ -201,9 +205,16 @@ class PVMaps(GrassGISUser):
         self.elevation = ELEVATION
 
         self._create_temp_mapset()
-        self._import_rasters(elevation_filename, mask_filename, flat_roof_aspect_filename, elevation_override_filename,
-                             forced_slope_filename,
-                             forced_aspect_filename_compass, forced_aspect_filename_grass, forced_horizon_basefilename_grass)
+        self._import_rasters(
+            elevation_filename=elevation_filename,
+            mask_filename=mask_filename,
+            aspect_override_compass=aspect_override_raster,
+            slope_override=slope_override_raster,
+            elevation_override_filename=elevation_override_filename,
+            forced_slope_filename=forced_slope_filename,
+            forced_aspect_filename_compass=forced_aspect_filename_compass,
+            forced_aspect_filename_grass=forced_aspect_filename_grass,
+            forced_horizon_basefilename_grass=forced_horizon_basefilename_grass)
 
         if use_elevation_override and not forced_horizon_basefilename_grass:
             self._set_region_to_and_zoom(ELEVATION)
@@ -217,11 +228,15 @@ class PVMaps(GrassGISUser):
         self._ensure_horizon_ranges_p()
 
         self._set_mask()
-        if not (forced_slope_filename and use_aspect_override):
+        if generate_aspect or generate_slope:
             self._calc_slope_aspect()
-        self._conv_flat_panel_aspects(use_flat_roof_aspects)
-        self._conv_aspect(use_compass_aspect_override)
-        self._flat_panel_correction(use_flat_roof_aspects)
+
+        if convert_compass_aspect:
+            self._conv_aspect(ASPECT_COMPASS, ASPECT_GRASS)
+        if use_specific_aspect_overrides:
+            self._conv_aspect(ASPECT_OVERRIDE_COMPASS, ASPECT_OVERRIDE_GRASS)
+
+        self._apply_slope_aspect_correction(use_specific_aspect_overrides, use_specific_slope_overrides)
 
         self._pv_calcs_p()
         self._apply_wind_corrections_p()
@@ -329,7 +344,8 @@ class PVMaps(GrassGISUser):
         self._run_cmd_via_method_p(self._import_raster, rasters_to_import)
 
     def _import_rasters(self, elevation_filename: str, mask_filename: str,
-                        flat_roof_aspect_filename: Optional[str],
+                        aspect_override_compass: Optional[str],
+                        slope_override: Optional[str],
                         elevation_override_filename: Optional[str],
                         forced_slope_filename: Optional[str],
                         forced_aspect_filename_compass: Optional[str],
@@ -340,8 +356,11 @@ class PVMaps(GrassGISUser):
             (mask_filename, MASK),
         ]
 
-        if flat_roof_aspect_filename:
-            rasters_to_import.append((flat_roof_aspect_filename, FLAT_ROOF_ASPECT_COMPASS))
+        if aspect_override_compass:
+            rasters_to_import.append((aspect_override_compass, ASPECT_OVERRIDE_COMPASS))
+
+        if slope_override:
+            rasters_to_import.append((slope_override, SLOPE_OVERRIDE))
 
         if elevation_override_filename:
             rasters_to_import.append((elevation_override_filename, ELEVATION_OVERRIDE))
@@ -419,36 +438,35 @@ class PVMaps(GrassGISUser):
         logging.info("_calc_slope_aspect")
         self._run_cmd(f"r.slope.aspect elevation={self.elevation} slope={SLOPE} aspect={ASPECT_GRASS}")
 
-    def _conv_flat_panel_aspects(self, use_flat_roof_aspects: bool):
-        if use_flat_roof_aspects:
-            self._run_cmd(f'r.mapcalc '
-                          f'expression="{FLAT_ROOF_ASPECT_GRASS} = if({FLAT_ROOF_ASPECT_COMPASS} == 0, 0, if({FLAT_ROOF_ASPECT_COMPASS} < 90, 90 - {FLAT_ROOF_ASPECT_COMPASS}, 450 - {FLAT_ROOF_ASPECT_COMPASS}))"')
+    def _conv_aspect(self, aspect_compass: str, aspect_grass: str):
+        self._run_cmd(f'r.mapcalc '
+                      f'expression="{aspect_grass} = if({aspect_compass} == 0, 0, if({aspect_compass} < 90, 90 - {aspect_compass}, 450 - {aspect_compass}))"')
 
-    def _conv_aspect(self, use_compass_aspect_override: bool):
-        if use_compass_aspect_override:
-            self._run_cmd(f'r.mapcalc '
-                          f'expression="{ASPECT_GRASS} = if({ASPECT_COMPASS} == 0, 0, if({ASPECT_COMPASS} < 90, 90 - {ASPECT_COMPASS}, 450 - {ASPECT_COMPASS}))"')
+    def _apply_slope_aspect_correction(self, has_aspect_override: bool, has_slope_override: bool):
+        logging.info("_apply_slope_aspect_correction")
 
-    def _flat_panel_correction(self, use_flat_roof_aspects: bool):
-        logging.info("_flat_panel_correction")
-
-        # If slope shallower than _flat_roof_degrees_threshold, set aspect = value from flat_roof_aspect if
-        # available, otherwise south
-        aspect_cmd: str
-        if use_flat_roof_aspects:
+        if has_aspect_override:
             aspect_cmd = \
-                f'r.mapcalc '\
-                f'expression="{ASPECT_GRASS_ADJUSTED} = '\
-                f'if({SLOPE} < {self._flat_roof_degrees_threshold}, if (isnull({FLAT_ROOF_ASPECT_GRASS}), 270.0, {FLAT_ROOF_ASPECT_GRASS}), {ASPECT_GRASS})"'
+                f'r.mapcalc ' \
+                f'expression="{ASPECT_GRASS_ADJUSTED} = ' \
+                f'if (isnull({ASPECT_OVERRIDE_GRASS}), {ASPECT_GRASS}, {ASPECT_OVERRIDE_GRASS})"'
         else:
+            # When no aspect override, just set flat roofs to South-facing:
             aspect_cmd = \
                 f'r.mapcalc '\
                 f'expression="{ASPECT_GRASS_ADJUSTED} = '\
                 f'if({SLOPE} < {self._flat_roof_degrees_threshold}, 270.0, {ASPECT_GRASS})"'
 
-        slope_cmd: str = \
-            f'r.mapcalc ' \
-            f'expression="{SLOPE_ADJUSTED} = if({SLOPE} < {self._flat_roof_degrees_threshold}, {self._flat_roof_degrees}, {SLOPE})"'
+        if has_slope_override:
+            slope_cmd = \
+                f'r.mapcalc ' \
+                f'expression="{SLOPE_ADJUSTED} = ' \
+                f'if (isnull({SLOPE_OVERRIDE}), {SLOPE}, {SLOPE_OVERRIDE})"'
+        else:
+            # When no slope override, just set flat roof slopes:
+            slope_cmd: str = \
+                f'r.mapcalc ' \
+                f'expression="{SLOPE_ADJUSTED} = if({SLOPE} < {self._flat_roof_degrees_threshold}, {self._flat_roof_degrees}, {SLOPE})"'
 
         self._run_cmd_via_method_p(self._run_cmd, [
             (slope_cmd,),

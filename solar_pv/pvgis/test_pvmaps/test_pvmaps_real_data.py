@@ -14,10 +14,6 @@ from solar_pv.pvgis.pvmaps import SLOPE, ASPECT_GRASS
 from solar_pv.pvgis.test_pvmaps.test_pvmaps import TestPVMaps, TEST_DATA_DIR
 
 
-# Run pytest with this to see results while running and see logging outputs
-# --capture=no --log-cli-level=INFO
-
-
 class TestPVMapsRealData(TestPVMaps):
     """
     Runs complete PVMaps process and then checks the data in the Grass DB
@@ -30,7 +26,7 @@ class TestPVMapsRealData(TestPVMaps):
 
     ELEVATION_RASTER_FILENAME: str = "elevation_27700.tif"
     MASK_RASTER_FILENAME: str = "mask_27700.tif"
-    FLAT_ROOF_RASTER_FILENAME: str = "flat_roof_nan_27700.tif"
+    ASPECT_OVERRIDE_RASTER_FILENAME: str = "flat_roof_nan_27700.tif"
 
     @classmethod
     def setUpClass(cls):
