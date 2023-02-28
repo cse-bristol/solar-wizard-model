@@ -100,10 +100,38 @@ The panel placement algorithm is fairly simplistic: we drag a grid of portrait-o
 
 For actual modelling of PV suitability, we use [PVMAPS](https://joint-research-centre.ec.europa.eu/pvgis-online-tool/pvgis-data-download/pvmaps_en), which is a [GRASS GIS](https://grass.osgeo.org/) plugin written in C. This is a raster operation.
 
-TODO
+### Horizon detection
 
-* horizon profile (inc. burn-in of missing buildings)
-* pv calc
-* spectral correction
-* wind correction
-* aggregation of raster data to panel-level data
+To begin with, a modified version of [r.horizon](https://grass.osgeo.org/grass82/manuals/r.horizon.html) is used to detect a horizon profile for each pixel. This basically uses ray-tracing in a configured number of compass slices to work out the degree to which the horizon is blocked in each slice. A flat horizon would be 0 degrees and a wall that stretched to the point directly above your head would be a 90 degree horizon. (the numbers are actually in radians though).
+
+r.horizon takes the LiDAR elevation raster as an input, which for this case has been modified so that any buildings where the LiDAR has been detected as outdated are burned-in to the raster for the sake of horizon-blocking. 
+
+r.horizon has been modified so that a mask raster can be supplied, which only controls which pixels get a horizon calculated for, and still allows masked pixels to be considered as horizon-blocking. (r.horizon can use the mask supplied by r.mask, but this also stops masked pixels being considered as horizon-blocking).
+
+### r.pv
+
+At this point, the `r.pv` GRASS module from PVMAPS is run. This is a modified version of the [r.sun](https://grass.osgeo.org/grass82/manuals/r.sun.html) solar irradiation model. See the [documentation for PVMAPS](https://re.jrc.ec.europa.eu/pvmaps/pvmaps.pdf) for more information. PVMAPS takes irradiation levels, temperature, slope and aspect of panel, and historical cloud cover into account when modelling PV output.
+
+r.sun is used to calculate the daily solar irradiation and predicted kWh for 12 days of the year, one in the middle of each month. The monthly and yearly values are then calculated from these representative days. For each of these 12 days, in 15-minute steps:
+* The related direct and diffuse insolation raster for that month from the PVMAPS data is used as input. These rasters have a resolution of 500 metres and include the effect of cloud coverage.
+* the position of the sun is modelled in concert with the horizon profile generated previously to calculate the actual levels of insolation for that 15-minute time period.
+* the effect of temperature on PV outputs is also modelled, using 3-hourly 500-metre resolution data.
+
+Insolation and PV output for the whole day are then calculated from the 15-minute steps.
+
+### wind correction
+
+See section 4.3 in the [documentation for PVMAPS](https://re.jrc.ec.europa.eu/pvmaps/pvmaps.pdf) for information on the method used.
+
+### spectral correction
+
+See section 4.4 in the [documentation for PVMAPS](https://re.jrc.ec.europa.eu/pvmaps/pvmaps.pdf) for information on the method used.
+
+### Aggregation from rasters to panels
+
+Finally the corrected annual kWh raster, monthly kWh rasters, and horizon profile rasters are aggregated to panel-level facts.
+
+PVMAPS models each pixel as if it was a panel the size of the pixel of size 1kWp, so for each panel, each intersecting pixel's output is adjusted by:
+* the configured output per m^2 (`peak_power_per_m2`)
+* the proportion of which the pixel overlaps the panel
+* the configured system loss
