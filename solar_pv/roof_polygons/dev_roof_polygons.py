@@ -91,18 +91,18 @@ def make_roof_polygons(pg_uri: str, job_id: int, toid: str,
     if write_test_data:
         _write_test_data(toid, planes, building_geoms[toid], out_dir)
 
-    _create_roof_polygons(building_geoms,
-                          planes,
-                          max_roof_slope_degrees=_MAX_ROOF_SLOPE_DEGREES,
-                          min_roof_area_m=_MIN_ROOF_AREA_M,
-                          min_roof_degrees_from_north=_MIN_ROOF_DEGREES_FROM_NORTH,
-                          flat_roof_degrees=_FLAT_ROOF_DEGREES,
-                          large_building_threshold=_LARGE_BUILDING_THRESHOLD,
-                          min_dist_to_edge_m=_MIN_DIST_TO_EDGE_M,
-                          min_dist_to_edge_large_m=_MIN_DIST_TO_EDGE_LARGE_M,
-                          panel_width_m=_PANEL_W_M,
-                          panel_height_m=_PANEL_H_M,
-                          resolution_metres=resolution_metres)
+    planes = _create_roof_polygons(building_geoms,
+                                   planes,
+                                   max_roof_slope_degrees=_MAX_ROOF_SLOPE_DEGREES,
+                                   min_roof_area_m=_MIN_ROOF_AREA_M,
+                                   min_roof_degrees_from_north=_MIN_ROOF_DEGREES_FROM_NORTH,
+                                   flat_roof_degrees=_FLAT_ROOF_DEGREES,
+                                   large_building_threshold=_LARGE_BUILDING_THRESHOLD,
+                                   min_dist_to_edge_m=_MIN_DIST_TO_EDGE_M,
+                                   min_dist_to_edge_large_m=_MIN_DIST_TO_EDGE_LARGE_M,
+                                   panel_width_m=_PANEL_W_M,
+                                   panel_height_m=_PANEL_H_M,
+                                   resolution_metres=resolution_metres)
 
     if write_test_data:
         _write_outputs(toid, planes, out_dir, building_geoms[toid])
@@ -176,13 +176,20 @@ if __name__ == "__main__":
 
     # make_job_roof_polygons(
     #     os.getenv("PGW_URI"),
+    #     1649,
+    #     1.0,
+    #     f"{os.getenv('DEV_DATA_DIR')}/roof-polys")
+
+    # make_roof_polygons(
+    #     os.getenv("PGW_URI"),
     #     1648,
+    #     "osgb1000014916349",
     #     1.0,
     #     f"{os.getenv('DEV_DATA_DIR')}/roof-polys")
 
     make_roof_polygons(
         os.getenv("PGW_URI"),
-        1648,
-        "osgb1000014916349",
+        1657,
+        "osgb1000021681594",
         1.0,
         f"{os.getenv('DEV_DATA_DIR')}/roof-polys")

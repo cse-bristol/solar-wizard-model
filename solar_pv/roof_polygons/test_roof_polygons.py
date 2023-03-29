@@ -50,7 +50,7 @@ def _create_polygons_using_test_data(toid: str,
                                      min_dist_to_edge_m: float = 0.3,
                                      min_dist_to_edge_large_m: float = 1):
     planes, building_geom = _load_test_data(toid)
-    _create_roof_polygons(
+    planes = _create_roof_polygons(
         {toid: building_geom},
         planes,
         max_roof_slope_degrees=max_roof_slope_degrees,
@@ -132,3 +132,7 @@ class RoofPolygonTest(ParameterisedTestCase):
             assert min_aspect < plane['aspect'] <= max_aspect
             checked = True
         assert checked is True
+
+    def test_merge(self):
+        planes, _ = _create_polygons_using_test_data("osgb1000021681594")
+        assert len(planes) == 2

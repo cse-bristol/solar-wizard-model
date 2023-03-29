@@ -15,7 +15,7 @@ from os.path import join
 from typing import Union, Optional
 
 import psycopg2
-from psycopg2.sql import SQL, Identifier, Composed
+from psycopg2.sql import SQL, Identifier, Composed, Literal
 from psycopg2 import OperationalError
 
 from solar_pv.paths import SQL_DIR
@@ -139,7 +139,11 @@ def copy_tsv(pg_conn, file_name: str, table: str, sep='\t', null=PG_NULL, encodi
     """Using the postgres COPY command, load data into a table from a TSV file."""
     with pg_conn.cursor() as cursor:
         with open(file_name, encoding=encoding) as f:
-            cursor.copy_from(f, table, sep=sep, null=null)
+            copy_sql = SQL("COPY {table} FROM stdin (DELIMITER {sep}, NULL {null})").format(
+                table=Identifier(*table.split(".")),
+                sep=Literal(sep),
+                null=Literal(null))
+            cursor.copy_expert(copy_sql, f)
             pg_conn.commit()
 
 

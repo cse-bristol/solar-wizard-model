@@ -5,6 +5,7 @@ from collections import defaultdict
 from typing import List, Dict
 
 import math
+import numpy as np
 from psycopg2.sql import Identifier
 import psycopg2.extras
 from shapely import wkt, affinity, ops
@@ -72,6 +73,7 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
     # (as already-created polygons take priority when ensuring two roof planes don't overlap)
     planes.sort(key=lambda p: (p['toid'], abs(180 - p['aspect'])))
 
+    plane_polys = []
     for plane in planes:
         toid = plane['toid']
         building_geom = building_geoms[toid]
@@ -97,26 +99,31 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
                         plane['aspect'] = orientation
                         aspect_adjusted = True
                         break
+            plane['aspect_adjusted'] = aspect_adjusted
 
-            # create roof polygon
-            pixels = []
-            for p in plane['inliers_xy']:
-                # Draw a square around the pixel centre:
-                edge = math.sqrt(resolution_metres**2 * 2.0) / 2
-                pixel = square(p[0] - edge, p[1] - edge, edge * 2)
-
-                # Rotate the square to align with plane aspect:
-                pixel = affinity.rotate(pixel, -plane['aspect'])
-                pixels.append(pixel)
-            neg_buffer = -((math.sqrt(resolution_metres**2 * 2.0) - resolution_metres) / 2)
-            roof_poly = ops.unary_union(pixels).buffer(neg_buffer,
-                                                       cap_style=CAP_STYLE.square,
-                                                       join_style=JOIN_STYLE.mitre,
-                                                       resolution=1)
-            roof_poly = largest_polygon(roof_poly)
-
+            roof_poly = _initial_polygon(plane, resolution_metres)
             if not roof_poly or roof_poly.is_empty:
                 continue
+
+            plane['roof_poly'] = roof_poly
+            plane_polys.append(plane)
+
+        except Exception as e:
+            print(json.dumps(_to_test_data(toid, [plane], building_geom),
+                             sort_keys=True, default=str))
+            raise e
+
+    plane_polys = _merge_touching(plane_polys, resolution_metres)
+
+    for plane in plane_polys:
+        toid = plane['toid']
+        building_geom = building_geoms[toid]
+        try:
+            is_flat = plane['is_flat']
+            roof_poly = plane['roof_poly']
+            aspect_adjusted = plane['aspect_adjusted']
+            del plane['roof_poly']
+            del plane['aspect_adjusted']
 
             # constrain roof polygons to building geometry, enforcing min dist to edge:
             roof_poly = _constrain_to_building(building_geom,
@@ -137,7 +144,6 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
             # Potentially use a pre-made roof archetype instead:
             plane['archetype'] = False
             if not is_flat \
-                    and len(roof_poly.interiors) == 0 \
                     and aspect_adjusted \
                     and roof_poly.area < (max_archetype_area * 1.5):
                 archetype = get_archetype(roof_poly, archetypes, plane['aspect'])
@@ -191,6 +197,70 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
             raise e
 
     return roof_polygons
+
+
+def _initial_polygon(plane, resolution_metres):
+    """
+    Make the initial roof polygon (basically by just drawing round
+    all the pixels rotated to match the aspect)
+    """
+    pixels = []
+    for p in plane['inliers_xy']:
+        # Draw a square around the pixel centre:
+        edge = math.sqrt(resolution_metres ** 2 * 2.0) / 2
+        pixel = square(p[0] - edge, p[1] - edge, edge * 2)
+
+        # Rotate the square to align with plane aspect:
+        pixel = affinity.rotate(pixel, -plane['aspect'])
+        pixels.append(pixel)
+    neg_buffer = -((math.sqrt(resolution_metres ** 2 * 2.0) - resolution_metres) / 2)
+    roof_poly = ops.unary_union(pixels).buffer(neg_buffer,
+                                               cap_style=CAP_STYLE.square,
+                                               join_style=JOIN_STYLE.mitre,
+                                               resolution=1)
+
+    roof_poly = largest_polygon(roof_poly)
+    return roof_poly
+
+
+def _merge_touching(planes, resolution_metres: float, max_slope_diff: int = 2) -> List[dict]:
+    """
+    Merge any planes that
+    a) have the same aspect
+    b) have a slope that differs less than `max_slope_diff`
+    c) intersect each other
+    """
+    merged = []
+    _by_aspect = defaultdict(list)
+    for plane in planes:
+        aspect = plane['aspect']
+        _by_aspect[aspect].append(plane)
+
+    for plane_group in _by_aspect.values():
+        if len(plane_group) == 1:
+            merged.append(plane_group[0])
+            continue
+
+        checked = set()
+        for plane in plane_group:
+            if id(plane) in checked:
+                continue
+            checked.add(id(plane))
+
+            slope = plane['slope']
+            poly = plane['roof_poly']
+            mergeable = [p for p in plane_group if id(p) not in checked and abs(p['slope'] - slope) <= max_slope_diff and p['roof_poly'].intersects(poly)]
+
+            for to_merge in mergeable:
+                checked.add(id(to_merge))
+
+            plane['roof_poly'] = ops.unary_union([p['roof_poly'] for p in mergeable] + [poly])
+            plane['inliers_xy'] = np.concatenate([p['inliers_xy'] for p in mergeable] + [plane['inliers_xy']])
+            plane['roof_poly'] = _initial_polygon(plane, resolution_metres)
+
+            merged.append(plane)
+
+    return merged
 
 
 def _remove_overlaps(toid: str, roof_poly: Polygon, polygons_by_toid: Dict[str, List[Polygon]]):

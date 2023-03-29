@@ -10,7 +10,7 @@ from solar_pv import paths
 from osgeo import ogr, gdal
 
 from solar_pv.lidar.lidar import LIDAR_NODATA
-from ransac.run_ransac import _ransac_building, _load
+from solar_pv.ransac.run_ransac import _ransac_building, _load
 
 
 def ransac_toid(pg_uri: str, job_id: int, toid: str, resolution_metres: float, out_dir: str, write_test_data: bool = True):
@@ -18,13 +18,14 @@ def ransac_toid(pg_uri: str, job_id: int, toid: str, resolution_metres: float, o
                         format='[%(asctime)s] %(levelname)s: %(message)s')
     os.makedirs(out_dir, exist_ok=True)
 
-    toid, building = _load(pg_uri, job_id, page=0, page_size=1000, toids=[toid])
+    by_toid = _load(pg_uri, job_id, page=0, page_size=1000, toids=[toid])
+    building = by_toid[toid]
     planes = _ransac_building(building, toid, resolution_metres, debug=True)
 
     if len(planes) > 0:
         print("RANSAC: all planes:")
         for plane in planes:
-            print(f'toid {plane["toid"]} slope {plane["slope"]} aspect {plane["aspect"]} sd {plane["sd"]} inliers {len(plane["inliers"])}')
+            print(f'toid {plane["toid"]} slope {plane["slope"]} aspect {plane["aspect"]} sd {plane["sd"]} inliers {len(plane["inliers_xy"])}')
         _write_planes(toid, resolution_metres, out_dir, building, planes)
     else:
         print("No planes to write, not creating geoJSON")
@@ -82,8 +83,9 @@ def _write_tiff(filepath: str, res: float, building, planes):
 
     for plane_id, plane in enumerate(planes):
         plane_id += 1
-        for inlier in plane["inliers"]:
-            pixel = by_pixel_id[inlier]
+        toid = plane['toid']
+        for inlier in plane["inliers_xy"]:
+            pixel = by_pixel_id[f"{toid}:{inlier[0]}:{inlier[1]}"]
             x = int(pixel["x"] - ulx)
             y = int(uly - pixel["y"])
             data[y, x] = plane_id
@@ -92,7 +94,7 @@ def _write_tiff(filepath: str, res: float, building, planes):
     band.FlushCache()
     band.SetNoDataValue(LIDAR_NODATA)
     # ulx, xres, xskew, uly, yskew, yres
-    out_ds.SetGeoTransform([ulx - res / 2, res, 0, uly - res / 2, 0, -res])
+    out_ds.SetGeoTransform([ulx - res / 2, res, 0, uly + res / 2, 0, -res])
     srs = osr.SpatialReference()
     srs.ImportFromEPSG(27700)
     out_ds.SetProjection(srs.ExportToWkt())
@@ -142,7 +144,7 @@ def _write_geojson_fields(geojson: str, planes):
             feature.SetField("sd", plane["sd"])
             feature.SetField("aspect_circ_mean", plane["aspect_circ_mean"])
             feature.SetField("aspect_circ_sd", plane["aspect_circ_sd"])
-            feature.SetField("inliers", len(plane["inliers"]))
+            feature.SetField("inliers", len(plane["inliers_xy"]))
             layer.SetFeature(feature)
 
 
@@ -196,7 +198,7 @@ if __name__ == "__main__":
     # thinness_ratio_experiments()
     ransac_toid(
         os.getenv("PGW_URI"),
-        1194,
-        "osgb1000020005464",
+        1657,
+        "osgb1000021681594",
         1.0,
         f"{os.getenv('DEV_DATA_DIR')}/ransac")

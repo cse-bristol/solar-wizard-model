@@ -5,8 +5,9 @@ from typing import List, Optional
 
 from shapely import ops, affinity
 from shapely.geometry import Polygon
+from shapely.validation import make_valid
 
-from solar_pv.geos import rect
+from solar_pv.geos import rect, largest_polygon
 
 
 @dataclass
@@ -94,12 +95,15 @@ ARCHETYPE_PATTERNS = [
     [[1, 1, 1],
      [1, 1, 0]],
 
-    [[0, 1, 0],
-     [1, 1, 1]],
+    # [[0, 1, 0],
+    #  [1, 1, 1]],
 
     [[1, 1],
      [1, 1],
      [1, 1]],
+
+    [[1, 1, 1, 1, 1],
+     [1, 1, 0, 1, 1]],
 
     [[1, 1, 1, 1, 1, 1],
      [1, 1, 0, 0, 1, 1]],
@@ -109,24 +113,6 @@ ARCHETYPE_PATTERNS = [
 
     [[1, 1, 1, 1, 1, 1, 1, 1],
      [1, 1, 0, 0, 0, 0, 1, 1]],
-
-    [[1, 1, 1, 1, 1, 1],
-     [1, 1, 1, 1, 1, 1],
-     [1, 1, 0, 0, 1, 1]],
-
-    [[1, 1, 1, 1, 1, 1],
-     [1, 1, 0, 0, 1, 1],
-     [1, 0, 0, 0, 0, 1]],
-
-    [[0, 1, 1, 1, 0],
-     [1, 1, 1, 1, 1],
-     [1, 1, 0, 1, 1],
-     [1, 0, 0, 0, 1]],
-
-    [[1, 1, 1, 1, 1],
-     [1, 1, 1, 1, 1],
-     [1, 1, 0, 1, 1],
-     [1, 0, 0, 0, 1]],
 ] + _pattern_variations(
     [[1, 1, 1, 1],
      [1, 1, 1, 1]]
@@ -153,8 +139,17 @@ ARCHETYPE_PATTERNS = [
 ) + _pattern_variations(
     [[1, 1, 1, 1],
      [1, 1, 1, 1],
+     [1, 0, 0, 1]],
+) + _pattern_variations(
+    [[1, 1, 1, 1],
+     [1, 1, 1, 1],
      [1, 1, 1, 1],
      [1, 1, 1, 1]],
+) + _pattern_variations(
+    [[1, 1, 1, 1],
+     [1, 1, 1, 1],
+     [1, 1, 1, 1],
+     [1, 0, 0, 1]],
 ) + _pattern_variations(
     [[1, 1, 1, 1, 1],
      [1, 1, 1, 1, 1],
@@ -164,10 +159,23 @@ ARCHETYPE_PATTERNS = [
      [1, 1, 1, 1, 1, 1],
      [1, 1, 1, 1, 1, 1]],
 ) + _pattern_variations(
+    [[1, 1, 1, 1, 1, 1],
+     [1, 1, 1, 1, 1, 1],
+     [1, 1, 0, 0, 1, 1]],
+) + _pattern_variations(
+    [[1, 1, 1, 1, 1, 1],
+     [1, 1, 0, 0, 1, 1],
+     [1, 0, 0, 0, 0, 1]],
+) + _pattern_variations(
     [[1, 1, 1, 1, 1],
      [1, 1, 1, 1, 1],
      [1, 1, 1, 1, 1],
      [1, 1, 1, 1, 1]],
+) + _pattern_variations(
+    [[1, 1, 1, 1, 1],
+     [1, 1, 1, 1, 1],
+     [1, 1, 0, 1, 1],
+     [1, 0, 0, 0, 1]],
 )
 
 
@@ -229,7 +237,7 @@ _MIN_PCT_AREA_DIFF = 0.68
 _PCT_SYM_DIFF_WEIGHT_1 = 0.75
 # weight for the parts of archetype that do not intersect roof poly (this is worse -
 # archetype is sticking out the sides of roof_poly here - so make it count more):
-_PCT_SYM_DIFF_WEIGHT_2 = 1.8
+_PCT_SYM_DIFF_WEIGHT_2 = 2.5
 
 
 def get_archetype(roof_polygon: Polygon, archetypes: List[Archetype], aspect) -> Optional[Archetype]:
@@ -265,7 +273,7 @@ def get_archetype(roof_polygon: Polygon, archetypes: List[Archetype], aspect) ->
             best_archetype = archetype
 
     if best_archetype:
-        return best_archetype
+        return _add_holes(best_archetype, roof_polygon)
 
     # If we didn't find one, try again, but only scoring archetypes based on how much
     # they fit within the roof plane.
@@ -283,7 +291,16 @@ def get_archetype(roof_polygon: Polygon, archetypes: List[Archetype], aspect) ->
             min_diff = pct_diff
             best_archetype = archetype
 
-    return best_archetype
+    return _add_holes(best_archetype, roof_polygon)
+
+
+def _add_holes(archetype: Archetype, original: Polygon) -> Archetype:
+    for hole in original.interiors:
+        hole_poly = Polygon(hole)
+        archetype.polygon = archetype.polygon.difference(hole_poly)
+    archetype.polygon = largest_polygon(archetype.polygon)
+    archetype.polygon = make_valid(archetype.polygon)
+    return archetype
 
 
 def _write_archetypes(name: str, archetypes: List[Polygon]):
