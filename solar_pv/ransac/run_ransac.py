@@ -16,7 +16,8 @@ from solar_pv.db_funcs import count, connection, sql_command
 from solar_pv.postgis import pixels_for_buildings
 from solar_pv import tables
 from solar_pv.constants import RANSAC_LARGE_BUILDING, \
-    RANSAC_BASE_MAX_TRIALS, RANSAC_ABS_MAX_TRIALS, FLAT_ROOF_DEGREES_THRESHOLD
+    RANSAC_LARGE_MAX_TRIALS, RANSAC_SMALL_MAX_TRIALS, FLAT_ROOF_DEGREES_THRESHOLD, \
+    RANSAC_SMALL_BUILDING, RANSAC_MEDIUM_MAX_TRIALS
 from solar_pv.ransac.ransac import RANSACRegressorForLIDAR, _aspect, \
     _slope, RANSACValueError
 from solar_pv.roof_polygons.roof_polygons import create_roof_polygons
@@ -112,16 +113,18 @@ def _ransac_building(pixels_in_building: List[dict],
     aspect = np.array([pixel["aspect"] for pixel in pixels_in_building])
 
     if len(pixels_in_building) > RANSAC_LARGE_BUILDING / resolution_metres:
-        max_trials = min(RANSAC_BASE_MAX_TRIALS + len(pixels_in_building) / resolution_metres,
-                         RANSAC_ABS_MAX_TRIALS)
+        max_trials = RANSAC_LARGE_MAX_TRIALS
         # Disables checks that forbid planes that cover multiple discontinuous groups
         # of pixels, as large buildings often have separate roof areas that are on the
         # same plane. Only the largest group will be used each time anyway, so this
         # won't cause problems and all discontinuous groups should be picked up
         # eventually.
         include_group_checks = False
+    elif len(pixels_in_building) < RANSAC_SMALL_BUILDING / resolution_metres:
+        max_trials = RANSAC_SMALL_MAX_TRIALS
+        include_group_checks = True
     else:
-        max_trials = RANSAC_BASE_MAX_TRIALS
+        max_trials = RANSAC_MEDIUM_MAX_TRIALS
         include_group_checks = True
 
     planes = []

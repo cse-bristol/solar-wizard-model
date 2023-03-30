@@ -25,10 +25,14 @@ SYSTEM_LOSS = 0.14
 # of pixels, as large buildings often have separate roof areas that are on the
 # same plane):
 RANSAC_LARGE_BUILDING = 1000
+# Area in m2 of a building to consider small for RANSAC purposes
+# (which has the effect of increasing `max_trials`, as it is harder to fit a
+# good plane to a smaller set of points):
+RANSAC_SMALL_BUILDING = 100
 
-RANSAC_BASE_MAX_TRIALS = 2000
-# Don't go over this number of trials, whatever size the building is:
-RANSAC_ABS_MAX_TRIALS = 3000
+RANSAC_LARGE_MAX_TRIALS = 2000
+RANSAC_MEDIUM_MAX_TRIALS = 2000
+RANSAC_SMALL_MAX_TRIALS = 3000
 
 # GDAL default tile geotiff tilesize:
 POSTGIS_TILESIZE = 256
