@@ -1,6 +1,7 @@
 # This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 import json
+import traceback
 from collections import defaultdict
 from typing import List, Dict
 
@@ -109,6 +110,7 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
             plane_polys.append(plane)
 
         except Exception as e:
+            traceback.print_exception(e)
             print(json.dumps(_to_test_data(toid, [plane], building_geom),
                              sort_keys=True, default=str))
             raise e
@@ -192,6 +194,7 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
             plane['raw_area'] = roof_poly.area / math.cos(math.radians(plane['slope']))
             roof_polygons.append(plane)
         except Exception as e:
+            traceback.print_exception(e)
             print(json.dumps(_to_test_data(toid, [plane], building_geom),
                              sort_keys=True, default=str))
             raise e

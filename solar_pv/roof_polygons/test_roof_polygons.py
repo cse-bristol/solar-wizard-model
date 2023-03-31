@@ -30,6 +30,7 @@ osgb1000014994594 = wkt.loads(
     "POLYGON((359550.9 171704.15,359549.65 171706.15,359548.55 171705.45,359547.1 171707.8,359541.15 171704.05,359543.9 171699.7,359550.9 171704.15))"
 )
 
+
 def _load_test_data(toid: str):
     roof_polys_dir = join(paths.TEST_DATA, "roof_polygons")
     with open(join(roof_polys_dir, f"{toid}.json")) as f:
@@ -118,6 +119,7 @@ class RoofPolygonTest(ParameterisedTestCase):
             ("osgb1000034161241", None),
             ("osgb1000034178593", None),
             ("osgb5000005113406742", None),
+            ("osgb1000014925723", None),
         ], _do_test)
 
     def test_flat_roofs_face_south(self):

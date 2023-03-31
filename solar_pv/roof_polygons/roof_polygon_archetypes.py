@@ -291,7 +291,8 @@ def get_archetype(roof_polygon: Polygon, archetypes: List[Archetype], aspect) ->
             min_diff = pct_diff
             best_archetype = archetype
 
-    return _add_holes(best_archetype, roof_polygon)
+    if best_archetype:
+        return _add_holes(best_archetype, roof_polygon)
 
 
 def _add_holes(archetype: Archetype, original: Polygon) -> Archetype:
