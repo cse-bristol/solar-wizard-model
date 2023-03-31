@@ -14,6 +14,7 @@ from datetime import date
 from os.path import join
 from typing import List, Tuple, Optional
 
+from solar_pv.constants import MAX_PVMAPS_PROCESSES
 from solar_pv.pvgis.grass_gis_user import GrassGISUser
 from solar_pv.pvgis.pvmaps_setup import PVMapsSetup
 
@@ -95,7 +96,7 @@ class PVMaps(GrassGISUser):
             num_cpus = 1
         if not (1 <= num_processes <= num_cpus):
             raise ValueError(f"Num processes must be 1 to {num_cpus}")
-        _executor = ThreadPoolExecutor(max_workers=num_processes)
+        _executor = ThreadPoolExecutor(max_workers=min(MAX_PVMAPS_PROCESSES, num_processes))
         self._set_executor(_executor)
         self._setup_grass_env()
 

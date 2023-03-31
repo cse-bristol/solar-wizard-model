@@ -36,3 +36,7 @@ RANSAC_SMALL_MAX_TRIALS = 3000
 
 # GDAL default tile geotiff tilesize:
 POSTGIS_TILESIZE = 256
+
+# These tend to use a lot of memory. This will only slow down the horizon profiling,
+# which only takes a few minutes anyway.
+MAX_PVMAPS_PROCESSES = 12
