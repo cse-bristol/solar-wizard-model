@@ -106,8 +106,12 @@ def get_grid_refs(poly, cell_size: int) -> List[str]:
 
 
 def largest_polygon(multi: Union[MultiPolygon, Polygon]):
+    if multi is None:
+        return None
     if multi.type == 'Polygon':
         return multi
+    if multi.type != 'MultiPolygon':
+        return None
     polygons = [g for g in multi.geoms if g.type == 'Polygon']
     if len(polygons) == 0:
         return None

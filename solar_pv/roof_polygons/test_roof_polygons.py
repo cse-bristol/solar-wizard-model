@@ -111,8 +111,7 @@ class RoofPolygonTest(ParameterisedTestCase):
         ], _do_test)
 
     def test_failing_roof_polygons(self):
-        def _do_test(toid: str):
-            min_dist_to_edge_m = 0.55
+        def _do_test(toid: str, min_dist_to_edge_m: float = 0.55):
             _create_polygons_using_test_data(toid, min_dist_to_edge_m=min_dist_to_edge_m)
 
         self.parameterised_test([
@@ -120,6 +119,7 @@ class RoofPolygonTest(ParameterisedTestCase):
             ("osgb1000034178593", None),
             ("osgb5000005113406742", None),
             ("osgb1000014925723", None),
+            ("osgb1000017860043", 0.4, None)
         ], _do_test)
 
     def test_flat_roofs_face_south(self):
