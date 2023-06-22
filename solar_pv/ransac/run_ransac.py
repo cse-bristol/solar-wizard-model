@@ -1,16 +1,19 @@
-
+import itertools
 # This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 import logging
 import time
 import math
 import traceback
-from typing import List, Dict
+from typing import List, Dict, TypedDict
 import multiprocessing as mp
 
 from psycopg2.extras import DictCursor, execute_values
-from psycopg2.sql import SQL, Identifier
+from psycopg2.sql import SQL, Identifier, Literal
 import numpy as np
+from shapely import wkt, ops
+from shapely.geometry import Polygon, LineString
+from sklearn.linear_model import LinearRegression
 
 from solar_pv.db_funcs import count, connection, sql_command
 from solar_pv.postgis import pixels_for_buildings
@@ -18,6 +21,8 @@ from solar_pv import tables
 from solar_pv.constants import RANSAC_LARGE_BUILDING, \
     RANSAC_LARGE_MAX_TRIALS, RANSAC_SMALL_MAX_TRIALS, FLAT_ROOF_DEGREES_THRESHOLD, \
     RANSAC_SMALL_BUILDING, RANSAC_MEDIUM_MAX_TRIALS
+from solar_pv.ransac.detsac import DETSACRegressorForLIDAR
+from solar_pv.ransac.premade_planes import create_planes
 from solar_pv.ransac.ransac import RANSACRegressorForLIDAR, _aspect, \
     _slope, RANSACValueError
 from solar_pv.roof_polygons.roof_polygons import create_roof_polygons
@@ -86,18 +91,18 @@ def run_ransac(pg_uri: str,
 
 def _handle_building_page(pg_uri: str, job_id: int, page: int, page_size: int, params: dict):
     start_time = time.time()
-    by_toid = _load(pg_uri, job_id, page, page_size)
+    buildings = _load(pg_uri, job_id, page, page_size)
 
     planes = []
-    for toid, building in by_toid.items():
+    for toid, building in buildings.items():
         try:
-            found = _ransac_building(building, toid, params['resolution_metres'])
+            found = _ransac_building(building['pixels'], toid, params['resolution_metres'], building['polygon'])
             if len(found) > 0:
                 planes.extend(found)
         except Exception as e:
             print(f"Exception during RANSAC for TOID {toid}:")
             traceback.print_exception(e)
-            _print_test_data(building)
+            _print_test_data(building['pixels'])
             raise e
 
     planes = create_roof_polygons(pg_uri, job_id, planes, **params)
@@ -108,6 +113,7 @@ def _handle_building_page(pg_uri: str, job_id: int, page: int, page_size: int, p
 def _ransac_building(pixels_in_building: List[dict],
                      toid: str,
                      resolution_metres: float,
+                     polygon: Polygon = None,
                      debug: bool = False) -> List[dict]:
     xyz = np.array([[pixel["x"], pixel["y"], pixel["elevation"]] for pixel in pixels_in_building])
     aspect = np.array([pixel["aspect"] for pixel in pixels_in_building])
@@ -131,11 +137,16 @@ def _ransac_building(pixels_in_building: List[dict],
     min_points_per_plane = min(8, int(8 / resolution_metres))  # 8 for 2m, 8 for 1m, 16 for 0.5m
     total_points_in_building = len(aspect)
 
+    if polygon is not None:
+        premade_planes = create_planes(pixels_in_building, polygon)
+    else:
+        premade_planes = None
+
     while np.count_nonzero(xyz) // 3 > min_points_per_plane:
         XY = xyz[:, :2]
         Z = xyz[:, 2]
         try:
-            ransac = RANSACRegressorForLIDAR(residual_threshold=0.25,
+            ransac = DETSACRegressorForLIDAR(residual_threshold=0.25,
                                              flat_roof_residual_threshold=0.1,
                                              max_trials=max_trials,
                                              max_slope=75,
@@ -145,6 +156,7 @@ def _ransac_building(pixels_in_building: List[dict],
                                              resolution_metres=resolution_metres)
             ransac.fit(XY, Z,
                        aspect=aspect,
+                       premade_planes=premade_planes,
                        total_points_in_building=total_points_in_building,
                        include_group_checks=include_group_checks,
                        debug=debug)
@@ -178,7 +190,13 @@ def _ransac_building(pixels_in_building: List[dict],
     return planes
 
 
-def _load(pg_uri: str, job_id: int, page: int, page_size: int, toids: List[str] = None) -> Dict[str, List[dict]]:
+class BuildingData(TypedDict):
+    toid: str
+    pixels: List[dict]
+    polygon: Polygon
+
+
+def _load(pg_uri: str, job_id: int, page: int, page_size: int, toids: List[str] = None, force_load: bool = False) -> Dict[str, BuildingData]:
     """
     Load LIDAR pixel data for RANSAC processing. page_size is number of
     buildings rather than pixels to prevent splitting a building's pixels across
@@ -187,8 +205,31 @@ def _load(pg_uri: str, job_id: int, page: int, page_size: int, toids: List[str] 
     with connection(pg_uri, cursor_factory=DictCursor) as pg_conn:
         elevation_table = f"{tables.schema(job_id)}.{tables.ELEVATION}"
         aspect_table = f"{tables.schema(job_id)}.{tables.ASPECT}"
-        by_toid = pixels_for_buildings(pg_conn, job_id, page, page_size, [elevation_table, aspect_table], toids)
-        return by_toid
+        by_toid = pixels_for_buildings(pg_conn, job_id, page, page_size, [elevation_table, aspect_table], toids, force_load=force_load)
+        buildings = _load_building_polygons(pg_conn, job_id, list(by_toid.keys()))
+        loaded = {}
+        for building in buildings:
+            toid = building["toid"]
+            pixels = by_toid[toid]
+            loaded[toid] = {}
+            loaded[toid]["toid"] = toid
+            loaded[toid]["polygon"] = wkt.loads(building["polygon"])
+            loaded[toid]["pixels"] = pixels
+        return loaded
+
+
+def _load_building_polygons(pg_conn, job_id, toids: List[str]) -> List[dict]:
+    buildings = sql_command(
+            pg_conn,
+            """
+            SELECT toid, ST_AsText(geom_27700) AS polygon 
+            FROM {buildings}
+            WHERE toid = ANY( %(toids)s )""",
+            {"toids": toids},
+            buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
+            result_extractor=lambda rows: rows)
+
+    return buildings
 
 
 def _building_count(pg_uri: str, job_id: int):

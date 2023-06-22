@@ -2,6 +2,7 @@
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 import logging
 from os.path import join
+from typing import List
 
 import time
 
@@ -13,32 +14,42 @@ from solar_pv.lidar.lidar import LIDAR_NODATA
 from solar_pv.ransac.run_ransac import _ransac_building, _load
 
 
-def ransac_toid(pg_uri: str, job_id: int, toid: str, resolution_metres: float, out_dir: str, write_test_data: bool = True):
+def ransac_toids(pg_uri: str, job_id: int, toids: List[str], resolution_metres: float, out_dir: str, write_test_data: bool = True):
     logging.basicConfig(level=logging.DEBUG,
                         format='[%(asctime)s] %(levelname)s: %(message)s')
     os.makedirs(out_dir, exist_ok=True)
 
-    by_toid = _load(pg_uri, job_id, page=0, page_size=1000, toids=[toid])
-    building = by_toid[toid]
-    planes = _ransac_building(building, toid, resolution_metres, debug=True)
+    by_toid = _load(pg_uri, job_id, page=0, page_size=1000, toids=toids, force_load=True)
+    all_planes = []
+    all_pixels = []
+    for toid, building in by_toid.items():
+        print(f"\nTOID: {toid}\n")
+        planes = _ransac_building(building['pixels'], toid, resolution_metres, building['polygon'], debug=True)
+        all_planes.extend(planes)
+        all_pixels.extend(building['pixels'])
 
-    if len(planes) > 0:
-        print("RANSAC: all planes:")
-        for plane in planes:
-            print(f'toid {plane["toid"]} slope {plane["slope"]} aspect {plane["aspect"]} sd {plane["sd"]} inliers {len(plane["inliers_xy"])}')
-        _write_planes(toid, resolution_metres, out_dir, building, planes)
+        if len(planes) > 0:
+            print("RANSAC: all planes:")
+            for plane in planes:
+                print(f'toid {plane["toid"]} slope {plane["slope"]} aspect {plane["aspect"]} sd {plane["sd"]} inliers {len(plane["inliers_xy"])}')
+        else:
+            print("No planes to write, not creating geoJSON")
+        if write_test_data:
+            _write_test_data(toid, building)
+
+    if len(all_planes) > 0:
+        _write_planes(toids, resolution_metres, out_dir, all_pixels, all_planes)
+
+
+def _write_planes(toids: List[str], resolution_metres: float, out_dir: str, pixels, planes):
+    if len(toids) == 1:
+        filename = toids[0]
     else:
-        print("No planes to write, not creating geoJSON")
-
-    if write_test_data:
-        _write_test_data(toid, building)
-
-
-def _write_planes(toid: str, resolution_metres: float, out_dir: str, building, planes):
+        filename = "toids"
     t = int(time.time())
-    tiff_out = join(out_dir, f"{toid}-{t}.tif")
-    _write_tiff(tiff_out, resolution_metres, building, planes)
-    geojson_out = join(out_dir, f"{toid}-{t}.geojson")
+    tiff_out = join(out_dir, f"{filename}-{t}.tif")
+    _write_tiff(tiff_out, resolution_metres, pixels, planes)
+    geojson_out = join(out_dir, f"{filename}-{t}.geojson")
     _write_geojson(tiff_out, geojson_out)
     _write_geojson_fields(geojson_out, planes)
     try:
@@ -47,17 +58,17 @@ def _write_planes(toid: str, resolution_metres: float, out_dir: str, building, p
         pass
 
 
-def _write_tiff(filepath: str, res: float, building, planes):
+def _write_tiff(filepath: str, res: float, pixels, planes):
     import numpy
     from osgeo import gdal, osr
     from osgeo.gdalconst import GDT_Int32
 
     gdal.UseExceptions()
 
-    ulx = min(building, key=lambda p: p['x'])['x']
-    uly = max(building, key=lambda p: p['y'])['y']
-    lrx = max(building, key=lambda p: p['x'])['x']
-    lry = min(building, key=lambda p: p['y'])['y']
+    ulx = min(pixels, key=lambda p: p['x'])['x']
+    uly = max(pixels, key=lambda p: p['y'])['y']
+    lrx = max(pixels, key=lambda p: p['x'])['x']
+    lry = min(pixels, key=lambda p: p['y'])['y']
 
     xmax = int((lrx - ulx) / res) + 1
     ymax = int((uly - lry) / res) + 1
@@ -74,7 +85,7 @@ def _write_tiff(filepath: str, res: float, building, planes):
 
     by_pixel_id = {}
 
-    for pixel in building:
+    for pixel in pixels:
         by_pixel_id[pixel['pixel_id']] = pixel
         # this sets all non-nodata pixels that aren't in a plane to 0:
         # x = int(pixel["x"] - ulx)
@@ -153,7 +164,7 @@ def _write_test_data(toid, building):
     csv = join(ransac_test_data_dir, f"{toid}.csv")
     with open(csv, 'w') as f:
         f.write("pixel_id,x,y,elevation,aspect\n")
-        for pixel in building:
+        for pixel in building['pixels']:
             f.write(f"{pixel['pixel_id']},{pixel['x']},{pixel['y']},{pixel['elevation']},{pixel['aspect']}\n")
     print(f"Wrote test data to {csv}")
 
@@ -196,9 +207,62 @@ def thinness_ratio_experiments():
 if __name__ == "__main__":
     import os
     # thinness_ratio_experiments()
-    ransac_toid(
+    ransac_toids(
         os.getenv("PGW_URI"),
-        1657,
-        "osgb1000021681594",
+        1649,
+        [
+            # "osgb5000005116861453",
+            # "osgb5000005116861461",
+            # "osgb1000014994628",
+            # "osgb1000014994636",
+            # "osgb1000014994648",
+            # "osgb1000014994630",
+            # "osgb1000014994634",
+            # "osgb1000014994631",
+            # "osgb1000014994632",
+            # "osgb1000014994629",
+            # "osgb1000014994635",
+            # "osgb1000014994633",
+            # "osgb1000014994626",
+            # "osgb1000014994627",
+            # "osgb1000014994624",
+            # "osgb1000014994625",
+            # "osgb1000014994654",
+            # "osgb1000014994658",
+            # "osgb1000014994649",
+            # "osgb1000014994652",
+            # "osgb1000014994646",
+            # "osgb1000014994653",
+            # "osgb1000014994641",
+            # "osgb1000014994651",
+            # "osgb1000014994639",
+            # "osgb1000014994644",
+            # "osgb1000014994637",
+            # "osgb1000014994650",
+            # "osgb1000014994655",
+            # "osgb1000014994657",
+            # "osgb1000014994660",
+            # "osgb1000014994656",
+            # "osgb1000014994647",
+            # "osgb1000014994643",
+            # "osgb1000014994642",
+            # "osgb1000014994645",
+            # "osgb1000014994659",
+            # "osgb1000014994638",
+            # "osgb1000014994640",
+            # "osgb1000014995257",
+            # "osgb5000005116861456",
+            # "osgb1000014995257",
+
+            # "osgb1000014994950",
+            # "osgb1000014994952",
+            # "osgb1000014994947",
+            # "osgb1000014994949",
+            # "osgb1000014994951",
+            # "osgb1000014994948",
+
+            # "osgb1000014998052"
+        ],
         1.0,
-        f"{os.getenv('DEV_DATA_DIR')}/ransac")
+        f"{os.getenv('DEV_DATA_DIR')}/ransac",
+        write_test_data=False)

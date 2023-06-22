@@ -351,16 +351,25 @@ def pixels_for_buildings(pg_conn,
                          page: int,
                          page_size: int,
                          raster_tables: List[str],
-                         toids: List[str] = None) -> Dict[str, List[dict]]:
+                         toids: List[str] = None,
+                         force_load: bool = False) -> Dict[str, List[dict]]:
     """
     Get a list of pixels by toid. Each pixel dict will have keys x, y, pixel_id and toid,
     and one for each table in `raster_tables`, where the key will be the table name (without
     schema).
+
+    If force_load is True, load buildings despite a set exclusion_reason. This is for
+    debugging only.
     """
     if toids:
         toid_filter = SQL("AND b.toid = ANY( {toids} )").format(toids=Literal(toids))
     else:
         toid_filter = SQL("")
+
+    if force_load:
+        where_clause = SQL("true")
+    else:
+        where_clause = SQL("b.exclusion_reason IS NULL")
 
     by_pixel_id = {}
     fields = []
@@ -374,7 +383,7 @@ def pixels_for_buildings(pg_conn,
             WITH building_page AS (
                 SELECT b.toid, b.geom_27700
                 FROM {buildings} b
-                WHERE b.exclusion_reason IS NULL
+                WHERE {where_clause}
                 {toid_filter}
                 ORDER BY b.toid
                 OFFSET %(offset)s LIMIT %(limit)s
@@ -401,6 +410,7 @@ def pixels_for_buildings(pg_conn,
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
             raster_table=Identifier(schema, rtable),
             toid_filter=toid_filter,
+            where_clause=where_clause,
             result_extractor=lambda rows: rows)
 
         for pixel in pixels:
