@@ -3,23 +3,25 @@
 import json
 import traceback
 from collections import defaultdict
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 import math
 import numpy as np
 from psycopg2.sql import Identifier
 import psycopg2.extras
 from shapely import wkt, affinity, ops
-from shapely.geometry import LineString, Polygon, CAP_STYLE, JOIN_STYLE
+from shapely.geometry import LineString, Polygon, CAP_STYLE, JOIN_STYLE, MultiPoint, \
+    MultiPolygon
+from shapely.prepared import prep
 from shapely.validation import make_valid
 
 from solar_pv import tables
 from solar_pv.db_funcs import connection, sql_command
-from solar_pv.geos import azimuth, square, largest_polygon
+from solar_pv.geos import azimuth, square, largest_polygon, get_grid_cells
 from solar_pv.constants import FLAT_ROOF_DEGREES_THRESHOLD, \
     FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD, AZIMUTH_ALIGNMENT_THRESHOLD
-from solar_pv.roof_polygons.roof_polygon_archetypes import \
-    construct_archetypes, get_archetype
+from solar_pv.roof_polygons.roof_polygon_archetypes import construct_archetypes, \
+    get_archetype
 
 
 def create_roof_polygons(pg_uri: str,
@@ -67,6 +69,7 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
                           resolution_metres: float) -> List[dict]:
     polygons_by_toid = defaultdict(list)
     roof_polygons = []
+    # TODO these will have to be based on a different size system, not panel w/h
     archetypes = construct_archetypes(panel_width_m, panel_height_m)
     max_archetype_area = max(archetypes, key=lambda a: a.polygon.area).polygon.area
 
@@ -127,52 +130,70 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
             del plane['roof_poly']
             del plane['aspect_adjusted']
 
-            # constrain roof polygons to building geometry, enforcing min dist to edge:
-            roof_poly = _constrain_to_building(building_geom,
-                                               roof_poly,
-                                               large_building_threshold,
-                                               min_dist_to_edge_large_m,
-                                               min_dist_to_edge_m)
-
-            if not roof_poly or roof_poly.is_empty:
-                continue
-
-            # remove overlaps :
-            roof_poly = _remove_overlaps(toid, roof_poly, polygons_by_toid)
-
-            if not roof_poly or roof_poly.is_empty:
-                continue
-
             # Potentially use a pre-made roof archetype instead:
             plane['archetype'] = False
             if not is_flat \
                     and aspect_adjusted \
-                    and roof_poly.area < (max_archetype_area * 1.5):
+                    and roof_poly.area < (max_archetype_area * 1.5)\
+                    and roof_poly.area / building_geom.area > 0.14:
+
+                roof_poly = _constrain_to_building(building_geom,
+                                                   roof_poly,
+                                                   large_building_threshold,
+                                                   min_dist_to_edge_large_m,
+                                                   min_dist_to_edge_m)
+                if not roof_poly or roof_poly.is_empty:
+                    continue
+
+                roof_poly = _remove_overlaps(toid, roof_poly, polygons_by_toid)
+                if not roof_poly or roof_poly.is_empty:
+                    continue
+
                 archetype = get_archetype(roof_poly, archetypes, plane['aspect'])
                 if archetype is not None:
                     roof_poly = archetype.polygon
                     plane['archetype'] = True
                     plane['archetype_pattern'] = json.dumps(archetype.pattern)
 
-                    # constrain roof polygons (again):
                     roof_poly = _constrain_to_building(building_geom,
                                                        roof_poly,
                                                        large_building_threshold,
                                                        min_dist_to_edge_large_m,
                                                        min_dist_to_edge_m)
-
                     if not roof_poly or roof_poly.is_empty:
                         continue
 
-                    # remove overlaps (again):
                     roof_poly = _remove_overlaps(toid, roof_poly, polygons_by_toid)
-
                     if not roof_poly or roof_poly.is_empty:
                         continue
+
+                    roof_poly = remove_tendrils(roof_poly)
+
+            if plane['archetype'] is False:
+                roof_poly = _grid_polygon(plane, resolution_metres)
+
+                roof_poly = _constrain_to_building(building_geom,
+                                                   roof_poly,
+                                                   large_building_threshold,
+                                                   min_dist_to_edge_large_m,
+                                                   min_dist_to_edge_m)
+                if not roof_poly or roof_poly.is_empty:
+                    continue
+
+                roof_poly = _remove_overlaps(toid, roof_poly, polygons_by_toid)
+                if not roof_poly or roof_poly.is_empty:
+                    continue
+
+                # TODO is this working?
+                roof_poly = remove_tendrils(roof_poly, resolution_metres)
+
+            if not roof_poly or roof_poly.is_empty:
+                continue
 
             # any other planes in the same toid will now not be allowed to overlap this one:
             polygons_by_toid[toid].append(roof_poly)
 
+            # TODO if aspect not adjusted, set not usable?
             # Set usability:
             if plane['slope'] > max_roof_slope_degrees:
                 plane['usable'] = False
@@ -226,7 +247,38 @@ def _initial_polygon(plane, resolution_metres):
     return roof_poly
 
 
-def _merge_touching(planes, resolution_metres: float, max_slope_diff: int = 2) -> List[dict]:
+def _grid_polygon(plane, resolution_metres):
+    # Rotate the roof area CCW by aspect, to be gridded easily:
+    aspect = plane['aspect']
+    plane_points = MultiPoint(plane['inliers_xy'])
+    centroid = plane_points.centroid
+
+    plane_points = affinity.rotate(plane_points, aspect, origin=centroid)
+
+    grid_size = math.sqrt(resolution_metres ** 2 * 2.0)
+    grid = get_grid_cells(plane_points, grid_size, grid_size, 0, 0, grid_start='bounds')
+    grid = affinity.rotate(MultiPolygon(grid), -aspect, origin=centroid).geoms
+    roof_poly = ops.unary_union(grid)
+    return roof_poly
+
+
+def remove_tendrils(roof_poly: Polygon, buf: float = 0.6) -> Optional[Polygon]:
+    splitter = roof_poly.buffer(-buf, cap_style=CAP_STYLE.square, join_style=JOIN_STYLE.mitre, resolution=1)
+    splitter = splitter.buffer(buf, cap_style=CAP_STYLE.square, join_style=JOIN_STYLE.mitre, resolution=1)
+    splitter = largest_polygon(splitter).exterior
+    roof_poly = largest_polygon(split_with(roof_poly, splitter))
+    return roof_poly
+
+
+def split_with(poly, splitter):
+    """Split a Polygon with a LineString or LinearRing"""
+
+    union = poly.boundary.union(splitter)
+    poly = prep(poly)
+    return MultiPolygon([pg for pg in ops.polygonize(union) if poly.contains(pg.representative_point())])
+
+
+def _merge_touching(planes, resolution_metres: float, max_slope_diff: int = 4) -> List[dict]:
     """
     Merge any planes that
     a) have the same aspect
@@ -314,6 +366,9 @@ def _building_geoms(pg_uri: str, job_id: int, toids: List[str]) -> Dict[str, Pol
 
 
 def _building_orientations(building_geom):
+    # TODO support non-square buildings - take the top n azimuths rather than
+    #      the top 1. Ideally then take the 1 closest to the plane and allow
+    #      adjusting to that, that +90, that +180 etc?
     # 1. decompose into straight-line segments and find the total length of all
     #    segments by azimuth:
     azimuths = defaultdict(int)
@@ -321,6 +376,7 @@ def _building_orientations(building_geom):
         p1 = building_geom.exterior.coords[i]
         p2 = building_geom.exterior.coords[i + 1]
         segment = LineString([p1, p2])
+        # TODO nearest n? 2?
         az = round(azimuth(p1, p2))
         azimuths[az] += segment.length
 

@@ -16,7 +16,7 @@ from shapely.geometry import Polygon
 from solar_pv import paths
 from solar_pv.db_funcs import connection, sql_command
 from solar_pv import tables
-from solar_pv.roof_polygons.roof_polygons import _building_geoms, \
+from solar_pv.roof_polygons.roof_polygons_2 import _building_geoms, \
     _create_roof_polygons, _to_test_data
 
 _MAX_ROOF_SLOPE_DEGREES = 70
@@ -187,9 +187,8 @@ if __name__ == "__main__":
     #     1.0,
     #     f"{os.getenv('DEV_DATA_DIR')}/roof-polys")
 
-    make_roof_polygons(
+    make_job_roof_polygons(
         os.getenv("PGW_URI"),
-        1657,
-        "osgb1000021681594",
+        1649,
         1.0,
         f"{os.getenv('DEV_DATA_DIR')}/roof-polys")
