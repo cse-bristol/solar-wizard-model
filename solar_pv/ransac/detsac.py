@@ -7,10 +7,13 @@ from typing import Tuple, List
 import numpy as np
 import warnings
 import math
+from scipy import ndimage
 from shapely.geometry import LineString
+from skimage.morphology import local_minima
+from skimage.segmentation import watershed
 
 from sklearn.linear_model import RANSACRegressor
-from skimage import measure, morphology
+from skimage import measure, morphology, segmentation, color, graph
 from sklearn.base import clone
 from sklearn.linear_model import LinearRegression
 from sklearn.utils import check_random_state, check_consistent_length
@@ -20,10 +23,11 @@ from sklearn.utils.validation import has_fit_parameter
 from sklearn.exceptions import ConvergenceWarning
 from skimage.measure import perimeter_crofton
 
-from solar_pv.ransac.premade_planes import Plane
+from solar_pv.ransac.premade_planes import Plane, ArrayPlane
 from solar_pv.ransac.ransac import _slope, _aspect, _aspect_rad, _circular_mean, \
     _circular_sd, _circular_variance, _rad_diff, _to_positive_angle, _exclude_unconnected, \
     _sample, _pixel_groups, _group_areas, _min_thinness_ratio, RANSACValueError
+from solar_pv.ransac.ridge_test import ridges
 
 
 class DETSACRegressorForLIDAR(RANSACRegressor):
@@ -31,7 +35,6 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
     def __init__(self, base_estimator=None, *,
                  min_samples=None,
                  residual_threshold=None,
-                 flat_roof_residual_threshold=None,
                  is_data_valid=None,
                  is_model_valid=None,
                  max_trials=100,
@@ -42,6 +45,7 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
                  loss='absolute_loss',
                  random_state=None,
                  # RANSAC for LIDAR additions:
+                 flat_roof_residual_threshold=None,
                  resolution_metres=1,
                  min_points_per_plane=8,
                  min_points_per_plane_perc=0.008,
@@ -52,7 +56,9 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
                  max_group_area_ratio_to_largest=0.02,
                  flat_roof_threshold_degrees=5,
                  max_aspect_circular_mean_degrees=90,
-                 max_aspect_circular_sd=1.5):
+                 max_aspect_circular_sd=1.5,
+                 # DETSAC:
+                 sample_residual_threshold=0.25):
         """
         :param min_points_per_plane_perc: min points per plane as a percentage of total
         points that fall within the building bounds. Default 0.8% (0.008). This will
@@ -63,6 +69,9 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
 
         :param max_group_area_ratio_to_largest: Maximum ratio of the area of each other
         group to the area of the largest.
+
+        :param sample_residual_threshold: residual threshold to use for points in the
+        sample.
         """
         super().__init__(base_estimator,
                          min_samples=min_samples,
@@ -76,6 +85,7 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
                          stop_probability=stop_probability,
                          loss=loss,
                          random_state=random_state)
+        self.sample_residual_threshold = sample_residual_threshold
         self.min_points_per_plane = min_points_per_plane
         self.min_points_per_plane_perc = min_points_per_plane_perc
         self.max_slope = max_slope
@@ -94,8 +104,9 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
 
     def fit(self, X, y,
             sample_weight=None,
-            premade_planes: List[Plane] = None,
+            premade_planes: List[ArrayPlane] = None,
             aspect=None,
+            mask=None,
             total_points_in_building: int = None,
             include_group_checks: bool = True,
             debug: bool = False):
@@ -142,7 +153,6 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
         This only extracts one plane at a time so should be re-run until it can't find
         any more, with the points in the found plane removed from the next round's input.
         """
-
         if self.base_estimator is not None:
             base_estimator = clone(self.base_estimator)
         else:
@@ -216,6 +226,13 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
 
         # RANSAC for LIDAR additions:
         min_X = [np.amin(X[:, 0]), np.amin(X[:, 1])]
+
+        # TODO move somewhere else
+        # _test_ridges(X, min_X, y, self.resolution_metres)
+        # _test_watershed(X, min_X, y, self.resolution_metres)
+        # _test_flow(X, min_X, y, self.resolution_metres)
+        # _segment_aspect(X, min_X, aspect, self.resolution_metres)
+
         sd_best = np.inf
         bad_samples = set()
         if debug:
@@ -227,6 +244,7 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
         X_inlier_best = None
         y_inlier_best = None
         inlier_best_idxs_subset = None
+        best_sample_idxs = None
         self.n_skips_no_inliers_ = 0
         self.n_skips_invalid_data_ = 0
         self.n_skips_invalid_model_ = 0
@@ -243,26 +261,35 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
                     self.n_skips_invalid_model_) > self.max_skips:
                 break
 
-            # RANSAC for LiDAR addition: use a more restrictive threshold for flat
-            # roofs, as they are more likely to be covered with obstacles, HVAC, pipes etc
-            slope = plane.slope
-            if slope <= self.flat_roof_threshold_degrees:
-                residual_threshold = self.flat_roof_residual_threshold
-
             # residuals of all data for current random sample model
             base_estimator = plane.fit()
             y_pred = base_estimator.predict(X)
             residuals_subset = loss_function(y, y_pred)
 
+            # RANSAC for LiDAR addition: use a more restrictive threshold for flat
+            # roofs, as they are more likely to be covered with obstacles, HVAC, pipes etc
+            slope = _slope(base_estimator.coef_[0], base_estimator.coef_[1])
+            if slope <= self.flat_roof_threshold_degrees:
+                residual_threshold = self.flat_roof_residual_threshold
+
+            # DETSAC change: allow the initial sample points to be further from the plane,
+            # and never allow plane to be fit to points already on a different plane:
+            m1 = residuals_subset < self.sample_residual_threshold
+            m2 = np.zeros(residuals_subset.shape, dtype=int)
+            m2[plane.idxs] = 1
+            residuals_subset_copy = residuals_subset.copy()
+            residuals_subset_copy[(m1 & m2) == 1] = 0
+            residuals_subset_copy[mask == 0] = 9999  # TODO constant
+
             # classify data into inliers and outliers
-            inlier_mask_subset = residuals_subset < residual_threshold
+            inlier_mask_subset = residuals_subset_copy < residual_threshold
             n_inliers_subset = np.sum(inlier_mask_subset)
 
             # less inliers -> skip current random sample
-            if n_inliers_subset < n_inliers_best:
-                bad_sample_reasons["LESS_INLIERS"] += 1
-                self.n_skips_no_inliers_ += 1
-                continue
+            # if n_inliers_subset < n_inliers_best:
+            #     bad_sample_reasons["LESS_INLIERS"] += 1
+            #     self.n_skips_no_inliers_ += 1
+            #     continue
             # RANSAC for LIDAR addition: don't optimise for number of points
             # fit to plane.
             # See Tarsha-Kurdi, 2007
@@ -286,17 +313,17 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
 
             # same number of inliers but worse score -> skip current random
             # sample
-            if (n_inliers_subset == n_inliers_best
-                    and sd > sd_best):
-                bad_sample_reasons["WORSE_SD"] += 1
-                continue
+            # if (n_inliers_subset == n_inliers_best
+            #         and sd > sd_best):
+            #     bad_sample_reasons["WORSE_SD"] += 1
+            #     continue
             # RANSAC for LIDAR addition: use stddev of inlier distance to plane
             # as score instead
             # See Tarsha-Kurdi, 2007
-            # if sd > sd_best or (sd == sd_best and n_inliers_subset <= n_inliers_best):
-            #     if debug:
-            #         bad_sample_reasons["WORSE_SD"] += 1
-            #     continue
+            if sd > sd_best or (sd == sd_best and n_inliers_subset <= n_inliers_best):
+                if debug:
+                    bad_sample_reasons["WORSE_SD"] += 1
+                continue
 
             # RANSAC for LIDAR addition:
             # if difference between circular mean of pixel aspects and slope aspect is too high:
@@ -367,6 +394,7 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
                 continue
 
             # RANSAC for LiDAR addition: thinness ratio check
+            # TODO isn't quite right for butterfly roofs in totterdown
             perimeter = perimeter_crofton(only_largest, directions=4)
             thinness_ratio = (4 * np.pi * roof_plane_area) / (perimeter * perimeter)
             if thinness_ratio < _min_thinness_ratio(roof_plane_area):
@@ -379,6 +407,7 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
 
             # save current random sample as best sample
             n_inliers_best = n_inliers_subset
+            best_sample_idxs = plane.idxs
             sd_best = sd
             plane_properties_best = {
                 "aspect_circ_mean": math.degrees(aspect_circ_mean) if aspect_circ_mean else None,
@@ -452,6 +481,15 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
         # Re-fit data to final model:
         y_pred = base_estimator.predict(X)
         residuals_subset = loss_function(y, y_pred)
+
+        # allow the initial sample points to be further from the plane,
+        # and never allow plane to be fit to points already on a different plane:
+        m1 = residuals_subset < self.sample_residual_threshold
+        m2 = np.zeros(residuals_subset.shape, dtype=int)
+        m2[best_sample_idxs] = 1
+        residuals_subset[(m1 & m2) == 1] = 0
+        residuals_subset[mask == 0] = 9999  # TODO constant
+
         inlier_mask_best = residuals_subset < residual_threshold
         mask_without_excluded = _exclude_unconnected(X, min_X, inlier_mask_best, res=self.resolution_metres)
 
@@ -469,3 +507,76 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
             print(f"plane found: slope {_slope(a, b)} aspect {_aspect(a, b)} sd {self.sd} inliers {np.sum(mask_without_excluded)}")
             print("")
         return self
+
+
+def _test_ridges(X, min_X, y, res: float):
+
+    normed = ((X - min_X) / res).astype(int)
+    image = np.zeros((int(np.amax(normed[:, 0])) + 1,
+                      int(np.amax(normed[:, 1])) + 1))
+    for i, pair in enumerate(normed):
+        image[pair[0]][pair[1]] = y[i]
+
+    ridges(image)
+
+
+def _test_watershed(X, min_X, y, res: float):
+    normed = ((X - min_X) / res).astype(int)
+    image = np.full((int(np.amax(normed[:, 1])) + 1,
+                     int(np.amax(normed[:, 0])) + 1), 9999.0)
+    for i, pair in enumerate(normed):
+        image[pair[1]][pair[0]] = y[i]
+
+    image = np.flip(image, axis=0)
+    mask = image != 9999
+
+    rounded = image.astype(int)
+    markers_bool = local_minima(rounded, connectivity=2) * mask
+    markers = ndimage.label(markers_bool)[0]
+
+    # does not having a buffer around the building geom when selecting pixels make this worse? Think this is OK
+    w = watershed(image, connectivity=2, mask=mask, compactness=1.0)
+    return w
+
+
+def _test_flow(X, min_X, y, res: float):
+    normed = ((X - min_X) / res).astype(int)
+    image = np.full((int(np.amax(normed[:, 1])) + 1,
+                     int(np.amax(normed[:, 0])) + 1), 0.0)
+    for i, pair in enumerate(normed):
+        image[pair[1]][pair[0]] = y[i]
+
+    image = np.flip(image, axis=0)
+    mask = image != 0.0
+
+    from pysheds.view import Raster, ViewFinder
+    from pysheds.grid import Grid
+    raster = Raster(image, viewfinder=ViewFinder(shape=image.shape, mask=mask))
+    grid = Grid(raster.viewfinder)
+    grid.mask = mask
+    fdir = grid.flowdir(raster, apply_mask=True, nodata_in=np.nan)
+    fdir = fdir * mask
+    # fdir = np.degrees(fdir)
+    fdir = np.array(fdir)
+    print(fdir)
+    return fdir
+
+
+def _segment_aspect(X, min_X, aspect, res: float):
+    normed = ((X - min_X) / res).astype(int)
+    image = np.full((int(np.amax(normed[:, 1])) + 1,
+                     int(np.amax(normed[:, 0])) + 1), 0.0)
+    for i, pair in enumerate(normed):
+        image[pair[1]][pair[0]] = aspect[i]
+
+    image = np.flip(image, axis=0)
+    mask = image != 0.0
+
+    labels1 = segmentation.slic(image, compactness=30, n_segments=100, start_label=1, mask=mask)
+    # out1 = color.label2rgb(labels1, image, kind='avg', bg_label=0)
+
+    from skimage.future.graph import rag_mean_color, cut_threshold
+    g = rag_mean_color(image, labels1)
+    labels2 = cut_threshold(labels1, g, 39)
+    # out2 = color.label2rgb(labels2, image, kind='avg', bg_label=0)
+    return labels2

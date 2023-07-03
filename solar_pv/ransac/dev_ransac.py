@@ -2,7 +2,7 @@
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 import logging
 from os.path import join
-from typing import List
+from typing import List, Optional
 
 import time
 
@@ -14,7 +14,7 @@ from solar_pv.lidar.lidar import LIDAR_NODATA
 from solar_pv.ransac.run_ransac import _ransac_building, _load
 
 
-def ransac_toids(pg_uri: str, job_id: int, toids: List[str], resolution_metres: float, out_dir: str, write_test_data: bool = True):
+def ransac_toids(pg_uri: str, job_id: int, toids: Optional[List[str]], resolution_metres: float, out_dir: str, write_test_data: bool = True):
     logging.basicConfig(level=logging.DEBUG,
                         format='[%(asctime)s] %(levelname)s: %(message)s')
     os.makedirs(out_dir, exist_ok=True)
@@ -38,11 +38,13 @@ def ransac_toids(pg_uri: str, job_id: int, toids: List[str], resolution_metres: 
             _write_test_data(toid, building)
 
     if len(all_planes) > 0:
-        _write_planes(toids, resolution_metres, out_dir, all_pixels, all_planes)
+        _write_planes(toids, job_id, resolution_metres, out_dir, all_pixels, all_planes)
 
 
-def _write_planes(toids: List[str], resolution_metres: float, out_dir: str, pixels, planes):
-    if len(toids) == 1:
+def _write_planes(toids: Optional[List[str]], job_id: int, resolution_metres: float, out_dir: str, pixels, planes):
+    if toids is None:
+        filename = f"job_{job_id}"
+    elif len(toids) == 1:
         filename = toids[0]
     else:
         filename = "toids"
@@ -207,62 +209,77 @@ def thinness_ratio_experiments():
 if __name__ == "__main__":
     import os
     # thinness_ratio_experiments()
+    # ransac_toids(
+    #     os.getenv("PGW_URI"),
+    #     1649,
+    #     [
+    #         # "osgb1000014994638",
+    #         # "osgb1000014994637",
+    #         # "osgb1000014994948",
+    #         # "osgb1000014994624",
+    #         # "osgb1000014994950",
+    #         # "osgb1000014994951",
+    #
+    #         "osgb5000005116861453",
+    #         "osgb5000005116861461",
+    #         "osgb1000014994628",
+    #         "osgb1000014994636",
+    #         "osgb1000014994648",
+    #         "osgb1000014994630",
+    #         "osgb1000014994634",
+    #         "osgb1000014994631",
+    #         "osgb1000014994632",
+    #         "osgb1000014994629",
+    #         "osgb1000014994635",
+    #         "osgb1000014994633",
+    #         "osgb1000014994626",
+    #         "osgb1000014994627",
+    #         "osgb1000014994624",
+    #         "osgb1000014994625",
+    #         "osgb1000014994654",
+    #         "osgb1000014994658",
+    #         "osgb1000014994649",
+    #         "osgb1000014994652",
+    #         "osgb1000014994646",
+    #         "osgb1000014994653",
+    #         "osgb1000014994641",
+    #         "osgb1000014994651",
+    #         "osgb1000014994639",
+    #         "osgb1000014994644",
+    #         "osgb1000014994637",
+    #         "osgb1000014994650",
+    #         "osgb1000014994655",
+    #         "osgb1000014994657",
+    #         "osgb1000014994660",
+    #         "osgb1000014994656",
+    #         "osgb1000014994647",
+    #         "osgb1000014994643",
+    #         "osgb1000014994642",
+    #         "osgb1000014994645",
+    #         "osgb1000014994659",
+    #         "osgb1000014994638",
+    #         "osgb1000014994640",
+    #         "osgb1000014995257",
+    #         "osgb5000005116861456",
+    #         "osgb1000014995257",
+    #
+    #         "osgb1000014994950",
+    #         "osgb1000014994952",
+    #         "osgb1000014994947",
+    #         "osgb1000014994949",
+    #         "osgb1000014994951",
+    #         "osgb1000014994948",
+    #
+    #         "osgb1000014998052"
+    #     ],
+    #     1.0,
+    #     f"{os.getenv('DEV_DATA_DIR')}/ransac",
+    #     write_test_data=False)
+
     ransac_toids(
         os.getenv("PGW_URI"),
-        1649,
-        [
-            # "osgb5000005116861453",
-            # "osgb5000005116861461",
-            # "osgb1000014994628",
-            # "osgb1000014994636",
-            # "osgb1000014994648",
-            # "osgb1000014994630",
-            # "osgb1000014994634",
-            # "osgb1000014994631",
-            # "osgb1000014994632",
-            # "osgb1000014994629",
-            # "osgb1000014994635",
-            # "osgb1000014994633",
-            # "osgb1000014994626",
-            # "osgb1000014994627",
-            # "osgb1000014994624",
-            # "osgb1000014994625",
-            # "osgb1000014994654",
-            # "osgb1000014994658",
-            # "osgb1000014994649",
-            # "osgb1000014994652",
-            # "osgb1000014994646",
-            # "osgb1000014994653",
-            # "osgb1000014994641",
-            # "osgb1000014994651",
-            # "osgb1000014994639",
-            # "osgb1000014994644",
-            # "osgb1000014994637",
-            # "osgb1000014994650",
-            # "osgb1000014994655",
-            # "osgb1000014994657",
-            # "osgb1000014994660",
-            # "osgb1000014994656",
-            # "osgb1000014994647",
-            # "osgb1000014994643",
-            # "osgb1000014994642",
-            # "osgb1000014994645",
-            # "osgb1000014994659",
-            # "osgb1000014994638",
-            # "osgb1000014994640",
-            # "osgb1000014995257",
-            # "osgb5000005116861456",
-            # "osgb1000014995257",
-
-            # "osgb1000014994950",
-            # "osgb1000014994952",
-            # "osgb1000014994947",
-            # "osgb1000014994949",
-            # "osgb1000014994951",
-            # "osgb1000014994948",
-
-            # "osgb1000014998052"
-        ],
+        1657,
+        ["osgb1000021672476"],
         1.0,
         f"{os.getenv('DEV_DATA_DIR')}/ransac",
         write_test_data=False)

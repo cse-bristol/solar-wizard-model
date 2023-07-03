@@ -13,7 +13,7 @@ from psycopg2.sql import SQL, Identifier, Literal
 import numpy as np
 from shapely import wkt, ops
 from shapely.geometry import Polygon, LineString
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import LinearRegression, HuberRegressor
 
 from solar_pv.db_funcs import count, connection, sql_command
 from solar_pv.postgis import pixels_for_buildings
@@ -22,7 +22,7 @@ from solar_pv.constants import RANSAC_LARGE_BUILDING, \
     RANSAC_LARGE_MAX_TRIALS, RANSAC_SMALL_MAX_TRIALS, FLAT_ROOF_DEGREES_THRESHOLD, \
     RANSAC_SMALL_BUILDING, RANSAC_MEDIUM_MAX_TRIALS
 from solar_pv.ransac.detsac import DETSACRegressorForLIDAR
-from solar_pv.ransac.premade_planes import create_planes
+from solar_pv.ransac.premade_planes import create_planes, create_planes_2
 from solar_pv.ransac.ransac import RANSACRegressorForLIDAR, _aspect, \
     _slope, RANSACValueError
 from solar_pv.roof_polygons.roof_polygons import create_roof_polygons
@@ -117,6 +117,7 @@ def _ransac_building(pixels_in_building: List[dict],
                      debug: bool = False) -> List[dict]:
     xyz = np.array([[pixel["x"], pixel["y"], pixel["elevation"]] for pixel in pixels_in_building])
     aspect = np.array([pixel["aspect"] for pixel in pixels_in_building])
+    mask = np.ones(aspect.shape)
 
     if len(pixels_in_building) > RANSAC_LARGE_BUILDING / resolution_metres:
         max_trials = RANSAC_LARGE_MAX_TRIALS
@@ -133,21 +134,45 @@ def _ransac_building(pixels_in_building: List[dict],
         max_trials = RANSAC_MEDIUM_MAX_TRIALS
         include_group_checks = True
 
+    # TODO maybe rather than this, inside DETSAC it should loop over (planes, sample_residual_thresholds) combinations?
+    #      would have to optimise for num inliers rather than SD
+
+    # First treat the points in the sample the same as any other point:
+    planes = _do_ransac_building(toid, xyz, aspect, mask, resolution_metres, max_trials, include_group_checks,
+                                 sample_residual_threshold=0.25, debug=debug)
+    # Next allow the sample points to be significantly further from the plane:
+    planes.extend(_do_ransac_building(toid, xyz, aspect, mask, resolution_metres, max_trials, include_group_checks,
+                                      sample_residual_threshold=2.0, debug=debug))
+
+    return planes
+
+
+def _do_ransac_building(toid: str,
+                        xyz,
+                        aspect,
+                        mask,
+                        resolution_metres: float,
+                        max_trials: int,
+                        include_group_checks: bool,
+                        sample_residual_threshold: float,
+                        debug: bool):
     planes = []
     min_points_per_plane = min(8, int(8 / resolution_metres))  # 8 for 2m, 8 for 1m, 16 for 0.5m
     total_points_in_building = len(aspect)
+    premade_planes = create_planes_2(xyz, aspect, resolution_metres)
+    # if polygon is not None:
+    #     premade_planes = create_planes(pixels_in_building, polygon)
+    # else:
+    #     premade_planes = None
 
-    if polygon is not None:
-        premade_planes = create_planes(pixels_in_building, polygon)
-    else:
-        premade_planes = None
-
-    while np.count_nonzero(xyz) // 3 > min_points_per_plane:
+    while np.count_nonzero(mask) > min_points_per_plane:
         XY = xyz[:, :2]
         Z = xyz[:, 2]
         try:
             ransac = DETSACRegressorForLIDAR(residual_threshold=0.25,
+                                             sample_residual_threshold=sample_residual_threshold,
                                              flat_roof_residual_threshold=0.1,
+                                             base_estimator=HuberRegressor(),
                                              max_trials=max_trials,
                                              max_slope=75,
                                              min_slope=0,
@@ -156,6 +181,7 @@ def _ransac_building(pixels_in_building: List[dict],
                                              resolution_metres=resolution_metres)
             ransac.fit(XY, Z,
                        aspect=aspect,
+                       mask=mask,
                        premade_planes=premade_planes,
                        total_points_in_building=total_points_in_building,
                        include_group_checks=include_group_checks,
@@ -178,15 +204,15 @@ def _ransac_building(pixels_in_building: List[dict],
                 "aspect_circ_sd": ransac.plane_properties["aspect_circ_sd"],
             })
 
-            xyz = xyz[outlier_mask]
-            aspect = aspect[outlier_mask]
+            # xyz = xyz[outlier_mask]
+            # aspect = aspect[outlier_mask]
+            mask[inlier_mask] = 0
         except RANSACValueError as e:
             if debug:
                 print("No plane found - received RANSACValueError:")
                 print(e)
                 print("")
             break
-
     return planes
 
 
