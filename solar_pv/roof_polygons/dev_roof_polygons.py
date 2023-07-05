@@ -21,17 +21,18 @@ from solar_pv.roof_polygons.roof_polygons_2 import _building_geoms, \
 
 _MAX_ROOF_SLOPE_DEGREES = 70
 _MIN_ROOF_AREA_M = 8
-_MIN_ROOF_DEGREES_FROM_NORTH = 45
+_MIN_ROOF_DEGREES_FROM_NORTH = 0
 _FLAT_ROOF_DEGREES = 10
 _LARGE_BUILDING_THRESHOLD = 200
-_MIN_DIST_TO_EDGE_M = 0.4
-_MIN_DIST_TO_EDGE_LARGE_M = 1
+_MIN_DIST_TO_EDGE_M = 0.1
+_MIN_DIST_TO_EDGE_LARGE_M = 0.1
 _PANEL_W_M = 0.99
 _PANEL_H_M = 1.64
 
 
 def make_job_roof_polygons(pg_uri: str, job_id: int,
                            resolution_metres: float, out_dir: str,
+                           make_planes: bool = False,
                            write_test_data: bool = True):
     logging.basicConfig(level=logging.DEBUG,
                         format='[%(asctime)s] %(levelname)s: %(message)s')
@@ -48,7 +49,10 @@ def make_job_roof_polygons(pg_uri: str, job_id: int,
         building_geoms = _building_geoms(pg_uri, job_id, toids)
         all_planes = []
         for toid in toids:
-            planes = _load_toid_planes(pg_uri, job_id, toid)
+            if make_planes:
+                planes = _make_roof_planes(pg_uri, job_id, toid, resolution_metres)
+            else:
+                planes = _load_toid_planes(pg_uri, job_id, toid)
             polygons = _create_roof_polygons(building_geoms,
                                              planes,
                                              max_roof_slope_degrees=_MAX_ROOF_SLOPE_DEGREES,
@@ -73,19 +77,24 @@ def make_job_roof_polygons(pg_uri: str, job_id: int,
 
 def make_roof_polygons_all(pg_uri: str, job_id: int, toids: List[str],
                            resolution_metres: float, out_dir: str,
+                           make_planes: bool = False,
                            write_test_data: bool = True):
     for toid in toids:
-        make_roof_polygons(pg_uri, job_id, toid, resolution_metres, out_dir, write_test_data)
+        make_roof_polygons(pg_uri, job_id, toid, resolution_metres, out_dir, make_planes, write_test_data)
 
 
 def make_roof_polygons(pg_uri: str, job_id: int, toid: str,
                        resolution_metres: float, out_dir: str,
+                       make_planes: bool = False,
                        write_test_data: bool = True):
     logging.basicConfig(level=logging.DEBUG,
                         format='[%(asctime)s] %(levelname)s: %(message)s')
     os.makedirs(out_dir, exist_ok=True)
 
-    planes = _load_toid_planes(pg_uri, job_id, toid)
+    if make_planes:
+        planes = _make_roof_planes(pg_uri, job_id, toid, resolution_metres)
+    else:
+        planes = _load_toid_planes(pg_uri, job_id, toid)
     building_geoms = _building_geoms(pg_uri, job_id, [toid])
 
     if write_test_data:
@@ -106,6 +115,14 @@ def make_roof_polygons(pg_uri: str, job_id: int, toid: str,
 
     if write_test_data:
         _write_outputs(toid, planes, out_dir, building_geoms[toid])
+
+
+def _make_roof_planes(pg_uri: str, job_id: int, toid: str, resolution_metres: float):
+    from solar_pv.ransac.run_ransac import _ransac_building, _load
+    by_toid = _load(pg_uri, job_id, page=0, page_size=1000, toids=[toid], force_load=True)
+    building = by_toid[toid]
+    planes = _ransac_building(building['pixels'], toid, resolution_metres, building['polygon'], debug=True)
+    return planes
 
 
 def _write_test_data(toid: str, planes: List[dict], building_geom: Polygon, out_dir: str):
@@ -189,6 +206,7 @@ if __name__ == "__main__":
 
     make_job_roof_polygons(
         os.getenv("PGW_URI"),
-        1649,
+        1657,
         1.0,
-        f"{os.getenv('DEV_DATA_DIR')}/roof-polys")
+        f"{os.getenv('DEV_DATA_DIR')}/roof-polys",
+        make_planes=True)

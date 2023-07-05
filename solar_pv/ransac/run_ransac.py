@@ -13,7 +13,7 @@ from psycopg2.sql import SQL, Identifier, Literal
 import numpy as np
 from shapely import wkt, ops
 from shapely.geometry import Polygon, LineString
-from sklearn.linear_model import LinearRegression, HuberRegressor
+from sklearn.linear_model import LinearRegression
 
 from solar_pv.db_funcs import count, connection, sql_command
 from solar_pv.postgis import pixels_for_buildings
@@ -134,15 +134,8 @@ def _ransac_building(pixels_in_building: List[dict],
         max_trials = RANSAC_MEDIUM_MAX_TRIALS
         include_group_checks = True
 
-    # TODO maybe rather than this, inside DETSAC it should loop over (planes, sample_residual_thresholds) combinations?
-    #      would have to optimise for num inliers rather than SD
-
-    # First treat the points in the sample the same as any other point:
     planes = _do_ransac_building(toid, xyz, aspect, mask, resolution_metres, max_trials, include_group_checks,
-                                 sample_residual_threshold=0.25, debug=debug)
-    # Next allow the sample points to be significantly further from the plane:
-    planes.extend(_do_ransac_building(toid, xyz, aspect, mask, resolution_metres, max_trials, include_group_checks,
-                                      sample_residual_threshold=2.0, debug=debug))
+                                 sample_residual_thresholds=[2.0, 0.25], debug=debug)
 
     return planes
 
@@ -154,7 +147,7 @@ def _do_ransac_building(toid: str,
                         resolution_metres: float,
                         max_trials: int,
                         include_group_checks: bool,
-                        sample_residual_threshold: float,
+                        sample_residual_thresholds: List[float],
                         debug: bool):
     planes = []
     min_points_per_plane = min(8, int(8 / resolution_metres))  # 8 for 2m, 8 for 1m, 16 for 0.5m
@@ -170,9 +163,8 @@ def _do_ransac_building(toid: str,
         Z = xyz[:, 2]
         try:
             ransac = DETSACRegressorForLIDAR(residual_threshold=0.25,
-                                             sample_residual_threshold=sample_residual_threshold,
+                                             sample_residual_thresholds=sample_residual_thresholds,
                                              flat_roof_residual_threshold=0.1,
-                                             base_estimator=HuberRegressor(),
                                              max_trials=max_trials,
                                              max_slope=75,
                                              min_slope=0,
@@ -187,7 +179,6 @@ def _do_ransac_building(toid: str,
                        include_group_checks=include_group_checks,
                        debug=debug)
             inlier_mask = ransac.inlier_mask_
-            outlier_mask = np.logical_not(inlier_mask)
             a, b = ransac.estimator_.coef_
             d = ransac.estimator_.intercept_
 
@@ -200,12 +191,13 @@ def _do_ransac_building(toid: str,
                 "aspect": _aspect(a, b),
                 "inliers_xy": XY[inlier_mask],
                 "sd": ransac.sd,
+                "score": ransac.plane_properties["score"],
                 "aspect_circ_mean": ransac.plane_properties["aspect_circ_mean"],
                 "aspect_circ_sd": ransac.plane_properties["aspect_circ_sd"],
+                "thinness_ratio": ransac.plane_properties["thinness_ratio"],
+                "cv_hull_ratio": ransac.plane_properties["cv_hull_ratio"],
             })
 
-            # xyz = xyz[outlier_mask]
-            # aspect = aspect[outlier_mask]
             mask[inlier_mask] = 0
         except RANSACValueError as e:
             if debug:

@@ -15,7 +15,7 @@ from solar_pv.ransac.run_ransac import _ransac_building, _load
 
 
 def ransac_toids(pg_uri: str, job_id: int, toids: Optional[List[str]], resolution_metres: float, out_dir: str, write_test_data: bool = True):
-    logging.basicConfig(level=logging.DEBUG,
+    logging.basicConfig(level=logging.INFO,
                         format='[%(asctime)s] %(levelname)s: %(message)s')
     os.makedirs(out_dir, exist_ok=True)
 
@@ -145,6 +145,9 @@ def _write_geojson_fields(geojson: str, planes):
     layer.CreateField(ogr.FieldDefn("sd", ogr.OFTReal))
     layer.CreateField(ogr.FieldDefn("aspect_circ_mean", ogr.OFTReal))
     layer.CreateField(ogr.FieldDefn("aspect_circ_sd", ogr.OFTReal))
+    layer.CreateField(ogr.FieldDefn("score", ogr.OFTReal))
+    layer.CreateField(ogr.FieldDefn("thinness_ratio", ogr.OFTReal))
+    layer.CreateField(ogr.FieldDefn("cv_hull_ratio", ogr.OFTReal))
     layer.CreateField(ogr.FieldDefn("inliers", ogr.OFTInteger))
 
     for feature in layer:
@@ -157,6 +160,9 @@ def _write_geojson_fields(geojson: str, planes):
             feature.SetField("sd", plane["sd"])
             feature.SetField("aspect_circ_mean", plane["aspect_circ_mean"])
             feature.SetField("aspect_circ_sd", plane["aspect_circ_sd"])
+            feature.SetField("score", plane["score"])
+            feature.SetField("thinness_ratio", plane["thinness_ratio"])
+            feature.SetField("cv_hull_ratio", plane["cv_hull_ratio"])
             feature.SetField("inliers", len(plane["inliers_xy"]))
             layer.SetFeature(feature)
 
@@ -276,10 +282,20 @@ if __name__ == "__main__":
     #     f"{os.getenv('DEV_DATA_DIR')}/ransac",
     #     write_test_data=False)
 
+    # ransac_toids(
+    #     os.getenv("PGW_URI"),
+    #     1657,
+    #     # ["osgb1000021672466"],
+    #     None,
+    #     1.0,
+    #     f"{os.getenv('DEV_DATA_DIR')}/ransac",
+    #     write_test_data=False)
+
     ransac_toids(
         os.getenv("PGW_URI"),
-        1657,
-        ["osgb1000021672476"],
+        1650,
+        # ["osgb1000021672466"],
+        None,
         1.0,
         f"{os.getenv('DEV_DATA_DIR')}/ransac",
         write_test_data=False)

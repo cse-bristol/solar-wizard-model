@@ -11,6 +11,8 @@ from shapely.geometry import Polygon, LineString, Point, CAP_STYLE, JOIN_STYLE
 from shapely.strtree import STRtree
 from sklearn.linear_model import LinearRegression, HuberRegressor
 
+from solar_pv.ransac.ransac import _aspect
+
 _SLOPES = [25, 28, 30, 33, 35, 40, 45, 50,
            -25, -28, -30, -33, -35,
            3, 5, 7, 10, 15, 20]
@@ -71,61 +73,101 @@ class ArrayPlane:
         return lr
 
 
-def create_planes_2(xyz: np.ndarray, aspect: np.ndarray, res: float):
-    from skimage import segmentation
-    from skimage.future.graph import rag_mean_color, cut_threshold
-    planes = []
-
-    xy = xyz[:, :2]
-    z = xyz[:, 2]
+def _image(xy: np.ndarray, vals: np.ndarray, res: float, nodata: float):
     min_xy = [np.amin(xy[:, 0]), np.amin(xy[:, 1])]
 
     normed = ((xy - min_xy) / res).astype(int)
     image = np.full((int(np.amax(normed[:, 1])) + 1,
-                     int(np.amax(normed[:, 0])) + 1), -9999.0)
+                     int(np.amax(normed[:, 0])) + 1), nodata)
     idxs = np.zeros((int(np.amax(normed[:, 1])) + 1,
                      int(np.amax(normed[:, 0])) + 1), dtype=int)
     for i, pair in enumerate(normed):
-        image[pair[1]][pair[0]] = aspect[i]
+        image[pair[1]][pair[0]] = vals[i]
         idxs[pair[1]][pair[0]] = i
 
     image = np.flip(image, axis=0)
     idxs = np.flip(idxs, axis=0)
-    mask = image != -9999.0
+    return image, idxs
 
+
+def _segment(image: np.ndarray, mask: np.ndarray, threshold: float):
+    from skimage import segmentation
+    from skimage.future.graph import rag_mean_color, cut_threshold
     initial_segments = segmentation.slic(image, compactness=30, start_label=1, mask=mask)
 
     g = rag_mean_color(image, initial_segments)
 
-    segments = cut_threshold(initial_segments, g, 29)
-    num_segments = np.amax(segments)
-    # TODO make planes with a range of different thresholds?
-    # TODO segment using height first
-    for segment_id in range(1, num_segments + 1):
-        idx_subset = idxs[segments == segment_id]
-        if len(idx_subset) > 3:
-            xy_subset = xy[idx_subset]
-            z_subset = z[idx_subset]
-            # TODO remove n worst outliers as variations?
-            planes.append(ArrayPlane(xy=xy_subset, z=z_subset, idxs=idx_subset))
+    segments = cut_threshold(initial_segments, g, threshold)
+    return segments
 
-            # lr = HuberRegressor()
-            # lr.fit(xy_subset, z_subset)
-            # z_pred = lr.predict(xy_subset)
-            # def loss_function(y_true, y_pred):
-            #     return np.abs(y_true - y_pred)
-            # residuals_subset = loss_function(z_subset, z_pred)
-            # residual_threshold = 0.25
-            # sd = np.std(residuals_subset[residuals_subset < residual_threshold])
 
-            # lr2 = LinearRegression()
-            # lr2.fit(xy_subset, z_subset)
-            # z2_pred = lr2.predict(xy_subset)
-            # residuals_subset2 = loss_function(z_subset, z2_pred)
+def _segment_sizes(segment_image: np.ndarray):
+    ids, sizes = np.unique(segment_image, return_counts=True)
+    return list(zip(ids, sizes))
 
-            # sd2 = np.std(residuals_subset2[residuals_subset2 < residual_threshold])
 
-            # print(residuals_subset)
+def _merge_small_segments(segment_image: np.ndarray, max_size: int):
+    from skimage.segmentation import expand_labels
+
+    segment_sizes = _segment_sizes(segment_image)
+    small_segments = [zss[0] for zss in segment_sizes if zss[1] <= max_size and zss[0] != 0]
+    mask = np.isin(segment_image, small_segments)
+    nodata_mask = segment_image == 0
+    segment_image[mask] = 0
+    enlarged_segment_image = expand_labels(segment_image)
+    enlarged_segment_image[nodata_mask] = 0
+    return enlarged_segment_image
+
+
+def create_planes_2(xyz: np.ndarray, aspect: np.ndarray, res: float):
+    planes = []
+
+    xy = xyz[:, :2]
+    z = xyz[:, 2]
+    nodata = -9999.0
+    aspect_image, idxs = _image(xy, aspect, res, nodata)
+    z_image, z_idxs = _image(xy, z, res, nodata)
+    z_segments = _segment(z_image, z_image != nodata, 1.5)
+    z_segments = _merge_small_segments(z_segments, max_size=3)
+    num_z_segments = np.amax(z_segments)
+
+    for z_segment_id in range(1, num_z_segments + 1):
+        z_idx_subset = idxs[z_segments == z_segment_id]
+        if len(z_idx_subset) > 3:
+            # don't mask out small z_segments - only nodata and other large z_segment_ids
+            mask = z_segments == z_segment_id
+            # TODO make planes with a range of different thresholds?
+            segments = _segment(aspect_image, mask, 29)
+            num_segments = np.amax(segments)
+            for segment_id in range(1, num_segments + 1):
+                idx_subset = idxs[segments == segment_id]
+                if len(idx_subset) > 3:
+                    xy_subset = xy[idx_subset]
+                    z_subset = z[idx_subset]
+                    avg_aspect = np.average(aspect_image[segments == segment_id])
+                    # TODO remove n worst outliers as variations?
+                    planes.append(ArrayPlane(xy=xy_subset, z=z_subset, idxs=idx_subset))
+
+                    lr = LinearRegression()
+                    lr.fit(xy_subset, z_subset)
+                    plane_aspect = _aspect(lr.coef_[0], lr.coef_[1])
+                    print(f"segment {segment_id}: points {len(z_subset)} avg aspect {avg_aspect} plane aspect {plane_aspect}")
+
+                    # z_pred = lr.predict(xy_subset)
+                    # def loss_function(y_true, y_pred):
+                    #     return np.abs(y_true - y_pred)
+                    # residuals_subset = loss_function(z_subset, z_pred)
+                    # residual_threshold = 0.25
+                    # sd = np.std(residuals_subset[residuals_subset < residual_threshold])
+
+                    # lr2 = LinearRegression()
+                    # lr2.fit(xy_subset, z_subset)
+                    # z2_pred = lr2.predict(xy_subset)
+                    # residuals_subset2 = loss_function(z_subset, z2_pred)
+
+                    # sd2 = np.std(residuals_subset2[residuals_subset2 < residual_threshold])
+
+                    # print(residuals_subset)
 
     return planes
 

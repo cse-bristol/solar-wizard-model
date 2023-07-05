@@ -128,7 +128,6 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
             roof_poly = plane['roof_poly']
             aspect_adjusted = plane['aspect_adjusted']
             del plane['roof_poly']
-            del plane['aspect_adjusted']
 
             # Potentially use a pre-made roof archetype instead:
             plane['archetype'] = False
@@ -149,7 +148,8 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
                 if not roof_poly or roof_poly.is_empty:
                     continue
 
-                archetype = get_archetype(roof_poly, archetypes, plane['aspect'])
+                # archetype = get_archetype(roof_poly, archetypes, plane['aspect'])
+                archetype = None
                 if archetype is not None:
                     roof_poly = archetype.polygon
                     plane['archetype'] = True
@@ -197,12 +197,16 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
             # Set usability:
             if plane['slope'] > max_roof_slope_degrees:
                 plane['usable'] = False
+                plane['not_usable_reason'] = "SLOPE"
             elif plane['aspect'] < min_roof_degrees_from_north:
                 plane['usable'] = False
+                plane['not_usable_reason'] = "ASPECT"
             elif plane['aspect'] > 360 - min_roof_degrees_from_north:
                 plane['usable'] = False
+                plane['not_usable_reason'] = "ASPECT"
             elif roof_poly.area < min_roof_area_m and plane['archetype'] is False:
                 plane['usable'] = False
+                plane['not_usable_reason'] = "AREA"
             else:
                 plane['usable'] = True
 

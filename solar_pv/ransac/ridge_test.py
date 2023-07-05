@@ -3,7 +3,7 @@ from skimage import color
 from skimage.filters import meijering, sato, frangi, hessian
 import matplotlib.pyplot as plt
 
-import pysheds.view
+# import pysheds.view
 
 def original(image, **kwargs):
     """Return the original image, ignoring any kwargs."""

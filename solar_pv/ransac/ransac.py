@@ -684,9 +684,9 @@ def _min_thinness_ratio(area) -> float:
     like more effort than it's worth.
     """
     if area <= 20:
-        return 0.55
+        return 0.45
     elif area <= 30:
-        return 0.5
+        return 0.45
     elif area <= 40:
         return 0.45
     elif area <= 50:
