@@ -385,11 +385,12 @@ def _building_orientations(building_geom):
         azimuths[az] += segment.length
 
     # 2. take the top azimuth and define other orientations based on it:
-    most_common_az = max(azimuths, key=azimuths.get)
-    return (most_common_az,
-            (most_common_az + 90) % 360,
-            (most_common_az + 180) % 360,
-            (most_common_az + 270) % 360)
+    # most_common_az = max(azimuths, key=azimuths.get)
+    # return (most_common_az,
+    #         (most_common_az + 90) % 360,
+    #         (most_common_az + 180) % 360,
+    #         (most_common_az + 270) % 360)
+    return azimuths.keys()
 
 
 def _to_test_data(toid: str, planes: List[dict], building_geom: Polygon) -> dict:

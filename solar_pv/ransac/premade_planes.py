@@ -12,6 +12,7 @@ from shapely.strtree import STRtree
 from sklearn.linear_model import LinearRegression, HuberRegressor
 
 from solar_pv.ransac.ransac import _aspect
+from solar_pv.roof_polygons.roof_polygons_2 import _building_orientations
 
 _SLOPES = [25, 28, 30, 33, 35, 40, 45, 50,
            -25, -28, -30, -33, -35,
@@ -66,6 +67,7 @@ class ArrayPlane:
     xy: np.ndarray
     z: np.ndarray
     idxs: np.ndarray
+    plane_type: str
 
     def fit(self) -> LinearRegression:
         lr = LinearRegression()
@@ -98,6 +100,9 @@ def _segment(image: np.ndarray, mask: np.ndarray, threshold: float):
     g = rag_mean_color(image, initial_segments)
 
     segments = cut_threshold(initial_segments, g, threshold)
+    # sort out 0 being used as a segment ID
+    segments += 1
+    segments *= mask
     return segments
 
 
@@ -119,17 +124,107 @@ def _merge_small_segments(segment_image: np.ndarray, max_size: int):
     return enlarged_segment_image
 
 
-def create_planes_2(xyz: np.ndarray, aspect: np.ndarray, res: float):
+def _contours(image, mask):
+    import numpy as np
+    import matplotlib.pyplot as plt
+
+    from skimage import measure
+    contours = measure.find_contours(image, mask=mask)
+
+    # Display the image and plot all contours found
+    fig, ax = plt.subplots()
+    ax.imshow(image, cmap=plt.cm.gray)
+
+    for contour in contours:
+        ax.plot(contour[:, 1], contour[:, 0], linewidth=2)
+
+    ax.axis('image')
+    ax.set_xticks([])
+    ax.set_yticks([])
+    plt.show()
+
+
+def _dbscan(z):
+    from sklearn.cluster import DBSCAN, OPTICS
+    from sklearn import metrics
+    z = z.reshape(-1, 1)
+    db = DBSCAN(eps=0.6, min_samples=5).fit(z)
+    # db = OPTICS(min_cluster_size=10, xi=0.4).fit(z)
+    labels = db.labels_
+
+    # Number of clusters in labels, ignoring noise if present.
+    n_clusters_ = len(set(labels)) - (1 if -1 in labels else 0)
+    n_noise_ = list(labels).count(-1)
+
+    print("Estimated number of clusters: %d" % n_clusters_)
+    print("Estimated number of noise points: %d" % n_noise_)
+    if n_clusters_ > 1:
+        print("Silhouette Coefficient: %0.3f" % metrics.silhouette_score(z, labels))
+
+    labels[labels == 0] = np.amax(labels) + 1
+    # labels[labels == -1] = np.amax(labels) + 1
+    return labels
+
+
+def hillshade(array: np.ndarray, azimuth: float, angle_altitude: float):
+    """
+    Adapted from GDAL c++ algorithm
+    see https://github.com/OSGeo/gdal/blob/09320728b45d7d6b0bf50dad350bdbb97db0bcd6/apps/gdaldem_lib.cpp#L754-L803
+    """
+    azimuth = 360.0 - azimuth + 90.0
+
+    x, y = np.gradient(array)
+    azimuth_rad = math.radians(azimuth)
+    altitude_rad = math.radians(angle_altitude)
+
+    shaded = ((altitude_rad * 254 -
+                 (y * np.cos(azimuth_rad) * np.cos(altitude_rad) * 254 -
+                  x * np.sin(azimuth_rad) * np.cos(altitude_rad) * 254)) /
+                np.sqrt(1 + x * x + y * y))
+    return (shaded + 1).clip(min=1.0)
+
+
+def create_planes_2(xyz: np.ndarray, aspect: np.ndarray, polygon: Polygon, res: float):
     planes = []
+    from skimage import measure
 
     xy = xyz[:, :2]
     z = xyz[:, 2]
-    nodata = -9999.0
+    nodata = 0.0  # careful - some segmentations use 0 as a label
     aspect_image, idxs = _image(xy, aspect, res, nodata)
-    z_image, z_idxs = _image(xy, z, res, nodata)
-    z_segments = _segment(z_image, z_image != nodata, 1.5)
+    z_image, _ = _image(xy, z, res, nodata)
+
+    # TODO use building orientation - then do a segmenting per azimuth
+    #      can also check plane aspect matches hillshade azimuth
+    orientations = _building_orientations(polygon)
+    z_mask = (z_image != nodata)
+    hillshades = [{"hillshade": hillshade(z_image, o, 0.0), "orientation": o} for o in orientations]
+
+    # h1 = hillshade(z_image, 76, 0.0) * z_mask
+    # h2 = hillshade(z_image, 76 + 90, 0.0) * z_mask
+    # h3 = hillshade(z_image, 76 + 180, 0.0) * z_mask
+    # h4 = hillshade(z_image, 76 + 270, 0.0) * z_mask
+    # h2_seg = measure.label(h2 > 20, background=0)
+
+    # z_segments = _segment(z_image, z_image != nodata, threshold=1.5)  # 3 works much better for 1650 but much worse for 1657 / 1649
+    # z_segments = _merge_small_segments(z_segments, max_size=3)
+
+    # attempt at better height segments... I think it's better. worse results in some places more due to luck on part of old approach than anything
+    noise_val = -1
+    z_labels = _dbscan(z)
+    z_segments, _ = _image(xy, z_labels, res, nodata)
+    noise_mask = z_segments == noise_val
+    z_segments = measure.label(z_segments, background=nodata)
     z_segments = _merge_small_segments(z_segments, max_size=3)
-    num_z_segments = np.amax(z_segments)
+    z_segments[noise_mask] = noise_val
+
+    num_z_segments = int(np.amax(z_segments))
+
+    from skimage import feature
+    from skimage import measure
+    from skimage import exposure
+    # c = feature.canny(exposure.rescale_intensity(z_image), mask=z_image != nodata, )
+    # _contours(z_image, mask=z_image != nodata)
 
     for z_segment_id in range(1, num_z_segments + 1):
         z_idx_subset = idxs[z_segments == z_segment_id]
@@ -137,26 +232,36 @@ def create_planes_2(xyz: np.ndarray, aspect: np.ndarray, res: float):
             # don't mask out small z_segments - only nodata and other large z_segment_ids
             mask = z_segments == z_segment_id
             # TODO make planes with a range of different thresholds?
-            segments = _segment(aspect_image, mask, 29)
-            num_segments = np.amax(segments)
-            for segment_id in range(1, num_segments + 1):
-                idx_subset = idxs[segments == segment_id]
-                if len(idx_subset) > 3:
-                    xy_subset = xy[idx_subset]
-                    z_subset = z[idx_subset]
-                    avg_aspect = np.average(aspect_image[segments == segment_id])
-                    # TODO remove n worst outliers as variations?
-                    planes.append(ArrayPlane(xy=xy_subset, z=z_subset, idxs=idx_subset))
+            segmented_aspect = _segment(aspect_image, mask, threshold=29)
+            segmentings = [{"segments": segmented_aspect, "plane_type": "segmented_aspect"}]
+            # segmentings = []
+            for hs in hillshades:
+                segmented_hs = measure.label(hs["hillshade"] > 20, background=0) * mask
+                segmentings.append({"segments": segmented_hs, "plane_type": f"hillshade_{hs['orientation']}"})
 
-                    lr = LinearRegression()
-                    lr.fit(xy_subset, z_subset)
-                    plane_aspect = _aspect(lr.coef_[0], lr.coef_[1])
-                    print(f"segment {segment_id}: points {len(z_subset)} avg aspect {avg_aspect} plane aspect {plane_aspect}")
+            for segments in segmentings:
+                num_segments = np.amax(segments["segments"])
+                for segment_id in range(1, num_segments + 1):
+                    idx_subset = idxs[segments["segments"] == segment_id]
+                    if len(idx_subset) > 3:
+                        xy_subset = xy[idx_subset]
+                        z_subset = z[idx_subset]
+                        # TODO remove n worst outliers as variations?
+                        # TODO maybe something like running RANSAC on the points within each segment?
+                        planes.append(ArrayPlane(xy=xy_subset, z=z_subset, idxs=idx_subset, plane_type=segments["plane_type"]))
 
+                    # avg_aspect = np.average(aspect_image[segments == segment_id])
+                    # lr = LinearRegression()
+                    # lr.fit(xy_subset, z_subset)
+                    # plane_aspect = _aspect(lr.coef_[0], lr.coef_[1])
+                    # print(f"segment {segment_id}: points {len(z_subset)} avg aspect {avg_aspect} plane aspect {plane_aspect}")
+                    #
                     # z_pred = lr.predict(xy_subset)
-                    # def loss_function(y_true, y_pred):
-                    #     return np.abs(y_true - y_pred)
-                    # residuals_subset = loss_function(z_subset, z_pred)
+                    # residuals_subset = z_subset - z_pred
+                    # res_image, res_idxs = _image(xy_subset, residuals_subset, res, nodata)
+                    # res_segments = _segment(res_image, res_image != nodata, threshold=0.5)
+                    # print("")
+
                     # residual_threshold = 0.25
                     # sd = np.std(residuals_subset[residuals_subset < residual_threshold])
 

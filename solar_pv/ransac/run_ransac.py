@@ -134,7 +134,7 @@ def _ransac_building(pixels_in_building: List[dict],
         max_trials = RANSAC_MEDIUM_MAX_TRIALS
         include_group_checks = True
 
-    planes = _do_ransac_building(toid, xyz, aspect, mask, resolution_metres, max_trials, include_group_checks,
+    planes = _do_ransac_building(toid, xyz, aspect, mask, polygon, resolution_metres, max_trials, include_group_checks,
                                  sample_residual_thresholds=[2.0, 0.25], debug=debug)
 
     return planes
@@ -144,6 +144,7 @@ def _do_ransac_building(toid: str,
                         xyz,
                         aspect,
                         mask,
+                        polygon: Polygon,
                         resolution_metres: float,
                         max_trials: int,
                         include_group_checks: bool,
@@ -152,11 +153,8 @@ def _do_ransac_building(toid: str,
     planes = []
     min_points_per_plane = min(8, int(8 / resolution_metres))  # 8 for 2m, 8 for 1m, 16 for 0.5m
     total_points_in_building = len(aspect)
-    premade_planes = create_planes_2(xyz, aspect, resolution_metres)
-    # if polygon is not None:
-    #     premade_planes = create_planes(pixels_in_building, polygon)
-    # else:
-    #     premade_planes = None
+    premade_planes = create_planes_2(xyz, aspect, polygon, resolution_metres)
+    # premade_planes = create_planes(pixels_in_building, polygon)
 
     while np.count_nonzero(mask) > min_points_per_plane:
         XY = xyz[:, :2]
@@ -196,6 +194,7 @@ def _do_ransac_building(toid: str,
                 "aspect_circ_sd": ransac.plane_properties["aspect_circ_sd"],
                 "thinness_ratio": ransac.plane_properties["thinness_ratio"],
                 "cv_hull_ratio": ransac.plane_properties["cv_hull_ratio"],
+                "plane_type": ransac.plane_properties["plane_type"],
             })
 
             mask[inlier_mask] = 0

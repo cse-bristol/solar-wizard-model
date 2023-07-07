@@ -148,6 +148,7 @@ def _write_geojson_fields(geojson: str, planes):
     layer.CreateField(ogr.FieldDefn("score", ogr.OFTReal))
     layer.CreateField(ogr.FieldDefn("thinness_ratio", ogr.OFTReal))
     layer.CreateField(ogr.FieldDefn("cv_hull_ratio", ogr.OFTReal))
+    layer.CreateField(ogr.FieldDefn("plane_type", ogr.OFTString))
     layer.CreateField(ogr.FieldDefn("inliers", ogr.OFTInteger))
 
     for feature in layer:
@@ -163,6 +164,7 @@ def _write_geojson_fields(geojson: str, planes):
             feature.SetField("score", plane["score"])
             feature.SetField("thinness_ratio", plane["thinness_ratio"])
             feature.SetField("cv_hull_ratio", plane["cv_hull_ratio"])
+            feature.SetField("plane_type", plane["plane_type"])
             feature.SetField("inliers", len(plane["inliers_xy"]))
             layer.SetFeature(feature)
 
@@ -215,69 +217,79 @@ def thinness_ratio_experiments():
 if __name__ == "__main__":
     import os
     # thinness_ratio_experiments()
+
+    ransac_toids(
+        os.getenv("PGW_URI"),
+        1649,
+        [
+            # "osgb1000014994638",
+            # "osgb1000014994637",
+            # "osgb1000014994948",
+            # "osgb1000014994624",
+            # "osgb1000014994950",
+            # "osgb1000014994951",
+
+            # "osgb5000005116861453",
+            # "osgb5000005116861461",
+            # "osgb1000014994628",
+            # "osgb1000014994636",
+            # "osgb1000014994648",
+            # "osgb1000014994630",
+            # "osgb1000014994634",
+            # "osgb1000014994631",
+            # "osgb1000014994632",
+            # "osgb1000014994629",
+            # "osgb1000014994635",
+            # "osgb1000014994633",
+            # "osgb1000014994626",
+            # "osgb1000014994627",
+            # "osgb1000014994624",
+            # "osgb1000014994625",
+            # "osgb1000014994654",
+            # "osgb1000014994658",
+            # "osgb1000014994649",
+            # "osgb1000014994652",
+            # "osgb1000014994646",
+            # "osgb1000014994653",
+            # "osgb1000014994641",
+            # "osgb1000014994651",
+            # "osgb1000014994639",
+            # "osgb1000014994644",
+            # "osgb1000014994637",
+            # "osgb1000014994650",
+            # "osgb1000014994655",
+            # "osgb1000014994657",
+            # "osgb1000014994660",
+            # "osgb1000014994656",
+            # "osgb1000014994647",
+            # "osgb1000014994643",
+            # "osgb1000014994642",
+            # "osgb1000014994645",
+            # "osgb1000014994659",
+            # "osgb1000014994638",
+            # "osgb1000014994640",
+            # "osgb1000014995257",
+            # "osgb5000005116861456",
+            # "osgb1000014995257",
+            #
+            # "osgb1000014994950",
+            # "osgb1000014994952",
+            # "osgb1000014994947",
+            # "osgb1000014994949",
+            # "osgb1000014994951",
+            # "osgb1000014994948",
+
+            "osgb1000014998052"
+        ],
+        1.0,
+        f"{os.getenv('DEV_DATA_DIR')}/ransac",
+        write_test_data=False)
+
     # ransac_toids(
     #     os.getenv("PGW_URI"),
     #     1649,
-    #     [
-    #         # "osgb1000014994638",
-    #         # "osgb1000014994637",
-    #         # "osgb1000014994948",
-    #         # "osgb1000014994624",
-    #         # "osgb1000014994950",
-    #         # "osgb1000014994951",
-    #
-    #         "osgb5000005116861453",
-    #         "osgb5000005116861461",
-    #         "osgb1000014994628",
-    #         "osgb1000014994636",
-    #         "osgb1000014994648",
-    #         "osgb1000014994630",
-    #         "osgb1000014994634",
-    #         "osgb1000014994631",
-    #         "osgb1000014994632",
-    #         "osgb1000014994629",
-    #         "osgb1000014994635",
-    #         "osgb1000014994633",
-    #         "osgb1000014994626",
-    #         "osgb1000014994627",
-    #         "osgb1000014994624",
-    #         "osgb1000014994625",
-    #         "osgb1000014994654",
-    #         "osgb1000014994658",
-    #         "osgb1000014994649",
-    #         "osgb1000014994652",
-    #         "osgb1000014994646",
-    #         "osgb1000014994653",
-    #         "osgb1000014994641",
-    #         "osgb1000014994651",
-    #         "osgb1000014994639",
-    #         "osgb1000014994644",
-    #         "osgb1000014994637",
-    #         "osgb1000014994650",
-    #         "osgb1000014994655",
-    #         "osgb1000014994657",
-    #         "osgb1000014994660",
-    #         "osgb1000014994656",
-    #         "osgb1000014994647",
-    #         "osgb1000014994643",
-    #         "osgb1000014994642",
-    #         "osgb1000014994645",
-    #         "osgb1000014994659",
-    #         "osgb1000014994638",
-    #         "osgb1000014994640",
-    #         "osgb1000014995257",
-    #         "osgb5000005116861456",
-    #         "osgb1000014995257",
-    #
-    #         "osgb1000014994950",
-    #         "osgb1000014994952",
-    #         "osgb1000014994947",
-    #         "osgb1000014994949",
-    #         "osgb1000014994951",
-    #         "osgb1000014994948",
-    #
-    #         "osgb1000014998052"
-    #     ],
+    #     ["osgb1000014994631"],
+    #     # None,
     #     1.0,
     #     f"{os.getenv('DEV_DATA_DIR')}/ransac",
     #     write_test_data=False)
@@ -285,17 +297,17 @@ if __name__ == "__main__":
     # ransac_toids(
     #     os.getenv("PGW_URI"),
     #     1657,
-    #     # ["osgb1000021672466"],
-    #     None,
+    #     ["osgb1000021672464"],
+    #     # None,
     #     1.0,
     #     f"{os.getenv('DEV_DATA_DIR')}/ransac",
     #     write_test_data=False)
 
-    ransac_toids(
-        os.getenv("PGW_URI"),
-        1650,
-        # ["osgb1000021672466"],
-        None,
-        1.0,
-        f"{os.getenv('DEV_DATA_DIR')}/ransac",
-        write_test_data=False)
+    # ransac_toids(
+    #     os.getenv("PGW_URI"),
+    #     1650,
+    #     ["osgb1000014963168"],
+    #     # None,
+    #     1.0,
+    #     f"{os.getenv('DEV_DATA_DIR')}/ransac",
+    #     write_test_data=False)

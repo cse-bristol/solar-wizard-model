@@ -429,6 +429,7 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
                 "score": score_best,
                 "thinness_ratio": thinness_ratio,
                 "cv_hull_ratio": cv_hull_ratio,
+                "plane_type": plane.plane_type,
             }
             inlier_mask_best = inlier_mask_subset
             X_inlier_best = X_inlier_subset
