@@ -153,7 +153,7 @@ def _do_ransac_building(toid: str,
     min_points_per_plane = min(8, int(8 / resolution_metres))  # 8 for 2m, 8 for 1m, 16 for 0.5m
     total_points_in_building = len(aspect)
     premade_planes = create_planes_2(xyz, aspect, polygon, resolution_metres)
-    premade_planes.extend(create_planes(xyz, polygon))
+    # premade_planes.extend(create_planes(xyz, polygon))
     skip_planes = set()
 
     while np.count_nonzero(mask) > min_points_per_plane:

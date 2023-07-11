@@ -235,7 +235,6 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
         # _segment_aspect(X, min_X, aspect, self.resolution_metres)
 
         sd_best = np.inf
-        bad_samples = set()
         if debug:
             bad_sample_reasons = defaultdict(int)
 
@@ -308,6 +307,25 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
 
             # extract inlier data set
             inlier_idxs_subset = sample_idxs[inlier_mask_subset]
+
+            # RANSAC for LIDAR addition: prep for following plane morphology checks
+            groups, num_groups = _pixel_groups(X[inlier_idxs_subset], min_X, self.resolution_metres)
+            group_areas = _group_areas(groups)
+
+            # RANSAC for LIDAR addition: check that size of the largest continuous
+            # group of pixels is also over the minimum number of points per plane:
+            largest = max(group_areas, key=group_areas.get)
+            roof_plane_area = group_areas[largest]
+            if roof_plane_area < self.min_points_per_plane or roof_plane_area < (
+                    total_points_in_building * self.min_points_per_plane_perc):
+                if debug:
+                    bad_sample_reasons["MIN_POINTS_PER_LARGEST_GROUP"] += 1
+                skip_planes.add(plane.plane_id)
+                continue
+
+            # re-extract (connected) inlier data set
+            inlier_mask_subset = _exclude_unconnected(X, min_X, inlier_mask_subset, res=self.resolution_metres)
+            inlier_idxs_subset = sample_idxs[inlier_mask_subset]
             X_inlier_subset = X[inlier_idxs_subset]
             y_inlier_subset = y[inlier_idxs_subset]
 
@@ -316,7 +334,7 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
                                                 y_inlier_subset)
 
             # TODO constant
-            if score_subset > 0.85 and score_best > 0.85:
+            if score_subset > 0.925 and score_best > 0.925:
                 if n_inliers_subset <= n_inliers_best or (n_inliers_subset == n_inliers_best and score_subset < score_best):
                     if debug:
                         bad_sample_reasons["LESS_INLIERS"] += 1
@@ -368,22 +386,6 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
                 aspect_circ_sd = None
                 aspect_circ_mean = None
 
-            # RANSAC for LIDAR addition: prep for following plane morphology checks
-            groups, num_groups = _pixel_groups(X_inlier_subset, min_X, self.resolution_metres)
-            group_areas = _group_areas(groups)
-
-            # RANSAC for LIDAR addition: check that size of the largest continuous
-            # group of pixels is also over the minimum number of points per plane:
-            largest = max(group_areas, key=group_areas.get)
-            roof_plane_area = group_areas[largest]
-            if roof_plane_area < self.min_points_per_plane or roof_plane_area < (
-                    total_points_in_building * self.min_points_per_plane_perc):
-                # bad_samples.add(tuple(subset_idxs))
-                if debug:
-                    bad_sample_reasons["MIN_POINTS_PER_LARGEST_GROUP"] += 1
-                skip_planes.add(plane.plane_id)
-                continue
-
             # RANSAC for LIDAR addition: if inliers form multiple groups, reject
             # See Tarsha-Kurdi, 2007
             # Adapted from Tarsha-Kurdi to allow a few discontinuous pixels as long as
@@ -397,12 +399,12 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
                         bad_sample_reasons["TOO_MANY_GROUPS"] += 1
                     skip_planes.add(plane.plane_id)
                     continue
-                for groupid, area in group_areas.items():
-                    if groupid != largest and area / roof_plane_area > self.max_group_area_ratio_to_largest:
-                        if debug:
-                            bad_sample_reasons["LARGEST_GROUP_TOO_SMALL"] += 1
-                        skip_planes.add(plane.plane_id)
-                        continue
+                # for groupid, area in group_areas.items():
+                #     if groupid != largest and area / roof_plane_area > self.max_group_area_ratio_to_largest:
+                #         if debug:
+                #             bad_sample_reasons["LARGEST_GROUP_TOO_SMALL"] += 1
+                #         skip_planes.add(plane.plane_id)
+                #         continue
 
             # RANSAC for LiDAR addition: check ratio of points area to ratio of convex
             # hull of points area.

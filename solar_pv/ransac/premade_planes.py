@@ -9,6 +9,7 @@ import numpy as np
 from shapely import ops
 from shapely.geometry import Polygon, LineString, Point, CAP_STYLE, JOIN_STYLE
 from shapely.strtree import STRtree
+from skimage.future.graph import RAG
 from sklearn.linear_model import LinearRegression, HuberRegressor
 
 from solar_pv.ransac.ransac import _aspect
@@ -72,6 +73,7 @@ class ArrayPlane:
     sample_residual_threshold: float
     plane_type: str
     plane_id: str
+    plane_image: np.ndarray
 
     def fit(self) -> LinearRegression:
         lr = LinearRegression()
@@ -239,28 +241,29 @@ def create_planes_2(xyz: np.ndarray, aspect: np.ndarray, polygon: Polygon, res: 
         if len(z_idx_subset) > 3:
             # don't mask out small z_segments - only nodata and other large z_segment_ids
             mask = z_segments == z_segment_id
-            # TODO make planes with a range of different thresholds?
-            segmented_aspect = _segment(aspect_image, mask, threshold=29)
-            segmentings = [{"segments": segmented_aspect, "plane_type": "segmented_aspect"}]
-            # segmentings = []
-            # for hs in hillshades:
-            #     segmented_hs = measure.label(hs["hillshade"] > 20, background=0) * mask
-            #     segmentings.append({"segments": segmented_hs, "plane_type": f"hillshade_{hs['orientation']}"})
+            for threshold in [29, 15]:
+                segmented_aspect = _segment(aspect_image, mask, threshold=threshold)
+                segmentings = [{"segments": segmented_aspect, "plane_type": "segmented_aspect"}]
+                # segmentings = []
+                # for hs in hillshades:
+                #     segmented_hs = measure.label(hs["hillshade"] > 20, background=0) * mask
+                #     segmentings.append({"segments": segmented_hs, "plane_type": f"hillshade_{hs['orientation']}"})
 
-            for segments in segmentings:
-                num_segments = np.amax(segments["segments"])
-                for segment_id in range(1, num_segments + 1):
-                    idx_subset = idxs[segments["segments"] == segment_id]
-                    if len(idx_subset) > 3:
-                        xy_subset = xy[idx_subset]
-                        z_subset = z[idx_subset]
-                        # TODO remove n worst outliers as variations?
-                        # TODO maybe something like running RANSAC on the points within each segment?
-                        plane_id = f'{segments["plane_type"]}_{segment_id}'
-                        for sample_residual_threshold in sample_residual_thresholds:
-                            planes.append(ArrayPlane(xy=xy_subset, z=z_subset, idxs=idx_subset,
-                                                     plane_type=segments["plane_type"], plane_id=plane_id,
-                                                     sample_residual_threshold=sample_residual_threshold))
+                for segments in segmentings:
+                    num_segments = np.amax(segments["segments"])
+                    for segment_id in range(1, num_segments + 1):
+                        idx_subset = idxs[segments["segments"] == segment_id]
+                        if len(idx_subset) > 3:
+                            xy_subset = xy[idx_subset]
+                            z_subset = z[idx_subset]
+                            # TODO remove n worst outliers as variations?
+                            # TODO maybe something like running RANSAC on the points within each segment?
+                            for sample_residual_threshold in sample_residual_thresholds:
+                                plane_id = f'{segments["plane_type"]}_{z_segment_id}_{threshold}_{sample_residual_threshold}_{segment_id}'
+                                planes.append(ArrayPlane(xy=xy_subset, z=z_subset, idxs=idx_subset,
+                                                         plane_type=segments["plane_type"], plane_id=plane_id,
+                                                         sample_residual_threshold=sample_residual_threshold,
+                                                         plane_image=segments["segments"]))
 
                     # avg_aspect = np.average(aspect_image[segments == segment_id])
                     # lr = LinearRegression()

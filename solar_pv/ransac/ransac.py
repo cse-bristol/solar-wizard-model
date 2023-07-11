@@ -381,6 +381,9 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
                 aspect_circ_sd = None
                 aspect_circ_mean = None
 
+            # TODO in DETSAC I moved all this to before the score/SD/inliers check, as
+            #      we only care about those things (as well as the circ mean etc) for
+            #      the connected inliers. That might be too expensive in standard RANSAC but it needs considering
             # RANSAC for LIDAR addition: prep for following plane morphology checks
             groups, num_groups = _pixel_groups(X_inlier_subset, min_X, self.resolution_metres)
             group_areas = _group_areas(groups)
@@ -701,7 +704,7 @@ def _min_thinness_ratio(area) -> float:
     elif area <= 50:
         return 0.4
     elif area <= 300:
-        return 0.25
+        return 0.24
     elif area <= 500:
         return 0.2
     elif area <= 750:
