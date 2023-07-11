@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import math
 
 import itertools
-from typing import List, Tuple, cast
+from typing import List, Tuple, cast, Dict
 
 import numpy as np
 from shapely import ops
@@ -19,6 +19,8 @@ _SLOPES = [25, 28, 30, 33, 35, 40, 45, 50,
            3, 5, 7, 10, 15, 20]
 # _SLOPES = [-25, -28, -30, -33, -35,
 #            0, 3, 5, 10, 15, 20, 22, 25, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 42, 45, 47, 50]
+
+sample_residual_thresholds = [0.25, 2.0]
 
 
 @dataclass
@@ -67,7 +69,9 @@ class ArrayPlane:
     xy: np.ndarray
     z: np.ndarray
     idxs: np.ndarray
+    sample_residual_threshold: float
     plane_type: str
+    plane_id: str
 
     def fit(self) -> LinearRegression:
         lr = LinearRegression()
@@ -166,6 +170,13 @@ def _dbscan(z):
     return labels
 
 
+def _slope(array: np.ndarray):
+    x, y = np.gradient(array)
+    slope = np.arctan(np.sqrt(x * x + y * y))
+    slope = np.degrees(slope)
+    return slope
+
+
 def hillshade(array: np.ndarray, azimuth: float, angle_altitude: float):
     """
     Adapted from GDAL c++ algorithm
@@ -194,17 +205,9 @@ def create_planes_2(xyz: np.ndarray, aspect: np.ndarray, polygon: Polygon, res: 
     aspect_image, idxs = _image(xy, aspect, res, nodata)
     z_image, _ = _image(xy, z, res, nodata)
 
-    # TODO use building orientation - then do a segmenting per azimuth
-    #      can also check plane aspect matches hillshade azimuth
-    orientations = _building_orientations(polygon)
-    z_mask = (z_image != nodata)
-    hillshades = [{"hillshade": hillshade(z_image, o, 0.0), "orientation": o} for o in orientations]
-
-    # h1 = hillshade(z_image, 76, 0.0) * z_mask
-    # h2 = hillshade(z_image, 76 + 90, 0.0) * z_mask
-    # h3 = hillshade(z_image, 76 + 180, 0.0) * z_mask
-    # h4 = hillshade(z_image, 76 + 270, 0.0) * z_mask
-    # h2_seg = measure.label(h2 > 20, background=0)
+    # TODO can check plane aspect matches hillshade azimuth?
+    # orientations = _building_orientations(polygon)
+    # hillshades = [{"hillshade": hillshade(z_image, o, 0.0), "orientation": o} for o in orientations]
 
     # z_segments = _segment(z_image, z_image != nodata, threshold=1.5)  # 3 works much better for 1650 but much worse for 1657 / 1649
     # z_segments = _merge_small_segments(z_segments, max_size=3)
@@ -221,10 +224,15 @@ def create_planes_2(xyz: np.ndarray, aspect: np.ndarray, polygon: Polygon, res: 
     num_z_segments = int(np.amax(z_segments))
 
     from skimage import feature
+    from skimage import filters
+    from skimage.future import graph
     from skimage import measure
     from skimage import exposure
     # c = feature.canny(exposure.rescale_intensity(z_image), mask=z_image != nodata, )
+    # c = feature.canny(z_image, mask=z_image != nodata, )
+    # c = filters.sobel(z_image, mask=z_image != nodata)
     # _contours(z_image, mask=z_image != nodata)
+    # _slope(z_image)
 
     for z_segment_id in range(1, num_z_segments + 1):
         z_idx_subset = idxs[z_segments == z_segment_id]
@@ -235,9 +243,9 @@ def create_planes_2(xyz: np.ndarray, aspect: np.ndarray, polygon: Polygon, res: 
             segmented_aspect = _segment(aspect_image, mask, threshold=29)
             segmentings = [{"segments": segmented_aspect, "plane_type": "segmented_aspect"}]
             # segmentings = []
-            for hs in hillshades:
-                segmented_hs = measure.label(hs["hillshade"] > 20, background=0) * mask
-                segmentings.append({"segments": segmented_hs, "plane_type": f"hillshade_{hs['orientation']}"})
+            # for hs in hillshades:
+            #     segmented_hs = measure.label(hs["hillshade"] > 20, background=0) * mask
+            #     segmentings.append({"segments": segmented_hs, "plane_type": f"hillshade_{hs['orientation']}"})
 
             for segments in segmentings:
                 num_segments = np.amax(segments["segments"])
@@ -248,7 +256,11 @@ def create_planes_2(xyz: np.ndarray, aspect: np.ndarray, polygon: Polygon, res: 
                         z_subset = z[idx_subset]
                         # TODO remove n worst outliers as variations?
                         # TODO maybe something like running RANSAC on the points within each segment?
-                        planes.append(ArrayPlane(xy=xy_subset, z=z_subset, idxs=idx_subset, plane_type=segments["plane_type"]))
+                        plane_id = f'{segments["plane_type"]}_{segment_id}'
+                        for sample_residual_threshold in sample_residual_thresholds:
+                            planes.append(ArrayPlane(xy=xy_subset, z=z_subset, idxs=idx_subset,
+                                                     plane_type=segments["plane_type"], plane_id=plane_id,
+                                                     sample_residual_threshold=sample_residual_threshold))
 
                     # avg_aspect = np.average(aspect_image[segments == segment_id])
                     # lr = LinearRegression()
@@ -277,63 +289,82 @@ def create_planes_2(xyz: np.ndarray, aspect: np.ndarray, polygon: Polygon, res: 
     return planes
 
 
-def create_planes(pixels_in_building: List[dict], polygon: Polygon) -> List[Plane]:
+def _rect_premade(plane_id: int, p1: Point, p2: Point, buf: float, points: List[Point], rtree: STRtree, sample_residual_threshold: float):
+    central_line = LineString([p1.coords[0], p2.coords[0]])
+    l1 = central_line.parallel_offset(buf, side='left')
+    l2 = central_line.parallel_offset(buf, side='right')
+    poly = Polygon([l1.coords[0], l1.coords[-1], l2.coords[0], l2.coords[-1], l1.coords[0]])
+    idxs = [idx for idx in rtree.query_items(poly) if points[idx].intersects(poly)]
+    if len(idxs) > 0:
+        points = np.array([points[idx].coords[0] for idx in idxs])
+        xy = points[:, :2]
+        z = points[:, 2]
+        return ArrayPlane(xy=xy, z=z, idxs=idxs,
+                          plane_type="rect", plane_id=f"rect_{plane_id}",
+                          sample_residual_threshold=sample_residual_threshold)
+
+
+# def _triangle_premade(line: LineString, point: Point, points: List[Point], rtree: STRtree):
+#     poly = Polygon([line.coords[0], line.coords[1], point.coords[0]])
+#     idxs = [idx for idx in rtree.query_items(poly) if points[idx].intersects(poly)]
+#     if len(idxs) > 0:
+#         points = np.array([points[idx].coords[0] for idx in idxs])
+#         xy = points[:, :2]
+#         z = points[:, 2]
+#         return ArrayPlane(xy=xy, z=z, idxs=idxs, plane_type="triangle")
+
+
+def _perpendicular_bisector(line_segment: LineString, length: float):
+    l1 = line_segment.parallel_offset(length / 2, side='left')
+    l2 = line_segment.parallel_offset(length / 2, side='right')
+    return LineString([l1.centroid.coords[0], l2.centroid.coords[0]])
+
+
+def create_planes(xyz: np.ndarray, polygon: Polygon) -> List[ArrayPlane]:
     planes = []
-    points = [Point(p['x'], p['y'], p['elevation']) for p in pixels_in_building]
+    points = [Point(p[0], p[1], p[2]) for p in xyz]
     rtree = STRtree(points)
-    centroid = polygon.centroid
-    polygon = _simplify_by_angle(polygon)
+    polygon = _simplify_by_angle(polygon, deg_tol=2)
 
-    def _rect_to_point_plane(_line: LineString, _point: Point, remove_lowest_n: int = None):
-        _poly = _line.buffer(_point.distance(_line), single_sided=True, cap_style=CAP_STYLE.square, join_style=JOIN_STYLE.mitre)
-        _pixels = [cast(Point, p) for p in rtree.query(_poly) if p.intersects(_poly)]
-        if remove_lowest_n:
-            _pixels.sort(key=lambda p: p.coords[0][2])
-            _pixels = _pixels[remove_lowest_n:]
-
-        if len(_pixels) > 0:
-            planes.append(PointPlane(points=_pixels))
-
-    def _triangle_to_point_plane(_line: LineString, _point: Point, remove_lowest_n: int = None):
-        _poly = Polygon([_line.coords[0], _line.coords[1], _point.coords[0]])
-        _pixels = [cast(Point, p) for p in rtree.query(_poly) if p.intersects(_poly)]
-        if remove_lowest_n:
-            _pixels.sort(key=lambda p: p.coords[0][2])
-            _pixels = _pixels[remove_lowest_n:]
-        if len(_pixels) > 0:
-            planes.append(PointPlane(points=_pixels))
+    line_segments = []
 
     for ring in itertools.chain([polygon.exterior], polygon.interiors):
         for p1, p2 in pairwise(ring.coords):
             line = LineString([p1, p2])
-            if line.length < 1:
-                continue
+            if line.length > 1:
+                line_segments.append(line)
 
-            _rect_to_point_plane(line, centroid)
-            # _rect_to_point_plane(line, centroid, remove_lowest_n=5)
-            # _rect_to_point_plane(line, centroid, remove_lowest_n=10)
-            # _rect_to_point_plane(_shrink_line(line, 0.2), centroid)
-            _rect_to_point_plane(line.parallel_offset(1, 'left'), centroid)
-            # TODO how about centroid - 1/3 ? and so on
+    plane_id = 0
+    for line in line_segments:
+        pb = _perpendicular_bisector(line, 1000)
+        # TODO if this is slow make an rtree
+        dist_points = [cast(Point, l.intersection(pb)) for l in line_segments if l.intersects(pb) and l != line]
+        buf_dist = line.length / 2
+        for dist_point in dist_points:
+            halfway = LineString([line.centroid.coords[0], dist_point.coords[0]]).interpolate(0.5, True)
+            if halfway.intersects(polygon):
+                for sample_residual_threshold in sample_residual_thresholds:
+                    plane_id += 1
+                    planes.append(_rect_premade(plane_id, line.centroid, halfway, buf_dist, points, rtree, sample_residual_threshold))
+                    plane_id += 1
+                    planes.append(_rect_premade(plane_id, line.parallel_offset(1, 'left').centroid, halfway, buf_dist, points, rtree, sample_residual_threshold))
 
-            _triangle_to_point_plane(line, centroid)
-            # _triangle_to_point_plane(line, centroid, remove_lowest_n=5)
-            # _triangle_to_point_plane(line, centroid, remove_lowest_n=10)
-            # _triangle_to_point_plane(_shrink_line(line, 0.2), centroid)
-            _triangle_to_point_plane(line.parallel_offset(1, 'left'), centroid)
+            # TODO trapezoids instead?
+            # planes.append(_triangle_premade(line, halfway, points, rtree))
+            # planes.append(_triangle_premade(line.parallel_offset(1, 'left'), halfway, points, rtree))
 
-            # poly = line.buffer(2)
-            # # TODO need to dedupe these nearby pixels  by (height, dist) a bit
-            # nearby_pixels = [p for p in rtree.query(poly) if p.intersects(poly)]
-            # for pixel in nearby_pixels:
-            #     dist = pixel.distance(line)
-            #     offset_line = line.parallel_offset(dist, 'left')
-            #     if offset_line.is_empty:
-            #         continue
-            #     for slope in _SLOPES:
-            #         planes.append(Plane(p1=offset_line.coords[0], p2=offset_line.coords[1], z=pixel.coords[0][2], slope=slope))
+        # poly = line.buffer(2)
+        # # TODO need to dedupe these nearby pixels  by (height, dist) a bit
+        # nearby_pixels = [p for p in rtree.query(poly) if p.intersects(poly)]
+        # for pixel in nearby_pixels:
+        #     dist = pixel.distance(line)
+        #     offset_line = line.parallel_offset(dist, 'left')
+        #     if offset_line.is_empty:
+        #         continue
+        #     for slope in _SLOPES:
+        #         planes.append(Plane(p1=offset_line.coords[0], p2=offset_line.coords[1], z=pixel.coords[0][2], slope=slope))
 
-    return planes
+    return [p for p in planes if p is not None]
 
 
 def _shrink_line(line: LineString, fraction: float):

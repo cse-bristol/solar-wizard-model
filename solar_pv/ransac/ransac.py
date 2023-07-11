@@ -314,7 +314,7 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
             residuals_subset = loss_function(y, y_pred)
 
             # classify data into inliers and outliers
-            inlier_mask_subset = residuals_subset < residual_threshold
+            inlier_mask_subset: np.ndarray = residuals_subset < residual_threshold
             n_inliers_subset = np.sum(inlier_mask_subset)
 
             # less inliers -> skip current random sample
@@ -518,20 +518,27 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
         y_pred = base_estimator.predict(X)
         residuals_subset = loss_function(y, y_pred)
         inlier_mask_best = residuals_subset < residual_threshold
-        if np.sum(inlier_mask_best) < self.min_points_per_plane:
-            raise RANSACValueError(f"Less than {self.min_points_per_plane} points within "
-                                   f"{residual_threshold} of plane after final fit")
-
         mask_without_excluded = _exclude_unconnected(X, min_X, inlier_mask_best, res=self.resolution_metres)
 
-        self.estimator_ = base_estimator
-        self.inlier_mask_ = mask_without_excluded
-        self.sd = sd_best
-        self.plane_properties = plane_properties_best
+        # TODO this should ignorelist the sample -
+        #      and the sample ignorelist should continue between runs... (except for things that are ignored just because they are worse than the current best)
+        if np.sum(mask_without_excluded) < self.min_points_per_plane:
+            self.success = False
+            # raise RANSACValueError(f"Less than {self.min_points_per_plane} points within "
+            #                        f"{residual_threshold} of plane after final fit")
+        else:
+            self.success = True
+            self.estimator_ = base_estimator
+            self.inlier_mask_ = mask_without_excluded
+            self.sd = sd_best
+            self.plane_properties = plane_properties_best
 
         if debug:
-            a, b = self.estimator_.coef_
-            print(f"plane found: slope {_slope(a, b)} aspect {_aspect(a, b)} sd {self.sd}")
+            if self.success:
+                a, b = self.estimator_.coef_
+                print(f"plane found: slope {_slope(a, b)} aspect {_aspect(a, b)} sd {self.sd} inliers {np.sum(mask_without_excluded)}")
+            else:
+                print(f"plane found, but rejected")
             print("")
         return self
 
@@ -626,6 +633,8 @@ def _exclude_unconnected(X, min_X, inlier_mask_best, res: float):
         idxs[pair[0]][pair[1]] = i
 
     groups, num_groups = measure.label(image, connectivity=1, return_num=True)
+    if num_groups == 0:
+        return np.zeros(inlier_mask_best.shape, dtype=bool)
 
     group_areas = _group_areas(groups)
     largest_area_group = max(group_areas, key=group_areas.get)

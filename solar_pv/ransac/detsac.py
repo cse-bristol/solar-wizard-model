@@ -3,7 +3,7 @@
 import itertools
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Tuple, List
+from typing import Tuple, List, Set
 
 import numpy as np
 import warnings
@@ -34,8 +34,6 @@ from solar_pv.ransac.ridge_test import ridges
 class DETSACRegressorForLIDAR(RANSACRegressor):
 
     def __init__(self,
-                 # DETSAC:
-                 sample_residual_thresholds: List[float],
                  # base:
                  base_estimator=None, *,
                  min_samples=None,
@@ -88,7 +86,6 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
                          stop_probability=stop_probability,
                          loss=loss,
                          random_state=random_state)
-        self.sample_residual_thresholds = sample_residual_thresholds
         self.min_points_per_plane = min_points_per_plane
         self.min_points_per_plane_perc = min_points_per_plane_perc
         self.max_slope = max_slope
@@ -108,6 +105,7 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
     def fit(self, X, y,
             sample_weight=None,
             premade_planes: List[ArrayPlane] = None,
+            skip_planes: Set[str] = None,
             aspect=None,
             mask=None,
             total_points_in_building: int = None,
@@ -259,8 +257,11 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
         sample_idxs = np.arange(n_samples)
 
         self.n_trials_ = 0
-        for plane, sample_residual_threshold in itertools.product(premade_planes, self.sample_residual_thresholds):
+        for plane in premade_planes:
             self.n_trials_ += 1
+
+            if plane.plane_id in skip_planes:
+                continue
 
             if (self.n_skips_no_inliers_ + self.n_skips_invalid_data_ +
                     self.n_skips_invalid_model_) > self.max_skips:
@@ -279,7 +280,7 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
 
             # DETSAC change: allow the initial sample points to be further from the plane,
             # and never allow plane to be fit to points already on a different plane:
-            m1 = residuals_subset < sample_residual_threshold
+            m1 = residuals_subset < plane.sample_residual_threshold
             m2 = np.zeros(residuals_subset.shape, dtype=int)
             m2[plane.idxs] = 1
             residuals_subset_copy = residuals_subset.copy()
@@ -302,6 +303,7 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
                 self.n_skips_no_inliers_ += 1
                 if debug:
                     bad_sample_reasons["MIN_POINTS_PER_PLANE"] += 1
+                skip_planes.add(plane.plane_id)
                 continue
 
             # extract inlier data set
@@ -313,10 +315,16 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
             score_subset = base_estimator.score(X_inlier_subset,
                                                 y_inlier_subset)
 
-            if score_subset < score_best or (score_subset == score_best and n_inliers_subset <= n_inliers_best):
-                if debug:
-                    bad_sample_reasons["WORSE_SCORE"] += 1
-                continue
+            # TODO constant
+            if score_subset > 0.85 and score_best > 0.85:
+                if n_inliers_subset <= n_inliers_best or (n_inliers_subset == n_inliers_best and score_subset < score_best):
+                    if debug:
+                        bad_sample_reasons["LESS_INLIERS"] += 1
+                    continue
+            elif score_subset < score_best or (score_subset == score_best and n_inliers_subset <= n_inliers_best):
+                    if debug:
+                        bad_sample_reasons["WORSE_SCORE"] += 1
+                    continue
 
             # RANSAC for LIDAR addition: use stddev of inlier distance to plane
             # for score
@@ -336,7 +344,6 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
             #         bad_sample_reasons["WORSE_SD"] += 1
             #     continue
 
-            # TODO can maybe remove?
             # RANSAC for LIDAR addition:
             # if difference between circular mean of pixel aspects and slope aspect is too high:
             # if circular deviation of pixel aspects too high:
@@ -348,12 +355,14 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
                 if aspect_diff > math.radians(self.max_aspect_circular_mean_degrees):
                     if debug:
                         bad_sample_reasons["CIRCULAR_MEAN"] += 1
+                    skip_planes.add(plane.plane_id)
                     continue
 
                 aspect_circ_sd = _circular_sd(aspect_inliers)
                 if aspect_circ_sd > self.max_aspect_circular_sd:
                     if debug:
                         bad_sample_reasons["CIRCULAR_SD"] += 1
+                    skip_planes.add(plane.plane_id)
                     continue
             else:
                 aspect_circ_sd = None
@@ -372,6 +381,7 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
                 # bad_samples.add(tuple(subset_idxs))
                 if debug:
                     bad_sample_reasons["MIN_POINTS_PER_LARGEST_GROUP"] += 1
+                skip_planes.add(plane.plane_id)
                 continue
 
             # RANSAC for LIDAR addition: if inliers form multiple groups, reject
@@ -385,11 +395,13 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
                 if len(group_areas) > self.max_num_groups:
                     if debug:
                         bad_sample_reasons["TOO_MANY_GROUPS"] += 1
+                    skip_planes.add(plane.plane_id)
                     continue
                 for groupid, area in group_areas.items():
                     if groupid != largest and area / roof_plane_area > self.max_group_area_ratio_to_largest:
                         if debug:
                             bad_sample_reasons["LARGEST_GROUP_TOO_SMALL"] += 1
+                        skip_planes.add(plane.plane_id)
                         continue
 
             # RANSAC for LiDAR addition: check ratio of points area to ratio of convex
@@ -403,6 +415,7 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
             if cv_hull_ratio < self.min_convex_hull_ratio:
                 if debug:
                     bad_sample_reasons["CONVEX_HULL_RATIO"] += 1
+                skip_planes.add(plane.plane_id)
                 continue
 
             # RANSAC for LiDAR addition: thinness ratio check
@@ -411,11 +424,12 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
             if thinness_ratio < _min_thinness_ratio(roof_plane_area):
                 if debug:
                     bad_sample_reasons["THINNESS_RATIO"] += 1
+                skip_planes.add(plane.plane_id)
                 continue
 
             if debug:
                 # print(f"new best SD plane found. SD {sd}. Old SD {sd_best}. Current trial: {self.n_trials_}")
-                print(f"new best score plane found. score {score_subset}. Old score {score_best}. Current trial: {self.n_trials_}")
+                print(f"new best score plane found. score {score_best} -> {score_subset} . inliers {n_inliers_best} -> {n_inliers_subset} .  Current trial: {self.n_trials_}")
 
             # save current random sample as best sample
             n_inliers_best = n_inliers_subset
@@ -430,12 +444,13 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
                 "thinness_ratio": thinness_ratio,
                 "cv_hull_ratio": cv_hull_ratio,
                 "plane_type": plane.plane_type,
+                "plane_id": plane.plane_id,
             }
             inlier_mask_best = inlier_mask_subset
             X_inlier_best = X_inlier_subset
             y_inlier_best = y_inlier_subset
             inlier_best_idxs_subset = inlier_idxs_subset
-            sample_residual_threshold_best = sample_residual_threshold
+            sample_residual_threshold_best = plane.sample_residual_threshold
 
             # RANSAC for LiDAR addition:
             # I've disabled the dynamic max_trials thing as it's based on proportion of
@@ -513,17 +528,25 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
         mask_without_excluded = _exclude_unconnected(X, min_X, inlier_mask_best, res=self.resolution_metres)
 
         if np.sum(mask_without_excluded) < self.min_points_per_plane:
-            raise RANSACValueError(f"Less than {self.min_points_per_plane} points within "
-                                   f"{residual_threshold} of plane after final fit")
+            self.success = False
+            # raise RANSACValueError(f"Less than {self.min_points_per_plane} points within "
+            #                        f"{residual_threshold} of plane after final fit")
+        else:
+            self.success = True
 
-        self.estimator_ = base_estimator
-        self.inlier_mask_ = mask_without_excluded
-        self.sd = sd_best
-        self.plane_properties = plane_properties_best
+            self.estimator_ = base_estimator
+            self.inlier_mask_ = mask_without_excluded
+            self.sd = sd_best
+            self.plane_properties = plane_properties_best
+
+        skip_planes.add(plane_properties_best["plane_id"])
 
         if debug:
-            a, b = self.estimator_.coef_
-            print(f"plane found: slope {_slope(a, b)} aspect {_aspect(a, b)} sd {self.sd} inliers {np.sum(mask_without_excluded)}")
+            if self.success:
+                a, b = self.estimator_.coef_
+                print(f"plane found: slope {_slope(a, b)} aspect {_aspect(a, b)} sd {self.sd} inliers {np.sum(mask_without_excluded)}")
+            else:
+                print(f"plane found, but rejected")
             print("")
         return self
 

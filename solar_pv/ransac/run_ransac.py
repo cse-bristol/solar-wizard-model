@@ -134,8 +134,8 @@ def _ransac_building(pixels_in_building: List[dict],
         max_trials = RANSAC_MEDIUM_MAX_TRIALS
         include_group_checks = True
 
-    planes = _do_ransac_building(toid, xyz, aspect, mask, polygon, resolution_metres, max_trials, include_group_checks,
-                                 sample_residual_thresholds=[2.0, 0.25], debug=debug)
+    planes = _do_ransac_building(toid, xyz, aspect, mask, polygon, resolution_metres,
+                                 max_trials, include_group_checks, debug=debug)
 
     return planes
 
@@ -148,20 +148,19 @@ def _do_ransac_building(toid: str,
                         resolution_metres: float,
                         max_trials: int,
                         include_group_checks: bool,
-                        sample_residual_thresholds: List[float],
                         debug: bool):
     planes = []
     min_points_per_plane = min(8, int(8 / resolution_metres))  # 8 for 2m, 8 for 1m, 16 for 0.5m
     total_points_in_building = len(aspect)
     premade_planes = create_planes_2(xyz, aspect, polygon, resolution_metres)
-    # premade_planes = create_planes(pixels_in_building, polygon)
+    premade_planes.extend(create_planes(xyz, polygon))
+    skip_planes = set()
 
     while np.count_nonzero(mask) > min_points_per_plane:
         XY = xyz[:, :2]
         Z = xyz[:, 2]
         try:
             ransac = DETSACRegressorForLIDAR(residual_threshold=0.25,
-                                             sample_residual_thresholds=sample_residual_thresholds,
                                              flat_roof_residual_threshold=0.1,
                                              max_trials=max_trials,
                                              max_slope=75,
@@ -173,31 +172,34 @@ def _do_ransac_building(toid: str,
                        aspect=aspect,
                        mask=mask,
                        premade_planes=premade_planes,
+                       skip_planes=skip_planes,
                        total_points_in_building=total_points_in_building,
                        include_group_checks=include_group_checks,
                        debug=debug)
-            inlier_mask = ransac.inlier_mask_
-            a, b = ransac.estimator_.coef_
-            d = ransac.estimator_.intercept_
 
-            planes.append({
-                "toid": toid,
-                "x_coef": a,
-                "y_coef": b,
-                "intercept": d,
-                "slope": _slope(a, b),
-                "aspect": _aspect(a, b),
-                "inliers_xy": XY[inlier_mask],
-                "sd": ransac.sd,
-                "score": ransac.plane_properties["score"],
-                "aspect_circ_mean": ransac.plane_properties["aspect_circ_mean"],
-                "aspect_circ_sd": ransac.plane_properties["aspect_circ_sd"],
-                "thinness_ratio": ransac.plane_properties["thinness_ratio"],
-                "cv_hull_ratio": ransac.plane_properties["cv_hull_ratio"],
-                "plane_type": ransac.plane_properties["plane_type"],
-            })
+            if ransac.success:
+                inlier_mask = ransac.inlier_mask_
+                a, b = ransac.estimator_.coef_
+                d = ransac.estimator_.intercept_
 
-            mask[inlier_mask] = 0
+                planes.append({
+                    "toid": toid,
+                    "x_coef": a,
+                    "y_coef": b,
+                    "intercept": d,
+                    "slope": _slope(a, b),
+                    "aspect": _aspect(a, b),
+                    "inliers_xy": XY[inlier_mask],
+                    "sd": ransac.sd,
+                    "score": ransac.plane_properties["score"],
+                    "aspect_circ_mean": ransac.plane_properties["aspect_circ_mean"],
+                    "aspect_circ_sd": ransac.plane_properties["aspect_circ_sd"],
+                    "thinness_ratio": ransac.plane_properties["thinness_ratio"],
+                    "cv_hull_ratio": ransac.plane_properties["cv_hull_ratio"],
+                    "plane_type": ransac.plane_properties["plane_type"],
+                })
+
+                mask[inlier_mask] = 0
         except RANSACValueError as e:
             if debug:
                 print("No plane found - received RANSACValueError:")
