@@ -283,6 +283,8 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[dict]):
     for plane in planes:
         plane['inliers_xy'] = plane['inliers_xy'].tolist()
 
+    # TODO also save all the other facts we are storing about planes - in jsonb?
+    # TODO maybe don't have to save inliers_xy as it's only needed for dev_roof_polygons?
     with connection(pg_uri) as pg_conn, pg_conn.cursor() as cursor:
         execute_values(cursor, SQL("""
             INSERT INTO {roof_polygons} (

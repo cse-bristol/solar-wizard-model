@@ -27,21 +27,26 @@ def _edge_weight(graph, src: int, dst: int) -> float:
         src_inliers = len(src_node['xy_subset'])
         curr_score = ((dst_node['score'] * dst_inliers) +
                       (src_node['score'] * src_inliers)) / (dst_inliers + src_inliers)
-        # curr_score = max(dst_node['score'], src_node['score'])
 
         xy_subset = np.concatenate([dst_node['xy_subset'], src_node['xy_subset']])
         z_subset = np.concatenate([dst_node['z_subset'], src_node['z_subset']])
+        lr = LinearRegression()
+        lr.fit(xy_subset, z_subset)
+        new_score = lr.score(xy_subset, z_subset)
+        # TODO constant
+        # If the new score is still good enough, don't require it to be better than before
+        weight = curr_score - new_score if new_score < 0.925 else -1
 
     # A plane and an outlier
     else:
         curr_score = dst_node.get('score', src_node.get('score'))
         xy_subset = np.concatenate([dst_node['xy_subset'], src_node['xy_subset']])
         z_subset = np.concatenate([dst_node['z_subset'], src_node['z_subset']])
+        lr = LinearRegression()
+        lr.fit(xy_subset, z_subset)
+        new_score = lr.score(xy_subset, z_subset)
+        weight = curr_score - new_score
 
-    lr = LinearRegression()
-    lr.fit(xy_subset, z_subset)
-    new_score = lr.score(xy_subset, z_subset)
-    weight = curr_score - new_score
     return weight
 
 
