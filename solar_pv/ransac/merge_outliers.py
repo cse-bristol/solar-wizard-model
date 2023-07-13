@@ -8,6 +8,9 @@ from solar_pv.ransac.premade_planes import _image
 from solar_pv.ransac.ransac import _slope, _aspect
 
 
+DO_NOT_MERGE = 9999
+
+
 def _new_edge_weight(graph, src: int, dst: int, n: int):
     """
     Callback to recompute edge weights after merging node `src` into `dst`
@@ -24,14 +27,23 @@ def _new_edge_weight(graph, src: int, dst: int, n: int):
     dst_node = graph.nodes[dst]
     n_node = graph.nodes[n]
 
-    curr_avg_score = (dst_node['score'] + n_node['score']) / 2
+    if dst_node['outlier'] == n_node['outlier']:
+        return {"weight": DO_NOT_MERGE}
 
-    xy_subset = np.concatenate([dst_node['xy_subset'], n_node['xy_subset']])
-    z_subset = np.concatenate([dst_node['z_subset'], n_node['z_subset']])
+    if dst_node['outlier'] is False and n_node['outlier'] is True:
+        plane = dst_node
+        outlier = n_node
+    else:
+        plane = n_node
+        outlier = dst_node
+
+    curr_score = plane['score']
+    xy_subset = np.concatenate([plane['xy_subset'], outlier['xy_subset']])
+    z_subset = np.concatenate([plane['z_subset'], outlier['z_subset']])
     lr = LinearRegression()
     lr.fit(xy_subset, z_subset)
-    merged_score = lr.score(xy_subset, z_subset)
-    weight = curr_avg_score - merged_score
+    new_score = lr.score(xy_subset, z_subset)
+    weight = curr_score - new_score
     return {'weight': weight}
 
 
@@ -46,8 +58,11 @@ def _update_node_data(graph, src: int, dst: int):
     src, dst : int
         The vertices in `graph` to be merged.
     """
+    print(f"merging nodes {src} {dst}")
     dst_node = graph.nodes[dst]
     src_node = graph.nodes[src]
+
+    dst_node['outlier'] = False
 
     xy_subset = np.concatenate([dst_node['xy_subset'], src_node['xy_subset']])
     z_subset = np.concatenate([dst_node['z_subset'], src_node['z_subset']])
@@ -55,6 +70,7 @@ def _update_node_data(graph, src: int, dst: int):
     lr.fit(xy_subset, z_subset)
     merged_score = lr.score(xy_subset, z_subset)
 
+    dst_node['toid'] = dst_node.get('toid', src_node.get('toid'))
     dst_node['xy_subset'] = xy_subset
     dst_node['z_subset'] = z_subset
     dst_node['score'] = merged_score
@@ -65,7 +81,7 @@ def _update_node_data(graph, src: int, dst: int):
     dst_node['slope'] = _slope(lr.coef_[0], lr.coef_[1])
     dst_node['aspect'] = _aspect(lr.coef_[0], lr.coef_[1])
     dst_node['inliers_xy'] = xy_subset
-    dst_node['plane_type'] = dst_node['plane_type'] + "_MERGED_" + src_node['plane_type']
+    dst_node['plane_type'] = dst_node.get('plane_type', src_node.get('plane_type'))
 
     # TODO:
     dst_node["sd"] = None
@@ -75,8 +91,10 @@ def _update_node_data(graph, src: int, dst: int):
     dst_node["cv_hull_ratio"] = None
 
 
-def merge_adjacent_planes(xy, z, labels, planes: Dict[int, dict], res: float, nodata: int, connectivity: int = 1, thresh: float = 0):
-    g = rag_score(xy, z, labels, planes, res, nodata=nodata, connectivity=connectivity)
+def merge_adjacent_outliers(xy, z, labels, planes: Dict[int, dict], res: float, nodata: int, connectivity: int = 1, thresh: float = 0):
+    if thresh >= DO_NOT_MERGE:
+        raise ValueError(f"threshold ({thresh}) was >= DO_NOT_MERGE ({DO_NOT_MERGE})")
+    g = rag_score(xy, z, labels, planes, res, nodata, connectivity=connectivity)
     return hierarchical_merge(g, labels, thresh=thresh)
 
 
@@ -98,10 +116,11 @@ def hierarchical_merge(graph, labels, thresh: float = 0):
     merged_planes = []
     for n in graph.nodes:
         plane = graph.nodes[n]
-        del plane["xy_subset"]
-        del plane["z_subset"]
-        del plane["labels"]
-        merged_planes.append(plane)
+        if plane['outlier'] is False:
+            del plane["xy_subset"]
+            del plane["z_subset"]
+            del plane["labels"]
+            merged_planes.append(plane)
 
     return merged_planes
 
@@ -117,7 +136,6 @@ def rag_score(xy, z, labels, planes: Dict[int, dict], res: float, nodata: int, c
     """
     label_image, idxs = _image(xy, labels, res, nodata=nodata)
     graph = RAG(label_image, connectivity=connectivity)
-
     graph.remove_node(nodata)
 
     for n in graph:
@@ -126,20 +144,33 @@ def rag_score(xy, z, labels, planes: Dict[int, dict], res: float, nodata: int, c
         z_subset = z[idxs[mask]]
         graph.nodes[n].update({'labels': [n],
                                'xy_subset': xy_subset,
-                               'z_subset': z_subset})
-        graph.nodes[n].update(planes[n])
+                               'z_subset': z_subset,
+                               'outlier': True})
+        if n in planes:
+            graph.nodes[n].update(planes[n])
+            graph.nodes[n]['outlier'] = False
 
     for node_1_id, node_2_id, edge in graph.edges(data=True):
         n1 = graph.nodes[node_1_id]
         n2 = graph.nodes[node_2_id]
-        # TODO is score the kind of thing that can be legitimately averaged?
-        curr_avg_score = (n1['score'] + n2['score']) / 2
-        xy_subset = np.concatenate([n1['xy_subset'], n2['xy_subset']])
-        z_subset = np.concatenate([n1['z_subset'], n2['z_subset']])
+        if n1['outlier'] == n2['outlier']:
+            edge['weight'] = DO_NOT_MERGE
+            continue
+
+        if n1['outlier'] is False and n2['outlier'] is True:
+            plane = n1
+            outlier = n2
+        else:
+            plane = n2
+            outlier = n1
+
+        curr_score = plane['score']
+        xy_subset = np.concatenate([plane['xy_subset'], outlier['xy_subset']])
+        z_subset = np.concatenate([plane['z_subset'], outlier['z_subset']])
         lr = LinearRegression()
         lr.fit(xy_subset, z_subset)
-        merged_score = lr.score(xy_subset, z_subset)
-        weight = curr_avg_score - merged_score
+        new_score = lr.score(xy_subset, z_subset)
+        weight = curr_score - new_score
         edge['weight'] = weight
 
     return graph

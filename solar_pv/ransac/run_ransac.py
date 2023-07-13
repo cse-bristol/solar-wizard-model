@@ -22,7 +22,8 @@ from solar_pv.constants import RANSAC_LARGE_BUILDING, \
     RANSAC_LARGE_MAX_TRIALS, RANSAC_SMALL_MAX_TRIALS, FLAT_ROOF_DEGREES_THRESHOLD, \
     RANSAC_SMALL_BUILDING, RANSAC_MEDIUM_MAX_TRIALS
 from solar_pv.ransac.detsac import DETSACRegressorForLIDAR
-from solar_pv.ransac.merge_adjacent_planes import LABEL_NODATA, merge_adjacent_planes
+from solar_pv.ransac.merge_adjacent_planes import merge_adjacent_planes
+from solar_pv.ransac.merge_outliers import merge_adjacent_outliers
 from solar_pv.ransac.premade_planes import create_planes, create_planes_2
 from solar_pv.ransac.ransac import RANSACRegressorForLIDAR, _aspect, \
     _slope, RANSACValueError
@@ -158,7 +159,9 @@ def _do_ransac_building(toid: str,
     xy = xyz[:, :2]
     z = xyz[:, 2]
 
-    labels = np.full(z.shape, LABEL_NODATA, dtype=int)
+    labels_nodata = -1
+    labels_mask = np.ones(aspect.shape)
+    labels = np.full(z.shape, labels_nodata, dtype=int)
     planes = {}
 
     plane_id = 0
@@ -186,25 +189,30 @@ def _do_ransac_building(toid: str,
                 a, b = ransac.estimator_.coef_
                 d = ransac.estimator_.intercept_
 
-                planes[plane_id] = {
-                    "toid": toid,
-                    "x_coef": a,
-                    "y_coef": b,
-                    "intercept": d,
-                    "slope": _slope(a, b),
-                    "aspect": _aspect(a, b),
-                    "inliers_xy": xy[inlier_mask],
-                    "sd": ransac.sd,
-                    "score": ransac.plane_properties["score"],
-                    "aspect_circ_mean": ransac.plane_properties["aspect_circ_mean"],
-                    "aspect_circ_sd": ransac.plane_properties["aspect_circ_sd"],
-                    "thinness_ratio": ransac.plane_properties["thinness_ratio"],
-                    "cv_hull_ratio": ransac.plane_properties["cv_hull_ratio"],
-                    "plane_type": ransac.plane_properties["plane_type"],
-                }
-                labels[inlier_mask] = plane_id
-                plane_id += 1
+                # inliers on bad planes are still masked out, but we don't keep the planes
+                # and their inliers become candidates for being merged into other planes
                 mask[inlier_mask] = 0
+                if ransac.plane_properties["score"] > 0.0:
+                    planes[plane_id] = {
+                        "toid": toid,
+                        "x_coef": a,
+                        "y_coef": b,
+                        "intercept": d,
+                        "slope": _slope(a, b),
+                        "aspect": _aspect(a, b),
+                        "inliers_xy": xy[inlier_mask],
+                        "sd": ransac.sd,
+                        "score": ransac.plane_properties["score"],
+                        "aspect_circ_mean": ransac.plane_properties["aspect_circ_mean"],
+                        "aspect_circ_sd": ransac.plane_properties["aspect_circ_sd"],
+                        "thinness_ratio": ransac.plane_properties["thinness_ratio"],
+                        "cv_hull_ratio": ransac.plane_properties["cv_hull_ratio"],
+                        "plane_type": ransac.plane_properties["plane_type"],
+                    }
+                    labels[inlier_mask] = plane_id
+                    plane_id += 1
+                    labels_mask[inlier_mask] = 0
+
         except RANSACValueError as e:
             if debug:
                 print("No plane found - received RANSACValueError:")
@@ -212,7 +220,9 @@ def _do_ransac_building(toid: str,
                 print("")
             break
 
-    merged_planes = merge_adjacent_planes(xy, z, labels, planes, resolution_metres)
+    outliers = np.count_nonzero(labels[labels_mask == 1])
+    labels[labels_mask == 1] = range(plane_id + 1, outliers + plane_id + 1)
+    merged_planes = merge_adjacent_outliers(xy, z, labels, planes, resolution_metres, labels_nodata, thresh=0.01)
     return merged_planes
 
 
