@@ -94,6 +94,7 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
         self.plane_properties = {}
         self.resolution_metres = resolution_metres
 
+    # TODO take a mask like DETSAC does now
     def fit(self, X, y,
             sample_weight=None,
             aspect=None,
@@ -412,6 +413,7 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
                     if debug:
                         bad_sample_reasons["TOO_MANY_GROUPS"] += 1
                     continue
+                # TODO maybe remove this like in DETSAC? I don't see the point of it.
                 for groupid, area in group_areas.items():
                     if groupid != largest and area / roof_plane_area > self.max_group_area_ratio_to_largest:
                         bad_samples.add(tuple(subset_idxs))
@@ -448,6 +450,7 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
             # save current random sample as best sample
             n_inliers_best = n_inliers_subset
             sd_best = sd
+            # TODO add more things to this like in DETSAC
             plane_properties_best = {
                 "aspect_circ_mean": math.degrees(aspect_circ_mean) if aspect_circ_mean else None,
                 "aspect_circ_sd": aspect_circ_sd,

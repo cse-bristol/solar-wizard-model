@@ -28,7 +28,6 @@ from solar_pv.ransac.premade_planes import Plane, ArrayPlane
 from solar_pv.ransac.ransac import _slope, _aspect, _aspect_rad, _circular_mean, \
     _circular_sd, _circular_variance, _rad_diff, _to_positive_angle, _exclude_unconnected, \
     _sample, _pixel_groups, _group_areas, _min_thinness_ratio, RANSACValueError
-from solar_pv.ransac.ridge_test import ridges
 
 
 class DETSACRegressorForLIDAR(RANSACRegressor):
@@ -227,12 +226,6 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
 
         # RANSAC for LIDAR additions:
         min_X = [np.amin(X[:, 0]), np.amin(X[:, 1])]
-
-        # TODO move somewhere else
-        # _test_ridges(X, min_X, y, self.resolution_metres)
-        # _test_watershed(X, min_X, y, self.resolution_metres)
-        # _test_flow(X, min_X, y, self.resolution_metres)
-        # _segment_aspect(X, min_X, aspect, self.resolution_metres)
 
         sd_best = np.inf
         if debug:
@@ -551,76 +544,3 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
                 print(f"plane found, but rejected")
             print("")
         return self
-
-
-def _test_ridges(X, min_X, y, res: float):
-
-    normed = ((X - min_X) / res).astype(int)
-    image = np.zeros((int(np.amax(normed[:, 0])) + 1,
-                      int(np.amax(normed[:, 1])) + 1))
-    for i, pair in enumerate(normed):
-        image[pair[0]][pair[1]] = y[i]
-
-    ridges(image)
-
-
-def _test_watershed(X, min_X, y, res: float):
-    normed = ((X - min_X) / res).astype(int)
-    image = np.full((int(np.amax(normed[:, 1])) + 1,
-                     int(np.amax(normed[:, 0])) + 1), 9999.0)
-    for i, pair in enumerate(normed):
-        image[pair[1]][pair[0]] = y[i]
-
-    image = np.flip(image, axis=0)
-    mask = image != 9999
-
-    rounded = image.astype(int)
-    markers_bool = local_minima(rounded, connectivity=2) * mask
-    markers = ndimage.label(markers_bool)[0]
-
-    # does not having a buffer around the building geom when selecting pixels make this worse? Think this is OK
-    w = watershed(image, connectivity=2, mask=mask, compactness=1.0)
-    return w
-
-
-# def _test_flow(X, min_X, y, res: float):
-#     normed = ((X - min_X) / res).astype(int)
-#     image = np.full((int(np.amax(normed[:, 1])) + 1,
-#                      int(np.amax(normed[:, 0])) + 1), 0.0)
-#     for i, pair in enumerate(normed):
-#         image[pair[1]][pair[0]] = y[i]
-#
-#     image = np.flip(image, axis=0)
-#     mask = image != 0.0
-#
-#     from pysheds.view import Raster, ViewFinder
-#     from pysheds.grid import Grid
-#     raster = Raster(image, viewfinder=ViewFinder(shape=image.shape, mask=mask))
-#     grid = Grid(raster.viewfinder)
-#     grid.mask = mask
-#     fdir = grid.flowdir(raster, apply_mask=True, nodata_in=np.nan)
-#     fdir = fdir * mask
-#     # fdir = np.degrees(fdir)
-#     fdir = np.array(fdir)
-#     print(fdir)
-#     return fdir
-
-
-def _segment_aspect(X, min_X, aspect, res: float):
-    normed = ((X - min_X) / res).astype(int)
-    image = np.full((int(np.amax(normed[:, 1])) + 1,
-                     int(np.amax(normed[:, 0])) + 1), 0.0)
-    for i, pair in enumerate(normed):
-        image[pair[1]][pair[0]] = aspect[i]
-
-    image = np.flip(image, axis=0)
-    mask = image != 0.0
-
-    labels1 = segmentation.slic(image, compactness=30, n_segments=100, start_label=1, mask=mask)
-    # out1 = color.label2rgb(labels1, image, kind='avg', bg_label=0)
-
-    from skimage.future.graph import rag_mean_color, cut_threshold
-    g = rag_mean_color(image, labels1)
-    labels2 = cut_threshold(labels1, g, 39)
-    # out2 = color.label2rgb(labels2, image, kind='avg', bg_label=0)
-    return labels2

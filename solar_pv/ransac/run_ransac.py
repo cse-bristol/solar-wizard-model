@@ -22,6 +22,7 @@ from solar_pv.constants import RANSAC_LARGE_BUILDING, \
     RANSAC_LARGE_MAX_TRIALS, RANSAC_SMALL_MAX_TRIALS, FLAT_ROOF_DEGREES_THRESHOLD, \
     RANSAC_SMALL_BUILDING, RANSAC_MEDIUM_MAX_TRIALS
 from solar_pv.ransac.detsac import DETSACRegressorForLIDAR
+from solar_pv.ransac.merge_adjacent_planes import LABEL_NODATA, merge_adjacent_planes
 from solar_pv.ransac.premade_planes import create_planes, create_planes_2
 from solar_pv.ransac.ransac import RANSACRegressorForLIDAR, _aspect, \
     _slope, RANSACValueError
@@ -149,16 +150,19 @@ def _do_ransac_building(toid: str,
                         max_trials: int,
                         include_group_checks: bool,
                         debug: bool):
-    planes = []
     min_points_per_plane = min(8, int(8 / resolution_metres))  # 8 for 2m, 8 for 1m, 16 for 0.5m
     total_points_in_building = len(aspect)
     premade_planes = create_planes_2(xyz, aspect, polygon, resolution_metres)
     # premade_planes.extend(create_planes(xyz, polygon))
     skip_planes = set()
+    xy = xyz[:, :2]
+    z = xyz[:, 2]
 
+    labels = np.full(z.shape, LABEL_NODATA, dtype=int)
+    planes = {}
+
+    plane_id = 0
     while np.count_nonzero(mask) > min_points_per_plane:
-        XY = xyz[:, :2]
-        Z = xyz[:, 2]
         try:
             ransac = DETSACRegressorForLIDAR(residual_threshold=0.25,
                                              flat_roof_residual_threshold=0.1,
@@ -168,7 +172,7 @@ def _do_ransac_building(toid: str,
                                              flat_roof_threshold_degrees=FLAT_ROOF_DEGREES_THRESHOLD,
                                              min_points_per_plane=min_points_per_plane,
                                              resolution_metres=resolution_metres)
-            ransac.fit(XY, Z,
+            ransac.fit(xy, z,
                        aspect=aspect,
                        mask=mask,
                        premade_planes=premade_planes,
@@ -182,14 +186,14 @@ def _do_ransac_building(toid: str,
                 a, b = ransac.estimator_.coef_
                 d = ransac.estimator_.intercept_
 
-                planes.append({
+                planes[plane_id] = {
                     "toid": toid,
                     "x_coef": a,
                     "y_coef": b,
                     "intercept": d,
                     "slope": _slope(a, b),
                     "aspect": _aspect(a, b),
-                    "inliers_xy": XY[inlier_mask],
+                    "inliers_xy": xy[inlier_mask],
                     "sd": ransac.sd,
                     "score": ransac.plane_properties["score"],
                     "aspect_circ_mean": ransac.plane_properties["aspect_circ_mean"],
@@ -197,8 +201,9 @@ def _do_ransac_building(toid: str,
                     "thinness_ratio": ransac.plane_properties["thinness_ratio"],
                     "cv_hull_ratio": ransac.plane_properties["cv_hull_ratio"],
                     "plane_type": ransac.plane_properties["plane_type"],
-                })
-
+                }
+                labels[inlier_mask] = plane_id
+                plane_id += 1
                 mask[inlier_mask] = 0
         except RANSACValueError as e:
             if debug:
@@ -206,9 +211,12 @@ def _do_ransac_building(toid: str,
                 print(e)
                 print("")
             break
-    return planes
+
+    merged_planes = merge_adjacent_planes(xy, z, labels, planes, resolution_metres)
+    return merged_planes
 
 
+# TODO probably can revert to just passing list of pixels around - not currently using polygon
 class BuildingData(TypedDict):
     toid: str
     pixels: List[dict]

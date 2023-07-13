@@ -73,6 +73,7 @@ class ArrayPlane:
     sample_residual_threshold: float
     plane_type: str
     plane_id: str
+    # TODO remove:
     plane_image: np.ndarray
 
     def fit(self) -> LinearRegression:
@@ -340,7 +341,7 @@ def create_planes(xyz: np.ndarray, polygon: Polygon) -> List[ArrayPlane]:
     plane_id = 0
     for line in line_segments:
         pb = _perpendicular_bisector(line, 1000)
-        # TODO if this is slow make an rtree
+        # could make an rtree if this is slow - seems ok though - we only enter this function once per building
         dist_points = [cast(Point, l.intersection(pb)) for l in line_segments if l.intersects(pb) and l != line]
         buf_dist = line.length / 2
         for dist_point in dist_points:
