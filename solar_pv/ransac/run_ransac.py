@@ -22,8 +22,7 @@ from solar_pv.constants import RANSAC_LARGE_BUILDING, \
     RANSAC_LARGE_MAX_TRIALS, RANSAC_SMALL_MAX_TRIALS, FLAT_ROOF_DEGREES_THRESHOLD, \
     RANSAC_SMALL_BUILDING, RANSAC_MEDIUM_MAX_TRIALS
 from solar_pv.ransac.detsac import DETSACRegressorForLIDAR
-from solar_pv.ransac.merge_adjacent_planes import merge_adjacent_planes
-from solar_pv.ransac.merge_outliers import merge_adjacent_outliers
+from solar_pv.ransac.merge_adjacent import merge_adjacent
 from solar_pv.ransac.premade_planes import create_planes, create_planes_2
 from solar_pv.ransac.ransac import RANSACRegressorForLIDAR, _aspect, \
     _slope, RANSACValueError
@@ -160,7 +159,6 @@ def _do_ransac_building(toid: str,
     z = xyz[:, 2]
 
     labels_nodata = -1
-    labels_mask = np.ones(aspect.shape)
     labels = np.full(z.shape, labels_nodata, dtype=int)
     planes = {}
 
@@ -189,9 +187,9 @@ def _do_ransac_building(toid: str,
                 a, b = ransac.estimator_.coef_
                 d = ransac.estimator_.intercept_
 
-                # inliers on bad planes are still masked out, but we don't keep the planes
-                # and their inliers become candidates for being merged into other planes
-                mask[inlier_mask] = 0
+                # don't keep bad planes - their inliers become candidates for being
+                # merged into other planes (and the planes will have be added to skip_planes,
+                # so we don't retry them)
                 if ransac.plane_properties["score"] > 0.0:
                     planes[plane_id] = {
                         "toid": toid,
@@ -211,7 +209,7 @@ def _do_ransac_building(toid: str,
                     }
                     labels[inlier_mask] = plane_id
                     plane_id += 1
-                    labels_mask[inlier_mask] = 0
+                    mask[inlier_mask] = 0
 
         except RANSACValueError as e:
             if debug:
@@ -220,9 +218,9 @@ def _do_ransac_building(toid: str,
                 print("")
             break
 
-    outliers = np.count_nonzero(labels[labels_mask == 1])
-    labels[labels_mask == 1] = range(plane_id + 1, outliers + plane_id + 1)
-    merged_planes = merge_adjacent_outliers(xy, z, labels, planes, resolution_metres, labels_nodata, thresh=0.01)
+    outliers = np.count_nonzero(labels[mask == 1])
+    labels[mask == 1] = range(plane_id + 1, outliers + plane_id + 1)
+    merged_planes = merge_adjacent(xy, z, labels, planes, resolution_metres, labels_nodata)
     return merged_planes
 
 
