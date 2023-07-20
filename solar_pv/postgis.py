@@ -352,6 +352,7 @@ def pixels_for_buildings(pg_conn,
                          page_size: int,
                          raster_tables: List[str],
                          toids: List[str] = None,
+                         geom_col: str = 'geom_27700',
                          force_load: bool = False) -> Dict[str, List[dict]]:
     """
     Get a list of pixels by toid. Each pixel dict will have keys x, y, pixel_id and toid,
@@ -371,6 +372,9 @@ def pixels_for_buildings(pg_conn,
     else:
         where_clause = SQL("b.exclusion_reason IS NULL")
 
+    if geom_col not in ('geom_27700', 'geom_27700_buffered_5'):
+        raise ValueError(f"Unrecognised geom col: {geom_col}")
+
     by_pixel_id = {}
     fields = []
 
@@ -381,7 +385,7 @@ def pixels_for_buildings(pg_conn,
             pg_conn,
             """        
             WITH building_page AS (
-                SELECT b.toid, b.geom_27700
+                SELECT b.toid, {geom_col}
                 FROM {buildings} b
                 WHERE {where_clause}
                 {toid_filter}
@@ -391,9 +395,9 @@ def pixels_for_buildings(pg_conn,
             raster_pixels AS (
                 SELECT
                     b.toid,
-                    (ST_PixelAsCentroids(ST_Clip(rast, b.geom_27700))).*
+                    (ST_PixelAsCentroids(ST_Clip(rast, {geom_col}))).*
                 FROM building_page b
-                LEFT JOIN {raster_table} r ON ST_Intersects(b.geom_27700, r.rast)
+                LEFT JOIN {raster_table} r ON ST_Intersects({geom_col}, r.rast)
             )
             SELECT
                 toid || ':' || ST_X(geom)::text || ':' || ST_Y(geom)::text AS pixel_id,
@@ -409,6 +413,7 @@ def pixels_for_buildings(pg_conn,
             },
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
             raster_table=Identifier(schema, rtable),
+            geom_col=Identifier("b", geom_col),
             toid_filter=toid_filter,
             where_clause=where_clause,
             result_extractor=lambda rows: rows)

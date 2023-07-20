@@ -70,8 +70,8 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
     polygons_by_toid = defaultdict(list)
     roof_polygons = []
     # TODO these will have to be based on a different size system, not panel w/h
-    archetypes = construct_archetypes(panel_width_m, panel_height_m)
-    max_archetype_area = max(archetypes, key=lambda a: a.polygon.area).polygon.area
+    # archetypes = construct_archetypes(panel_width_m, panel_height_m)
+    # max_archetype_area = max(archetypes, key=lambda a: a.polygon.area).polygon.area
 
     # Sort planes so that southerly aspects are considered first
     # (as already-created polygons take priority when ensuring two roof planes don't overlap)
@@ -131,43 +131,43 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
 
             # Potentially use a pre-made roof archetype instead:
             plane['archetype'] = False
-            if not is_flat \
-                    and aspect_adjusted \
-                    and roof_poly.area < (max_archetype_area * 1.5)\
-                    and roof_poly.area / building_geom.area > 0.14:
-
-                roof_poly = _constrain_to_building(building_geom,
-                                                   roof_poly,
-                                                   large_building_threshold,
-                                                   min_dist_to_edge_large_m,
-                                                   min_dist_to_edge_m)
-                if not roof_poly or roof_poly.is_empty:
-                    continue
-
-                roof_poly = _remove_overlaps(toid, roof_poly, polygons_by_toid)
-                if not roof_poly or roof_poly.is_empty:
-                    continue
-
-                # archetype = get_archetype(roof_poly, archetypes, plane['aspect'])
-                archetype = None
-                if archetype is not None:
-                    roof_poly = archetype.polygon
-                    plane['archetype'] = True
-                    plane['archetype_pattern'] = json.dumps(archetype.pattern)
-
-                    roof_poly = _constrain_to_building(building_geom,
-                                                       roof_poly,
-                                                       large_building_threshold,
-                                                       min_dist_to_edge_large_m,
-                                                       min_dist_to_edge_m)
-                    if not roof_poly or roof_poly.is_empty:
-                        continue
-
-                    roof_poly = _remove_overlaps(toid, roof_poly, polygons_by_toid)
-                    if not roof_poly or roof_poly.is_empty:
-                        continue
-
-                    roof_poly = remove_tendrils(roof_poly)
+            # if not is_flat \
+            #         and aspect_adjusted \
+            #         and roof_poly.area < (max_archetype_area * 1.5)\
+            #         and roof_poly.area / building_geom.area > 0.14:
+            #
+            #     roof_poly = _constrain_to_building(building_geom,
+            #                                        roof_poly,
+            #                                        large_building_threshold,
+            #                                        min_dist_to_edge_large_m,
+            #                                        min_dist_to_edge_m)
+            #     if not roof_poly or roof_poly.is_empty:
+            #         continue
+            #
+            #     roof_poly = _remove_overlaps(toid, roof_poly, polygons_by_toid)
+            #     if not roof_poly or roof_poly.is_empty:
+            #         continue
+            #
+            #     # archetype = get_archetype(roof_poly, archetypes, plane['aspect'])
+            #     archetype = None
+            #     if archetype is not None:
+            #         roof_poly = archetype.polygon
+            #         plane['archetype'] = True
+            #         plane['archetype_pattern'] = json.dumps(archetype.pattern)
+            #
+            #         roof_poly = _constrain_to_building(building_geom,
+            #                                            roof_poly,
+            #                                            large_building_threshold,
+            #                                            min_dist_to_edge_large_m,
+            #                                            min_dist_to_edge_m)
+            #         if not roof_poly or roof_poly.is_empty:
+            #             continue
+            #
+            #         roof_poly = _remove_overlaps(toid, roof_poly, polygons_by_toid)
+            #         if not roof_poly or roof_poly.is_empty:
+            #             continue
+            #
+            #         roof_poly = remove_tendrils(roof_poly)
 
             if plane['archetype'] is False:
                 roof_poly = _grid_polygon(plane, resolution_metres)

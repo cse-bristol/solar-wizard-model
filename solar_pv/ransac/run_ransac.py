@@ -8,7 +8,7 @@ import traceback
 from typing import List, Dict, TypedDict
 import multiprocessing as mp
 
-from psycopg2.extras import DictCursor, execute_values
+from psycopg2.extras import DictCursor, execute_values, Json
 from psycopg2.sql import SQL, Identifier, Literal
 import numpy as np
 from shapely import wkt, ops
@@ -23,11 +23,19 @@ from solar_pv.constants import RANSAC_LARGE_BUILDING, \
     RANSAC_SMALL_BUILDING, RANSAC_MEDIUM_MAX_TRIALS
 from solar_pv.ransac.detsac import DETSACRegressorForLIDAR
 from solar_pv.ransac.merge_adjacent import merge_adjacent
-from solar_pv.ransac.premade_planes import create_planes, create_planes_2
+from solar_pv.ransac.premade_planes import create_planes, create_planes_2, _image
 from solar_pv.ransac.ransac import RANSACRegressorForLIDAR, _aspect, \
     _slope, RANSACValueError
-from solar_pv.roof_polygons.roof_polygons import create_roof_polygons
+from solar_pv.roof_polygons.roof_polygons_2 import create_roof_polygons
 from solar_pv.util import get_cpu_count
+
+
+class BuildingData(TypedDict):
+    toid: str
+    pixels: List[dict]
+    polygon: Polygon
+    min_ground_height: float
+    max_ground_height: float
 
 
 def _ransac_cpu_count():
@@ -97,7 +105,7 @@ def _handle_building_page(pg_uri: str, job_id: int, page: int, page_size: int, p
     planes = []
     for toid, building in buildings.items():
         try:
-            found = _ransac_building(building['pixels'], toid, params['resolution_metres'], building['polygon'])
+            found = _ransac_building(building, toid, params['resolution_metres'])
             if len(found) > 0:
                 planes.extend(found)
         except Exception as e:
@@ -111,14 +119,20 @@ def _handle_building_page(pg_uri: str, job_id: int, page: int, page_size: int, p
     print(f"Page {page} of {page_size} buildings complete, took {round(time.time() - start_time, 2)} s.")
 
 
-def _ransac_building(pixels_in_building: List[dict],
+def _ransac_building(building: BuildingData,
                      toid: str,
                      resolution_metres: float,
-                     polygon: Polygon = None,
                      debug: bool = False) -> List[dict]:
+    pixels_in_building = building['pixels']
+    polygon = building['polygon']
+    max_ground_height = building['max_ground_height']
+
     xyz = np.array([[pixel["x"], pixel["y"], pixel["elevation"]] for pixel in pixels_in_building])
     aspect = np.array([pixel["aspect"] for pixel in pixels_in_building])
-    mask = np.ones(aspect.shape)
+    z = xyz[:, 2]
+    mask = z > max_ground_height if max_ground_height else np.ones(aspect.shape)
+    if np.count_nonzero(mask == 0) > 0:
+        print("found ground-level thing")
 
     if len(pixels_in_building) > RANSAC_LARGE_BUILDING / resolution_metres:
         max_trials = RANSAC_LARGE_MAX_TRIALS
@@ -224,13 +238,6 @@ def _do_ransac_building(toid: str,
     return merged_planes
 
 
-# TODO probably can revert to just passing list of pixels around - not currently using polygon
-class BuildingData(TypedDict):
-    toid: str
-    pixels: List[dict]
-    polygon: Polygon
-
-
 def _load(pg_uri: str, job_id: int, page: int, page_size: int, toids: List[str] = None, force_load: bool = False) -> Dict[str, BuildingData]:
     """
     Load LIDAR pixel data for RANSAC processing. page_size is number of
@@ -250,6 +257,8 @@ def _load(pg_uri: str, job_id: int, page: int, page_size: int, toids: List[str] 
             loaded[toid]["toid"] = toid
             loaded[toid]["polygon"] = wkt.loads(building["polygon"])
             loaded[toid]["pixels"] = pixels
+            loaded[toid]["min_ground_height"] = building["min_ground_height"]
+            loaded[toid]["max_ground_height"] = building["max_ground_height"]
         return loaded
 
 
@@ -257,7 +266,7 @@ def _load_building_polygons(pg_conn, job_id, toids: List[str]) -> List[dict]:
     buildings = sql_command(
             pg_conn,
             """
-            SELECT toid, ST_AsText(geom_27700) AS polygon 
+            SELECT toid, ST_AsText(geom_27700) AS polygon, min_ground_height, max_ground_height
             FROM {buildings}
             WHERE toid = ANY( %(toids)s )""",
             {"toids": toids},
@@ -281,10 +290,19 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[dict]):
         return
 
     for plane in planes:
+        # TODO maybe don't have to save inliers_xy as it's only needed for dev_roof_polygons?
         plane['inliers_xy'] = plane['inliers_xy'].tolist()
+        plane['meta'] = Json({
+            "sd": plane["sd"],
+            "score": plane["score"],
+            "aspect_circ_mean": plane["aspect_circ_mean"],
+            "aspect_circ_sd": plane["aspect_circ_sd"],
+            "thinness_ratio": plane["thinness_ratio"],
+            "cv_hull_ratio": plane["cv_hull_ratio"],
+            "plane_type": plane["plane_type"],
+            "aspect_adjusted": plane["aspect_adjusted"],
+        })
 
-    # TODO also save all the other facts we are storing about planes - in jsonb?
-    # TODO maybe don't have to save inliers_xy as it's only needed for dev_roof_polygons?
     with connection(pg_uri) as pg_conn, pg_conn.cursor() as cursor:
         execute_values(cursor, SQL("""
             INSERT INTO {roof_polygons} (
@@ -303,7 +321,8 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[dict]):
                 raw_footprint, 
                 raw_area, 
                 archetype,
-                inliers_xy
+                inliers_xy,
+                meta
             ) VALUES %s;
         """).format(
             roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE),
@@ -323,7 +342,8 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[dict]):
                         %(raw_footprint)s, 
                         %(raw_area)s, 
                         %(archetype)s,
-                        %(inliers_xy)s )""")
+                        %(inliers_xy)s,
+                        %(meta)s )""")
 
         pg_conn.commit()
 

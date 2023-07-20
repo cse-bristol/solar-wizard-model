@@ -12,7 +12,7 @@ FLAT_ROOF_DEGREES_THRESHOLD = 5.0
 AZIMUTH_ALIGNMENT_THRESHOLD = 15
 
 # Same as above, but for flat roofs:
-FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD = 45
+FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD = 46
 
 # PVGIS recommend this factor is applied to cover losses due to cabling, inverter, and
 # degradation due to age.

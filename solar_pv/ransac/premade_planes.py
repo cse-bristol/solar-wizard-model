@@ -163,10 +163,10 @@ def _dbscan(z):
     n_clusters_ = len(set(labels)) - (1 if -1 in labels else 0)
     n_noise_ = list(labels).count(-1)
 
-    print("Estimated number of clusters: %d" % n_clusters_)
-    print("Estimated number of noise points: %d" % n_noise_)
-    if n_clusters_ > 1:
-        print("Silhouette Coefficient: %0.3f" % metrics.silhouette_score(z, labels))
+    # print("Estimated number of clusters: %d" % n_clusters_)
+    # print("Estimated number of noise points: %d" % n_noise_)
+    # if n_clusters_ > 1:
+    #     print("Silhouette Coefficient: %0.3f" % metrics.silhouette_score(z, labels))
 
     labels[labels == 0] = np.amax(labels) + 1
     # labels[labels == -1] = np.amax(labels) + 1
@@ -221,16 +221,16 @@ def create_planes_2(xyz: np.ndarray, aspect: np.ndarray, polygon: Polygon, res: 
     z_segments, _ = _image(xy, z_labels, res, nodata)
     noise_mask = z_segments == noise_val
     z_segments = measure.label(z_segments, background=nodata)
-    z_segments = _merge_small_segments(z_segments, max_size=3)
+    # z_segments = _merge_small_segments(z_segments, max_size=3)
     z_segments[noise_mask] = noise_val
 
     num_z_segments = int(np.amax(z_segments))
 
-    from skimage import feature
-    from skimage import filters
-    from skimage.future import graph
-    from skimage import measure
-    from skimage import exposure
+    # from skimage import feature
+    # from skimage import filters
+    # from skimage.future import graph
+    # from skimage import measure
+    # from skimage import exposure
     # c = feature.canny(exposure.rescale_intensity(z_image), mask=z_image != nodata, )
     # c = feature.canny(z_image, mask=z_image != nodata, )
     # c = filters.sobel(z_image, mask=z_image != nodata)
@@ -240,7 +240,6 @@ def create_planes_2(xyz: np.ndarray, aspect: np.ndarray, polygon: Polygon, res: 
     for z_segment_id in range(1, num_z_segments + 1):
         z_idx_subset = idxs[z_segments == z_segment_id]
         if len(z_idx_subset) > 3:
-            # don't mask out small z_segments - only nodata and other large z_segment_ids
             mask = z_segments == z_segment_id
             for threshold in [29, 15]:
                 segmented_aspect = _segment(aspect_image, mask, threshold=threshold)

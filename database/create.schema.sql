@@ -31,9 +31,11 @@ SELECT
     toid,
     geom_27700,
     -- For selecting a building 'moat' for detecting outdated LiDAR:
-    ST_Buffer(geom_27700, 5) AS geom_27700_buffered,
+    ST_Buffer(geom_27700, 5, 'endcap=square join=mitre quad_segs=2') AS geom_27700_buffered_5,
     NULL::models.pv_exclusion_reason AS exclusion_reason,
-    NULL::real AS height
+    NULL::real AS height,
+    NULL::real AS min_ground_height,
+    NULL::real AS max_ground_height
 FROM mastermap.building_27700 b
 LEFT JOIN {bounds_27700} q ON ST_Intersects(b.geom_27700, q.bounds_27700)
 WHERE q.job_id=%(job_id)s
@@ -48,7 +50,7 @@ AND (NOT ST_Touches(ST_Centroid(b.geom_27700), q.bounds_27700)
 
 CREATE UNIQUE INDEX IF NOT EXISTS buildings_toid_idx ON {buildings} (toid);
 CREATE INDEX IF NOT EXISTS buildings_geom_27700_idx ON {buildings} USING GIST (geom_27700);
-CREATE INDEX IF NOT EXISTS buildings_geom_27700_buffered_idx ON {buildings} USING GIST (geom_27700_buffered);
+CREATE INDEX IF NOT EXISTS buildings_geom_27700_buffered_idx ON {buildings} USING GIST (geom_27700_buffered_5);
 
 --
 -- Create the table for storing roof planes:
@@ -70,7 +72,8 @@ CREATE TABLE IF NOT EXISTS {roof_polygons} (
     raw_footprint double precision NOT NULL,
     raw_area double precision NOT NULL,
     archetype boolean NOT NULL,
-    inliers_xy real[][] NOT NULL
+    inliers_xy real[][] NOT NULL,
+    meta jsonb NOT NULL
 );
 
 CREATE INDEX ON {roof_polygons} (toid);

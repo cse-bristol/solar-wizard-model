@@ -62,9 +62,9 @@ def _check_lidar_page(pg_uri: str, job_id: int, resolution_metres: float, page: 
 
         for building in buildings:
             try:
-                reason = _check_building(building, resolution_metres)
+                reason, min_gh, max_gh = _check_building(building, resolution_metres)
                 height = HeightAggregator(building['pixels']).height() if reason is None else None
-                to_write.append((building['toid'], reason, height))
+                to_write.append((building['toid'], reason, height, min_gh, max_gh))
             except Exception as e:
                 print("outdated LiDAR check failed on building:")
                 print(json.dumps(building, sort_keys=True, default=str))
@@ -77,8 +77,11 @@ def _check_lidar_page(pg_uri: str, job_id: int, resolution_metres: float, page: 
 def _check_building(building: dict, resolution_metres: float, debug: bool = False):
     reason = _check_coverage(building)
     if not reason:
-        reason = check_perimeter_gradient(building, resolution_metres, debug=debug)
-    return reason
+        reason, min_gh, max_gh = check_perimeter_gradient(building, resolution_metres, debug=debug)
+    else:
+        min_gh = None
+        max_gh = None
+    return reason, min_gh, max_gh
 
 
 def _check_coverage(building: dict):
@@ -88,7 +91,7 @@ def _check_coverage(building: dict):
     return 'NO_LIDAR_COVERAGE'
 
 
-def _write_exclusions(pg_conn, job_id: int, to_exclude: List[Tuple[str, str, float]]):
+def _write_exclusions(pg_conn, job_id: int, to_exclude: List[Tuple[str, str, float, float, float]]):
     with pg_conn.cursor() as cursor:
         psycopg2.extras.execute_values(
             cursor,
@@ -96,8 +99,10 @@ def _write_exclusions(pg_conn, job_id: int, to_exclude: List[Tuple[str, str, flo
                 UPDATE {buildings}
                 SET 
                     exclusion_reason = data.exclusion_reason::models.pv_exclusion_reason,
-                    height = data.height::real
-                FROM (VALUES %s) AS data (toid, exclusion_reason, height)
+                    height = data.height::real,
+                    min_ground_height = min_gh::real,
+                    max_ground_height = max_gh::real
+                FROM (VALUES %s) AS data (toid, exclusion_reason, height, min_gh, max_gh)
                 WHERE {buildings}.toid = data.toid;
             """).format(
                 buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
@@ -120,7 +125,7 @@ def _load_pixels(pg_conn, job_id: int, interior: bool, page: int, page_size: int
         pg_conn,
         """        
         WITH building_page AS (
-            SELECT b.toid, b.geom_27700, b.geom_27700_buffered
+            SELECT b.toid, b.geom_27700, b.geom_27700_buffered_5
             FROM {buildings} b
             {toid_filter}
             ORDER BY b.toid
@@ -129,9 +134,9 @@ def _load_pixels(pg_conn, job_id: int, interior: bool, page: int, page_size: int
         raster_pixels AS (
             SELECT
                 b.toid,
-                (ST_PixelAsCentroids(ST_Clip(rast, b.geom_27700_buffered))).*
+                (ST_PixelAsCentroids(ST_Clip(rast, b.geom_27700_buffered_5))).*
             FROM building_page b
-            LEFT JOIN {raster_table} r ON ST_Intersects(b.geom_27700_buffered, r.rast)
+            LEFT JOIN {raster_table} r ON ST_Intersects(b.geom_27700_buffered_5, r.rast)
         )
         SELECT
             ST_X(geom)::text || ':' || ST_Y(geom)::text AS pixel_id,

@@ -108,11 +108,11 @@ def _update_node_data(graph, src: int, dst: int):
     dst_node['outlier'] = False
 
     # TODO:
-    dst_node["sd"] = None
-    dst_node["aspect_circ_mean"] = None
-    dst_node["aspect_circ_sd"] = None
-    dst_node["thinness_ratio"] = None
-    dst_node["cv_hull_ratio"] = None
+    dst_node["sd"] = 0
+    dst_node["aspect_circ_mean"] = 0
+    dst_node["aspect_circ_sd"] = 0
+    dst_node["thinness_ratio"] = 0
+    dst_node["cv_hull_ratio"] = 0
 
 
 def _hierarchical_merge(graph, labels, thresh: float = 0):
@@ -136,7 +136,8 @@ def _hierarchical_merge(graph, labels, thresh: float = 0):
 def _rag_score(xy, z, labels, planes: Dict[int, dict], res: float, nodata: int, connectivity: int = 1):
     label_image, idxs = _image(xy, labels, res, nodata=nodata)
     graph = RAG(label_image, connectivity=connectivity)
-    graph.remove_node(nodata)
+    if graph.has_node(nodata):
+        graph.remove_node(nodata)
 
     for n in graph:
         mask = label_image == n

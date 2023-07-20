@@ -55,7 +55,7 @@ def check_perimeter_gradient(building,
                              bisector_length: int = 5,
                              gradient_threshold: float = 0.5,
                              bad_bisector_ratio: float = 0.52,
-                             debug: bool = False):
+                             debug: bool = False) -> Tuple[Optional[str], Optional[float], Optional[float]]:
     """
     Attempt to detect outdated LiDAR.
 
@@ -83,6 +83,10 @@ def check_perimeter_gradient(building,
     length = int(geom.exterior.length)
     total = 0
     bad = 0
+    min_ground_height = 9999
+    max_ground_height = 0
+    min_building_height = 9999
+
     for start in range(0, length, segment_length):
         # Find a straight line-segment:
         segment = substring(geom.exterior, start, start + segment_length)
@@ -92,7 +96,6 @@ def check_perimeter_gradient(building,
         if segment.length < 0.01:
             continue
 
-        # Find the perpendicular bisector of the line-segment:
         perp_bisector = _perpendicular_bisector(segment, bisector_length)
 
         # Find all the pixels that lie on it:
@@ -104,16 +107,21 @@ def check_perimeter_gradient(building,
         ha = HeightAggregator(pixels_on_cross)
         h_within, h_without = ha.average_heights()
         if h_without and h_within:
-            # print(h_within - h_without)
             if h_within - h_without < gradient_threshold:
                 total += 1
                 bad += 1
             else:
+                min_building_height = min(min_building_height, h_within)
+                min_ground_height = min(min_ground_height, h_without)
+                max_ground_height = min(max(max_ground_height, h_without), min_building_height - 0.1)
                 total += 1
 
     if debug:
-        print(f"Perimeter gradient results: total: {total}, bad: {bad}, ratio: {bad / total}")
+        print(f"Perimeter gradient results: total: {total}, bad: {bad}, ratio: {bad / total if bad > 0 else 'NA'}")
+        print(f"{building['toid']} min_gh: {min_ground_height} max_gh: {max_ground_height} min_bh: {min_building_height}")
     if total > 0 and bad / total > bad_bisector_ratio:
-        return "OUTDATED_LIDAR_COVERAGE"
+        return "OUTDATED_LIDAR_COVERAGE", None, None
+    elif total > 0:
+        return None, round(min_ground_height, 1), round(max_ground_height, 1)
     else:
-        return None
+        return None, None, None

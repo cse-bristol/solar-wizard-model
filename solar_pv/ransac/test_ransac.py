@@ -18,6 +18,7 @@ def _load_data(filename: str) -> List[dict]:
 
 
 def _ransac(filename: str, res: float):
+    # TODO change format of test data - need polygon, min_gh etc
     return len(_ransac_building(_load_data(join(_RANSAC_DATA, filename)), filename, res,
                                 debug=False))
 

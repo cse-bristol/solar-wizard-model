@@ -18,7 +18,11 @@ def _load_data(filename: str) -> dict:
 
 def _check(filename: str):
     building = _load_data(join(_PIXEL_DATA, filename))
-    return _check_building(building, resolution_metres=1.0)
+    return _check_building(building, resolution_metres=1.0)[0]
+
+def _check_gh(filename: str):
+    building = _load_data(join(_PIXEL_DATA, filename))
+    return _check_building(building, resolution_metres=1.0)[1:]
 
 
 def _height(filename: str):
@@ -72,3 +76,14 @@ class OutdatedLidarTestCase(ParameterisedTestCase):
             # that aren't inside another building, we can't know the height...
             ("no_without.json", None),
         ], _height)
+
+    def test_ground_height(self):
+        self.parameterised_test([
+            ('osgb5000005219846721.json', (None, None)),
+            ('osgb5000005134753276.json', (None, None)),
+            ('osgb1000019929148.json', (129.8, 131.2)),
+            ("osgb1000034157635.json", (135.0, 136.3)),
+            ("osgb1000034135706.json", (6.0, 8.3)),
+            # Has a pixel within, but none without:
+            ("no_without.json", (None, None)),
+        ], _check_gh)
