@@ -43,6 +43,7 @@ def check_lidar(pg_uri: str,
 
     pages = math.ceil(count(pg_uri, tables.schema(job_id), tables.BUILDINGS_TABLE) / page_size)
     logging.info(f"{pages} pages of size {page_size} buildings to check LiDAR coverage for")
+    workers = min(pages, workers)
     logging.info(f"Using {workers} processes for LiDAR coverage check")
 
     with mp.get_context("spawn").Pool(workers) as pool:

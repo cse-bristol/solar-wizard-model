@@ -202,9 +202,10 @@ def _do_ransac_building(toid: str,
                 d = ransac.estimator_.intercept_
 
                 # don't keep bad planes - their inliers become candidates for being
-                # merged into other planes (and the planes will have be added to skip_planes,
-                # so we don't retry them)
-                if ransac.plane_properties["score"] > 0.0:
+                # merged into other planes (and the planes will still have been added to
+                # skip_planes, so we don't retry them)
+                # TODO constant
+                if ransac.plane_properties["score"] < 1.0:
                     planes[plane_id] = {
                         "toid": toid,
                         "x_coef": a,
@@ -241,7 +242,6 @@ def _do_ransac_building(toid: str,
     outliers = np.count_nonzero(labels[mask == 1])
     labels[mask == 1] = range(plane_id + 1, outliers + plane_id + 1)
 
-    # merged_planes = planes.values()
     merged_planes = merge_adjacent(xy, z, labels, planes, resolution_metres, labels_nodata)
     return merged_planes
 

@@ -201,7 +201,7 @@ class PlaneDef:
 
 
 def create_planes_2(xyz: np.ndarray, aspect: np.ndarray, slope: np.ndarray, polygon: Polygon, res: float):
-    # TODO use min ground height here
+    # TODO try using min ground height here?
     planes = []
 
     xy = xyz[:, :2]
