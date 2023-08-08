@@ -145,11 +145,17 @@ def _write_geojson_fields(geojson: str, planes):
     layer.CreateField(ogr.FieldDefn("sd", ogr.OFTReal))
     layer.CreateField(ogr.FieldDefn("aspect_circ_mean", ogr.OFTReal))
     layer.CreateField(ogr.FieldDefn("aspect_circ_sd", ogr.OFTReal))
-    layer.CreateField(ogr.FieldDefn("score", ogr.OFTReal))
     layer.CreateField(ogr.FieldDefn("thinness_ratio", ogr.OFTReal))
     layer.CreateField(ogr.FieldDefn("cv_hull_ratio", ogr.OFTReal))
     layer.CreateField(ogr.FieldDefn("plane_type", ogr.OFTString))
     layer.CreateField(ogr.FieldDefn("inliers", ogr.OFTInteger))
+
+    layer.CreateField(ogr.FieldDefn("r2", ogr.OFTReal))
+    layer.CreateField(ogr.FieldDefn("mae", ogr.OFTReal))
+    layer.CreateField(ogr.FieldDefn("mse", ogr.OFTReal))
+    layer.CreateField(ogr.FieldDefn("rmse", ogr.OFTReal))
+    layer.CreateField(ogr.FieldDefn("msle", ogr.OFTReal))
+    layer.CreateField(ogr.FieldDefn("mape", ogr.OFTReal))
 
     for feature in layer:
         plane_id = feature.GetField("plane_id")
@@ -161,11 +167,17 @@ def _write_geojson_fields(geojson: str, planes):
             feature.SetField("sd", plane["sd"])
             feature.SetField("aspect_circ_mean", plane["aspect_circ_mean"])
             feature.SetField("aspect_circ_sd", plane["aspect_circ_sd"])
-            feature.SetField("score", plane["score"])
             feature.SetField("thinness_ratio", plane["thinness_ratio"])
             feature.SetField("cv_hull_ratio", plane["cv_hull_ratio"])
             feature.SetField("plane_type", plane["plane_type"])
             feature.SetField("inliers", len(plane["inliers_xy"]))
+
+            feature.SetField("r2", plane["r2"])
+            feature.SetField("mae", plane["mae"])
+            feature.SetField("mse", plane["mse"])
+            feature.SetField("rmse", plane["rmse"])
+            feature.SetField("msle", plane["msle"])
+            feature.SetField("mape", plane["mape"])
             layer.SetFeature(feature)
 
 
@@ -221,67 +233,73 @@ if __name__ == "__main__":
     ransac_toids(
         os.getenv("PGW_URI"),
         1659,
-        None,
-        # [
-        #     # "osgb1000014994638",
-        #     # "osgb1000014994637",
-        #     # "osgb1000014994948",
-        #     # "osgb1000014994624",
-        #     # "osgb1000014994950",
-        #     # "osgb1000014994951",
-        #
-        #     "osgb5000005116861453",
-        #     "osgb5000005116861461",
-        #     "osgb1000014994628",
-        #     "osgb1000014994636",
-        #     "osgb1000014994648",
-        #     "osgb1000014994630",
-        #     "osgb1000014994634",
-        #     "osgb1000014994631",
-        #     "osgb1000014994632",
-        #     "osgb1000014994629",
-        #     "osgb1000014994635",
-        #     "osgb1000014994633",
-        #     "osgb1000014994626",
-        #     "osgb1000014994627",
-        #     "osgb1000014994624",
-        #     "osgb1000014994625",
-        #     "osgb1000014994654",
-        #     "osgb1000014994658",
-        #     "osgb1000014994649",
-        #     "osgb1000014994652",
-        #     "osgb1000014994646",
-        #     "osgb1000014994653",
-        #     "osgb1000014994641",
-        #     "osgb1000014994651",
-        #     "osgb1000014994639",
-        #     "osgb1000014994644",
-        #     "osgb1000014994637",
-        #     "osgb1000014994650",
-        #     "osgb1000014994655",
-        #     "osgb1000014994657",
-        #     "osgb1000014994660",
-        #     "osgb1000014994656",
-        #     "osgb1000014994647",
-        #     "osgb1000014994643",
-        #     "osgb1000014994642",
-        #     "osgb1000014994645",
-        #     "osgb1000014994659",
-        #     "osgb1000014994638",
-        #     "osgb1000014994640",
-        #     "osgb1000014995257",
-        #     "osgb5000005116861456",
-        #     "osgb1000014995257",
-        #
-        #     "osgb1000014994950",
-        #     "osgb1000014994952",
-        #     "osgb1000014994947",
-        #     "osgb1000014994949",
-        #     "osgb1000014994951",
-        #     "osgb1000014994948",
-        #
-        #     "osgb1000014998052"
-        # ],
+        [
+            # "osgb1000014994638",
+            # "osgb1000014994637",
+            # "osgb1000014994948",
+            # "osgb1000014994624",
+            # "osgb1000014994950",
+            # "osgb1000014994951",
+
+            "osgb5000005116861453",
+            "osgb5000005116861461",
+            "osgb1000014994628",
+            "osgb1000014994636",
+            "osgb1000014994648",
+            "osgb1000014994630",
+            "osgb1000014994634",
+            "osgb1000014994631",
+            "osgb1000014994632",
+            "osgb1000014994629",
+            "osgb1000014994635",
+            "osgb1000014994633",
+            "osgb1000014994626",
+            "osgb1000014994627",
+            "osgb1000014994624",
+            "osgb1000014994625",
+            "osgb1000014994654",
+            "osgb1000014994658",
+            "osgb1000014994649",
+            "osgb1000014994652",
+            "osgb1000014994646",
+            "osgb1000014994653",
+            "osgb1000014994641",
+            "osgb1000014994651",
+            "osgb1000014994639",
+            "osgb1000014994644",
+            "osgb1000014994637",
+            "osgb1000014994650",
+            "osgb1000014994655",
+            "osgb1000014994657",
+            "osgb1000014994660",
+            "osgb1000014994656",
+            "osgb1000014994647",
+            "osgb1000014994643",
+            "osgb1000014994642",
+            "osgb1000014994645",
+            "osgb1000014994659",
+            "osgb1000014994638",
+            "osgb1000014994640",
+            "osgb1000014995257",
+            "osgb5000005116861456",
+            "osgb1000014995257",
+
+            "osgb1000014994950",
+            "osgb1000014994952",
+            "osgb1000014994947",
+            "osgb1000014994949",
+            "osgb1000014994951",
+            "osgb1000014994948",
+
+            "osgb1000014998052",
+
+            "osgb1000014994877",
+            "osgb1000014995098",
+            "osgb1000014994794",
+            "osgb1000014995098",
+            "osgb1000014998049",
+            "osgb1000014998048",
+        ],
         1.0,
         f"{os.getenv('DEV_DATA_DIR')}/ransac",
         write_test_data=False)

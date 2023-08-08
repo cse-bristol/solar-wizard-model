@@ -153,6 +153,7 @@ def _init_schema(pg_uri: str, job_id: int, job_bounds_27700: str):
             panel_polygons=Identifier(tables.schema(job_id), tables.PANEL_POLYGON_TABLE),
             elevation=Identifier(tables.schema(job_id), tables.ELEVATION),
             aspect=Identifier(tables.schema(job_id), tables.ASPECT),
+            slope=Identifier(tables.schema(job_id), tables.SLOPE),
             mask=Identifier(tables.schema(job_id), tables.MASK),
         )
 

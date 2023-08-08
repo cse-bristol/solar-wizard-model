@@ -29,6 +29,9 @@ ELEVATION = 'elevation'
 ASPECT = 'aspect'
 """Aspect raster for job"""
 
+SLOPE = 'slope'
+"""Slope raster for job"""
+
 MASK = 'mask'
 """Mask raster for job"""
 

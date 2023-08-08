@@ -17,6 +17,7 @@ from sklearn.linear_model import RANSACRegressor
 from skimage import measure, morphology, segmentation, color, graph
 from sklearn.base import clone
 from sklearn.linear_model import LinearRegression
+from sklearn import metrics
 from sklearn.utils import check_random_state, check_consistent_length
 from sklearn.utils.random import sample_without_replacement
 from sklearn.utils.validation import _check_sample_weight
@@ -24,6 +25,7 @@ from sklearn.utils.validation import has_fit_parameter
 from sklearn.exceptions import ConvergenceWarning
 from skimage.measure import perimeter_crofton
 
+from solar_pv.constants import ROOFDET_GOOD_SCORE
 from solar_pv.ransac.premade_planes import Plane, ArrayPlane
 from solar_pv.ransac.ransac import _slope, _aspect, _aspect_rad, _circular_mean, \
     _circular_sd, _circular_variance, _rad_diff, _to_positive_angle, _exclude_unconnected, \
@@ -232,7 +234,7 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
             bad_sample_reasons = defaultdict(int)
 
         n_inliers_best = 1
-        score_best = -np.inf
+        score_best = np.inf
         inlier_mask_best = None
         X_inlier_best = None
         y_inlier_best = None
@@ -321,25 +323,23 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
             inlier_idxs_subset = sample_idxs[inlier_mask_subset]
             X_inlier_subset = X[inlier_idxs_subset]
             y_inlier_subset = y[inlier_idxs_subset]
+            y_inlier_pred = y_pred[inlier_idxs_subset]
 
             # score of inlier data set
-            score_subset = base_estimator.score(X_inlier_subset,
-                                                y_inlier_subset)
+            score_subset = metrics.mean_absolute_error(y_inlier_subset, y_inlier_pred)
+            # score_subset = base_estimator.score(X_inlier_subset, y_inlier_subset)
 
-            # TODO constant
-            if score_subset > 0.925 and score_best > 0.925:
-                if n_inliers_subset <= n_inliers_best or (n_inliers_subset == n_inliers_best and score_subset < score_best):
+            sd = np.std(residuals_subset[inlier_mask_subset])
+
+            if score_subset < ROOFDET_GOOD_SCORE and score_best < ROOFDET_GOOD_SCORE:
+                if n_inliers_subset <= n_inliers_best or (n_inliers_subset == n_inliers_best and score_subset > score_best):
                     if debug:
                         bad_sample_reasons["LESS_INLIERS"] += 1
                     continue
-            elif score_subset < score_best or (score_subset == score_best and n_inliers_subset <= n_inliers_best):
-                    if debug:
-                        bad_sample_reasons["WORSE_SCORE"] += 1
-                    continue
-
-            # RANSAC for LIDAR addition: use stddev of inlier distance to plane
-            # for score
-            sd = np.std(residuals_subset[inlier_mask_subset])
+            elif score_subset > score_best or (score_subset == score_best and n_inliers_subset <= n_inliers_best):
+                if debug:
+                    bad_sample_reasons["WORSE_SCORE"] += 1
+                continue
 
             # same number of inliers but worse score -> skip current random
             # sample
@@ -385,13 +385,13 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
             # The `include_group_checks` flag allows disabling these 2 checks, as they
             # were causing issues for buildings with many unconnected roof sections
             # on the same plane:
-            if num_groups > 1 and include_group_checks:
-                # Allow a small amount of small outliers:
-                if len(group_areas) > self.max_num_groups:
-                    if debug:
-                        bad_sample_reasons["TOO_MANY_GROUPS"] += 1
-                    skip_planes.add(plane.plane_id)
-                    continue
+            # if num_groups > 1 and include_group_checks:
+            #     # Allow a small amount of small outliers:
+            #     if len(group_areas) > self.max_num_groups:
+            #         if debug:
+            #             bad_sample_reasons["TOO_MANY_GROUPS"] += 1
+            #         skip_planes.add(plane.plane_id)
+            #         continue
                 # for groupid, area in group_areas.items():
                 #     if groupid != largest and area / roof_plane_area > self.max_group_area_ratio_to_largest:
                 #         if debug:
@@ -424,7 +424,7 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
 
             if debug:
                 # print(f"new best SD plane found. SD {sd}. Old SD {sd_best}. Current trial: {self.n_trials_}")
-                print(f"new best score plane found. score {score_best} -> {score_subset} . inliers {n_inliers_best} -> {n_inliers_subset} .  Current trial: {self.n_trials_}")
+                print(f"new best score plane found. MAE {score_best} -> {score_subset} . inliers {n_inliers_best} -> {n_inliers_subset} .  Current trial: {self.n_trials_}")
 
             # save current random sample as best sample
             n_inliers_best = n_inliers_subset
@@ -533,6 +533,16 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
             self.inlier_mask_ = mask_without_excluded
             self.sd = sd_best
             self.plane_properties = plane_properties_best
+
+            inlier_idxs_subset = sample_idxs[mask_without_excluded]
+            y_true = y[inlier_idxs_subset]
+            y_pred = self.estimator_.predict(X[inlier_idxs_subset])
+            plane_properties_best["r2"] = metrics.r2_score(y_true, y_pred)
+            plane_properties_best["mae"] = metrics.mean_absolute_error(y_true, y_pred)
+            plane_properties_best["mse"] = metrics.mean_squared_error(y_true, y_pred)
+            plane_properties_best["rmse"] = metrics.mean_squared_error(y_true, y_pred, squared=False)
+            plane_properties_best["msle"] = metrics.mean_squared_log_error(y_true, y_pred)
+            plane_properties_best["mape"] = metrics.mean_absolute_percentage_error(y_true, y_pred)
 
         skip_planes.add(plane_properties_best["plane_id"])
 

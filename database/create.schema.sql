@@ -117,6 +117,17 @@ CREATE TABLE IF NOT EXISTS {aspect} (
 CREATE INDEX IF NOT EXISTS aspect_idx ON {aspect} USING gist (st_convexhull(rast));
 
 --
+-- slope raster
+--
+CREATE TABLE IF NOT EXISTS {slope} (
+    rid serial PRIMARY KEY,
+    rast raster NOT NULL,
+    filename text NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS slope_idx ON {slope} USING gist (st_convexhull(rast));
+
+--
 -- mask raster
 --
 CREATE TABLE IF NOT EXISTS {mask} (

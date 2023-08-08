@@ -2,8 +2,10 @@ from typing import Dict
 
 import numpy as np
 from skimage.future.graph import RAG, merge_hierarchical
+from sklearn import metrics
 from sklearn.linear_model import LinearRegression
 
+from solar_pv.constants import ROOFDET_GOOD_SCORE
 from solar_pv.ransac.premade_planes import _image
 from solar_pv.ransac.ransac import _slope, _aspect
 
@@ -32,10 +34,10 @@ def _edge_weight(graph, src: int, dst: int) -> float:
         z_subset = np.concatenate([dst_node['z_subset'], src_node['z_subset']])
         lr = LinearRegression()
         lr.fit(xy_subset, z_subset)
-        new_score = lr.score(xy_subset, z_subset)
-        # TODO constant
+        # new_score = lr.score(xy_subset, z_subset)
+        new_score = metrics.mean_absolute_error(z_subset, lr.predict(xy_subset))
         # If the new score is still good enough, don't require it to be better than before
-        weight = curr_score - new_score if new_score < 0.925 else -1
+        weight = new_score - curr_score if new_score > ROOFDET_GOOD_SCORE else -1
 
     # A plane and an outlier
     else:
@@ -44,8 +46,9 @@ def _edge_weight(graph, src: int, dst: int) -> float:
         z_subset = np.concatenate([dst_node['z_subset'], src_node['z_subset']])
         lr = LinearRegression()
         lr.fit(xy_subset, z_subset)
-        new_score = lr.score(xy_subset, z_subset)
-        weight = curr_score - new_score
+        # new_score = lr.score(xy_subset, z_subset)
+        new_score = metrics.mean_absolute_error(z_subset, lr.predict(xy_subset))
+        weight = new_score - curr_score
 
     return weight
 
@@ -86,7 +89,9 @@ def _update_node_data(graph, src: int, dst: int):
     z_subset = np.concatenate([dst_node['z_subset'], src_node['z_subset']])
     lr = LinearRegression()
     lr.fit(xy_subset, z_subset)
-    merged_score = lr.score(xy_subset, z_subset)
+    z_pred = lr.predict(xy_subset)
+    # merged_score = lr.score(xy_subset, z_subset)
+    merged_score = metrics.mean_absolute_error(z_subset, z_pred)
 
     dst_node['toid'] = dst_node.get('toid', src_node.get('toid'))
     dst_node['xy_subset'] = xy_subset
@@ -106,6 +111,13 @@ def _update_node_data(graph, src: int, dst: int):
         dst_node['plane_type'] = dst_node.get('plane_type', src_node.get('plane_type'))
 
     dst_node['outlier'] = False
+
+    dst_node["r2"] = metrics.r2_score(z_subset, z_pred)
+    dst_node["mae"] = merged_score
+    dst_node["mse"] = metrics.mean_squared_error(z_subset, z_pred)
+    dst_node["rmse"] = metrics.mean_squared_error(z_subset, z_pred, squared=False)
+    dst_node["msle"] = metrics.mean_squared_log_error(z_subset, z_pred)
+    dst_node["mape"] = metrics.mean_absolute_percentage_error(z_subset, z_pred)
 
     # TODO:
     dst_node["sd"] = 0

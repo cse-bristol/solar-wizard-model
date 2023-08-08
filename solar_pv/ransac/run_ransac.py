@@ -129,10 +129,9 @@ def _ransac_building(building: BuildingData,
 
     xyz = np.array([[pixel["x"], pixel["y"], pixel["elevation"]] for pixel in pixels_in_building])
     aspect = np.array([pixel["aspect"] for pixel in pixels_in_building])
+    slope = np.array([pixel["slope"] for pixel in pixels_in_building])
     z = xyz[:, 2]
     mask = z > max_ground_height if max_ground_height else np.ones(aspect.shape)
-    if np.count_nonzero(mask == 0) > 0:
-        print("found ground-level thing")
 
     if len(pixels_in_building) > RANSAC_LARGE_BUILDING / resolution_metres:
         max_trials = RANSAC_LARGE_MAX_TRIALS
@@ -149,7 +148,7 @@ def _ransac_building(building: BuildingData,
         max_trials = RANSAC_MEDIUM_MAX_TRIALS
         include_group_checks = True
 
-    planes = _do_ransac_building(toid, xyz, aspect, mask, polygon, resolution_metres,
+    planes = _do_ransac_building(toid, xyz, aspect, slope, mask, polygon, resolution_metres,
                                  max_trials, include_group_checks, debug=debug)
 
     return planes
@@ -158,6 +157,7 @@ def _ransac_building(building: BuildingData,
 def _do_ransac_building(toid: str,
                         xyz,
                         aspect,
+                        slope,
                         mask,
                         polygon: Polygon,
                         resolution_metres: float,
@@ -166,7 +166,7 @@ def _do_ransac_building(toid: str,
                         debug: bool):
     min_points_per_plane = min(8, int(8 / resolution_metres))  # 8 for 2m, 8 for 1m, 16 for 0.5m
     total_points_in_building = len(aspect)
-    premade_planes = create_planes_2(xyz, aspect, polygon, resolution_metres)
+    premade_planes = create_planes_2(xyz, aspect, slope, polygon, resolution_metres)
     # premade_planes.extend(create_planes(xyz, polygon))
     skip_planes = set()
     xy = xyz[:, :2]
@@ -220,6 +220,12 @@ def _do_ransac_building(toid: str,
                         "thinness_ratio": ransac.plane_properties["thinness_ratio"],
                         "cv_hull_ratio": ransac.plane_properties["cv_hull_ratio"],
                         "plane_type": ransac.plane_properties["plane_type"],
+                        "r2": ransac.plane_properties["r2"],
+                        "mae": ransac.plane_properties["mae"],
+                        "mse": ransac.plane_properties["mse"],
+                        "rmse": ransac.plane_properties["rmse"],
+                        "msle": ransac.plane_properties["msle"],
+                        "mape": ransac.plane_properties["mape"],
                     }
                     labels[inlier_mask] = plane_id
                     plane_id += 1
@@ -234,6 +240,8 @@ def _do_ransac_building(toid: str,
 
     outliers = np.count_nonzero(labels[mask == 1])
     labels[mask == 1] = range(plane_id + 1, outliers + plane_id + 1)
+
+    # merged_planes = planes.values()
     merged_planes = merge_adjacent(xy, z, labels, planes, resolution_metres, labels_nodata)
     return merged_planes
 
@@ -247,7 +255,8 @@ def _load(pg_uri: str, job_id: int, page: int, page_size: int, toids: List[str] 
     with connection(pg_uri, cursor_factory=DictCursor) as pg_conn:
         elevation_table = f"{tables.schema(job_id)}.{tables.ELEVATION}"
         aspect_table = f"{tables.schema(job_id)}.{tables.ASPECT}"
-        by_toid = pixels_for_buildings(pg_conn, job_id, page, page_size, [elevation_table, aspect_table], toids, force_load=force_load)
+        slope_table = f"{tables.schema(job_id)}.{tables.SLOPE}"
+        by_toid = pixels_for_buildings(pg_conn, job_id, page, page_size, [elevation_table, aspect_table, slope_table], toids, force_load=force_load)
         buildings = _load_building_polygons(pg_conn, job_id, list(by_toid.keys()))
         loaded = {}
         for building in buildings:

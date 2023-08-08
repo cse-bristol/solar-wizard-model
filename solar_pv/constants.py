@@ -34,6 +34,10 @@ RANSAC_LARGE_MAX_TRIALS = 2000
 RANSAC_MEDIUM_MAX_TRIALS = 2000
 RANSAC_SMALL_MAX_TRIALS = 3000
 
+# If a roof plane's score is lower than this, stop optimising for score
+# and start optimising for number of points on the plane:
+ROOFDET_GOOD_SCORE = 0.1
+
 # GDAL default tile geotiff tilesize:
 POSTGIS_TILESIZE = 256
 
