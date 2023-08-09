@@ -9,7 +9,8 @@ import numpy as np
 import warnings
 import math
 from scipy import ndimage
-from shapely.geometry import LineString
+from shapely.geometry import LineString, MultiPoint, Polygon
+from shapely.strtree import STRtree
 from skimage.morphology import local_minima
 from skimage.segmentation import watershed
 
@@ -25,11 +26,14 @@ from sklearn.utils.validation import has_fit_parameter
 from sklearn.exceptions import ConvergenceWarning
 from skimage.measure import perimeter_crofton
 
-from solar_pv.constants import ROOFDET_GOOD_SCORE
+from solar_pv.constants import ROOFDET_GOOD_SCORE, AZIMUTH_ALIGNMENT_THRESHOLD, \
+    FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD
+from solar_pv.geos import polygon_line_segments, simplify_by_angle, azimuth_deg, slope_deg, \
+    aspect_deg, aspect_rad, circular_mean_rad, circular_sd_rad, circular_variance_rad, rad_diff, \
+    deg_diff, to_positive_angle
 from solar_pv.ransac.premade_planes import Plane, ArrayPlane
-from solar_pv.ransac.ransac import _slope, _aspect, _aspect_rad, _circular_mean, \
-    _circular_sd, _circular_variance, _rad_diff, _to_positive_angle, _exclude_unconnected, \
-    _sample, _pixel_groups, _group_areas, _min_thinness_ratio, RANSACValueError
+from solar_pv.ransac.ransac import _exclude_unconnected, \
+    _sample, _pixel_groups, _group_areas, _min_thinness_ratio, _get_potential_aspects
 
 
 class DETSACRegressorForLIDAR(RANSACRegressor):
@@ -102,15 +106,19 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
         self.sd = None
         self.plane_properties = {}
         self.resolution_metres = resolution_metres
+        self.success = False
+        self.finished = False
 
     def fit(self, X, y,
             sample_weight=None,
+            # These are all optional parameters just so that the method matches
+            # the base class signature... They are actually required!
+            polygon: Polygon = None,
             premade_planes: List[ArrayPlane] = None,
             skip_planes: Set[str] = None,
-            aspect=None,
-            mask=None,
+            aspect: np.ndarray = None,
+            mask: np.ndarray = None,
             total_points_in_building: int = None,
-            include_group_checks: bool = True,
             debug: bool = False):
         """
         Extended implementation of RANSAC with additions for usage with LIDAR
@@ -167,15 +175,15 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
             min_samples = np.ceil(self.min_samples * X.shape[0])
         elif self.min_samples >= 1:
             if self.min_samples % 1 != 0:
-                raise RANSACValueError("Absolute number of samples must be an "
-                                       "integer value.")
+                raise ValueError("Absolute number of samples must be an "
+                                 "integer value.")
             min_samples = self.min_samples
         else:
-            raise RANSACValueError("Value for `min_samples` must be scalar and "
+            raise ValueError("Value for `min_samples` must be scalar and "
                              "positive.")
         if min_samples > X.shape[0]:
-            raise RANSACValueError("`min_samples` may not be larger than number "
-                                   "of samples: n_samples = %d." % (X.shape[0]))
+            raise ValueError("`min_samples` may not be larger than number "
+                             "of samples: n_samples = %d." % (X.shape[0]))
 
         if self.residual_threshold is None:
             # MAD (median absolute deviation)
@@ -201,7 +209,7 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
             loss_function = self.loss
 
         else:
-            raise RANSACValueError(
+            raise ValueError(
                 "loss should be 'absolute_loss', 'squared_loss' or a callable."
                 "Got %s. " % self.loss)
 
@@ -220,9 +228,9 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
         estimator_name = type(base_estimator).__name__
         if (sample_weight is not None and not
                 estimator_fit_has_sample_weight):
-            raise RANSACValueError("%s does not support sample_weight. Samples"
-                                   " weights are only used for the calibration"
-                                   " itself." % estimator_name)
+            raise ValueError("%s does not support sample_weight. Samples"
+                             " weights are only used for the calibration"
+                             " itself." % estimator_name)
         if sample_weight is not None:
             sample_weight = _check_sample_weight(sample_weight, X)
 
@@ -250,6 +258,10 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
         n_samples = X.shape[0]
         sample_idxs = np.arange(n_samples)
 
+        if len(premade_planes) == len(skip_planes):
+            self.finished = True
+            return self
+
         self.n_trials_ = 0
         for plane in premade_planes:
             self.n_trials_ += 1
@@ -268,17 +280,17 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
 
             # RANSAC for LiDAR addition: use a more restrictive threshold for flat
             # roofs, as they are more likely to be covered with obstacles, HVAC, pipes etc
-            slope = _slope(base_estimator.coef_[0], base_estimator.coef_[1])
+            slope = slope_deg(base_estimator.coef_[0], base_estimator.coef_[1])
             if slope <= self.flat_roof_threshold_degrees:
                 residual_threshold = self.flat_roof_residual_threshold
 
-            # DETSAC change: allow the initial sample points to be further from the plane,
-            # and never allow plane to be fit to points already on a different plane:
+            # DETSAC change: allow the initial sample points to be further from the plane
             m1 = residuals_subset < plane.sample_residual_threshold
             m2 = np.zeros(residuals_subset.shape, dtype=int)
             m2[plane.idxs] = 1
             residuals_subset_copy = residuals_subset.copy()
             residuals_subset_copy[(m1 & m2) == 1] = 0
+            # never allow plane to be fit to points already on a different plane:
             residuals_subset_copy[mask == 0] = 9999  # TODO constant
 
             # classify data into inliers and outliers
@@ -360,16 +372,16 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
             # if circular deviation of pixel aspects too high:
             if slope > self.flat_roof_threshold_degrees:
                 aspect_inliers = np.radians(aspect[inlier_mask_subset])
-                plane_aspect = _aspect_rad(base_estimator.coef_[0], base_estimator.coef_[1])
-                aspect_circ_mean = _circular_mean(aspect_inliers)
-                aspect_diff = _rad_diff(plane_aspect, aspect_circ_mean)
+                plane_aspect = aspect_rad(base_estimator.coef_[0], base_estimator.coef_[1])
+                aspect_circ_mean = circular_mean_rad(aspect_inliers)
+                aspect_diff = rad_diff(plane_aspect, aspect_circ_mean)
                 if aspect_diff > math.radians(self.max_aspect_circular_mean_degrees):
                     if debug:
                         bad_sample_reasons["CIRCULAR_MEAN"] += 1
                     skip_planes.add(plane.plane_id)
                     continue
 
-                aspect_circ_sd = _circular_sd(aspect_inliers)
+                aspect_circ_sd = circular_sd_rad(aspect_inliers)
                 if aspect_circ_sd > self.max_aspect_circular_sd:
                     if debug:
                         bad_sample_reasons["CIRCULAR_SD"] += 1
@@ -378,26 +390,6 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
             else:
                 aspect_circ_sd = None
                 aspect_circ_mean = None
-
-            # RANSAC for LIDAR addition: if inliers form multiple groups, reject
-            # See Tarsha-Kurdi, 2007
-            # Adapted from Tarsha-Kurdi to allow a few discontinuous pixels as long as
-            # The `include_group_checks` flag allows disabling these 2 checks, as they
-            # were causing issues for buildings with many unconnected roof sections
-            # on the same plane:
-            # if num_groups > 1 and include_group_checks:
-            #     # Allow a small amount of small outliers:
-            #     if len(group_areas) > self.max_num_groups:
-            #         if debug:
-            #             bad_sample_reasons["TOO_MANY_GROUPS"] += 1
-            #         skip_planes.add(plane.plane_id)
-            #         continue
-                # for groupid, area in group_areas.items():
-                #     if groupid != largest and area / roof_plane_area > self.max_group_area_ratio_to_largest:
-                #         if debug:
-                #             bad_sample_reasons["LARGEST_GROUP_TOO_SMALL"] += 1
-                #         skip_planes.add(plane.plane_id)
-                #         continue
 
             # RANSAC for LiDAR addition: check ratio of points area to ratio of convex
             # hull of points area.
@@ -422,6 +414,29 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
                 skip_planes.add(plane.plane_id)
                 continue
 
+            azimuths = _get_potential_aspects(X_inlier_subset, polygon)
+            if len(azimuths) == 0:
+                if debug:
+                    bad_sample_reasons["NO_NEARBY_FACE"] += 1
+                skip_planes.add(plane.plane_id)
+                continue
+
+            if slope > self.flat_roof_threshold_degrees:
+                target_az = aspect_deg(base_estimator.coef_[0], base_estimator.coef_[1])
+                az_diff_thresh = AZIMUTH_ALIGNMENT_THRESHOLD
+            else:
+                target_az = 180
+                az_diff_thresh = FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD
+
+            az = min(azimuths, key=lambda az_: deg_diff(az_, target_az))
+            if deg_diff(az, target_az) < az_diff_thresh:
+                aspect_deg_ = az
+            else:
+                if debug:
+                    bad_sample_reasons["NO_CLOSE_ASPECT"] += 1
+                skip_planes.add(plane.plane_id)
+                continue
+
             if debug:
                 # print(f"new best SD plane found. SD {sd}. Old SD {sd_best}. Current trial: {self.n_trials_}")
                 print(f"new best score plane found. MAE {score_best} -> {score_subset} . inliers {n_inliers_best} -> {n_inliers_subset} .  Current trial: {self.n_trials_}")
@@ -433,13 +448,15 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
             sd_best = sd
 
             plane_properties_best = {
+                "sd": sd_best,
+                "score": score_best,
                 "aspect_circ_mean": math.degrees(aspect_circ_mean) if aspect_circ_mean else None,
                 "aspect_circ_sd": aspect_circ_sd,
-                "score": score_best,
                 "thinness_ratio": thinness_ratio,
                 "cv_hull_ratio": cv_hull_ratio,
                 "plane_type": plane.plane_type,
                 "plane_id": plane.plane_id,
+                "aspect_adjusted": aspect_deg_,
             }
             inlier_mask_best = inlier_mask_subset
             X_inlier_best = X_inlier_subset
@@ -463,7 +480,7 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
                 break
 
         if debug:
-            print("RANSAC finished.")
+            print("DETSAC finished.")
 
             print("Planes were rejected for the following reasons:")
             total = 0
@@ -474,28 +491,9 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
 
         # if none of the iterations met the required criteria
         if inlier_mask_best is None:
-            if ((self.n_skips_no_inliers_ + self.n_skips_invalid_data_ +
-                    self.n_skips_invalid_model_) > self.max_skips):
-                raise RANSACValueError(
-                    "RANSAC skipped more iterations than `max_skips` without"
-                    " finding a valid consensus set. Iterations were skipped"
-                    " because each randomly chosen sub-sample failed the"
-                    " passing criteria. See estimator attributes for"
-                    " diagnostics (n_skips*).")
-            else:
-                raise RANSACValueError(
-                    "RANSAC could not find a valid consensus set. All"
-                    " `max_trials` iterations were skipped because each"
-                    " randomly chosen sub-sample failed the passing criteria."
-                    " See estimator attributes for diagnostics (n_skips*).")
-        else:
-            if (self.n_skips_no_inliers_ + self.n_skips_invalid_data_ +
-                    self.n_skips_invalid_model_) > self.max_skips:
-                warnings.warn("RANSAC found a valid consensus set but exited"
-                              " early due to skipping more iterations than"
-                              " `max_skips`. See estimator attributes for"
-                              " diagnostics (n_skips*).",
-                              ConvergenceWarning)
+            self.success = False
+            self.finished = True
+            return self
 
         # estimate final model using all inliers
         if sample_weight is None:
@@ -524,8 +522,6 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
 
         if np.sum(mask_without_excluded) < self.min_points_per_plane:
             self.success = False
-            # raise RANSACValueError(f"Less than {self.min_points_per_plane} points within "
-            #                        f"{residual_threshold} of plane after final fit")
         else:
             self.success = True
 
@@ -537,19 +533,30 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
             inlier_idxs_subset = sample_idxs[mask_without_excluded]
             y_true = y[inlier_idxs_subset]
             y_pred = self.estimator_.predict(X[inlier_idxs_subset])
-            plane_properties_best["r2"] = metrics.r2_score(y_true, y_pred)
-            plane_properties_best["mae"] = metrics.mean_absolute_error(y_true, y_pred)
-            plane_properties_best["mse"] = metrics.mean_squared_error(y_true, y_pred)
-            plane_properties_best["rmse"] = metrics.mean_squared_error(y_true, y_pred, squared=False)
-            plane_properties_best["msle"] = metrics.mean_squared_log_error(y_true, y_pred)
-            plane_properties_best["mape"] = metrics.mean_absolute_percentage_error(y_true, y_pred)
+
+            a, b = base_estimator.coef_
+            d = base_estimator.intercept_
+            self.plane_properties.update({
+                "x_coef": a,
+                "y_coef": b,
+                "intercept": d,
+                "slope": slope_deg(a, b),
+                "aspect": aspect_deg(a, b),
+                "inliers_xy": X[mask_without_excluded],
+                "r2": metrics.r2_score(y_true, y_pred),
+                "mae": metrics.mean_absolute_error(y_true, y_pred),
+                "mse": metrics.mean_squared_error(y_true, y_pred),
+                "rmse": metrics.mean_squared_error(y_true, y_pred, squared=False),
+                "msle": metrics.mean_squared_log_error(y_true, y_pred),
+                "mape": metrics.mean_absolute_percentage_error(y_true, y_pred),
+            })
 
         skip_planes.add(plane_properties_best["plane_id"])
 
         if debug:
             if self.success:
                 a, b = self.estimator_.coef_
-                print(f"plane found: slope {_slope(a, b)} aspect {_aspect(a, b)} sd {self.sd} inliers {np.sum(mask_without_excluded)}")
+                print(f"plane found: slope {slope_deg(a, b)} aspect {aspect_deg(a, b)} sd {self.sd} inliers {np.sum(mask_without_excluded)}")
             else:
                 print(f"plane found, but rejected")
             print("")

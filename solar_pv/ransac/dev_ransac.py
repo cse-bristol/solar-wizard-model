@@ -29,9 +29,9 @@ def ransac_toids(pg_uri: str, job_id: int, toids: Optional[List[str]], resolutio
         all_pixels.extend(building['pixels'])
 
         if len(planes) > 0:
-            print("RANSAC: all planes:")
+            print("\nROOFDET: all planes:")
             for plane in planes:
-                print(f'toid {plane["toid"]} slope {plane["slope"]} aspect {plane["aspect"]} sd {plane["sd"]} inliers {len(plane["inliers_xy"])}')
+                print(f'type {plane["plane_type"]} toid {plane["toid"]} slope {plane["slope"]} aspect {plane["aspect"]} sd {plane["sd"]} inliers {len(plane["inliers_xy"])}')
         else:
             print("No planes to write, not creating geoJSON")
         if write_test_data:
@@ -313,23 +313,23 @@ if __name__ == "__main__":
     #     f"{os.getenv('DEV_DATA_DIR')}/ransac",
     #     write_test_data=False)
 
-    ransac_toids(
-        os.getenv("PGW_URI"),
-        1661,
-        # ["osgb1000021672464"],
-        None,
-        1.0,
-        f"{os.getenv('DEV_DATA_DIR')}/ransac",
-        write_test_data=False)
-
     # ransac_toids(
     #     os.getenv("PGW_URI"),
-    #     1660,
-    #     [
-    #         "osgb5000005110302956",
-    #         "osgb1000014963168"
-    #     ],
-    #     # None,
+    #     1661,
+    #     # ["osgb1000021672464"],
+    #     None,
     #     1.0,
     #     f"{os.getenv('DEV_DATA_DIR')}/ransac",
     #     write_test_data=False)
+
+    ransac_toids(
+        os.getenv("PGW_URI"),
+        1660,
+        [
+            "osgb5000005110302956",
+            "osgb1000014963168"
+        ],
+        # None,
+        1.0,
+        f"{os.getenv('DEV_DATA_DIR')}/ransac",
+        write_test_data=False)

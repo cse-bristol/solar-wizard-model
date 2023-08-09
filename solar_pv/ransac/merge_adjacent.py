@@ -7,8 +7,7 @@ from sklearn.linear_model import LinearRegression
 
 from solar_pv.constants import ROOFDET_GOOD_SCORE
 from solar_pv.ransac.premade_planes import _image
-from solar_pv.ransac.ransac import _slope, _aspect
-
+from solar_pv.geos import slope_deg, aspect_deg
 
 DO_NOT_MERGE = 9999
 
@@ -101,8 +100,8 @@ def _update_node_data(graph, src: int, dst: int):
     dst_node['x_coef'] = lr.coef_[0]
     dst_node['y_coef'] = lr.coef_[1]
     dst_node['intercept'] = lr.intercept_
-    dst_node['slope'] = _slope(lr.coef_[0], lr.coef_[1])
-    dst_node['aspect'] = _aspect(lr.coef_[0], lr.coef_[1])
+    dst_node['slope'] = slope_deg(lr.coef_[0], lr.coef_[1])
+    dst_node['aspect'] = aspect_deg(lr.coef_[0], lr.coef_[1])
     dst_node['inliers_xy'] = xy_subset
 
     if dst_node['outlier'] is src_node['outlier'] is False:

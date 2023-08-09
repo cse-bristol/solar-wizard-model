@@ -1,10 +1,14 @@
 # This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 from collections import defaultdict
+from typing import Set, Tuple
 
 import numpy as np
 import warnings
 import math
+from shapely.geometry import Polygon, MultiPoint
+from shapely.strtree import STRtree
+from sklearn import metrics
 
 from sklearn.linear_model import RANSACRegressor
 from skimage import measure, morphology
@@ -17,15 +21,10 @@ from sklearn.utils.validation import has_fit_parameter
 from sklearn.exceptions import ConvergenceWarning
 from skimage.measure import perimeter_crofton
 
-
-class RANSACValueError(ValueError):
-    """
-    So we can treat when the RANSAC regressor has failed intentionally differently
-    from unintentionally thrown ValueErrors due to bugs.
-
-    Not sure I like this use of exceptions but it's inherited from sklearn.
-    """
-    pass
+from solar_pv.constants import AZIMUTH_ALIGNMENT_THRESHOLD, \
+    FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD, ROOFDET_GOOD_SCORE
+from solar_pv.geos import simplify_by_angle, polygon_line_segments, azimuth_deg, slope_deg, \
+    aspect_deg, aspect_rad, circular_mean_rad, circular_sd_rad, rad_diff, deg_diff
 
 
 class RANSACRegressorForLIDAR(RANSACRegressor):
@@ -93,13 +92,18 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
         self.sd = None
         self.plane_properties = {}
         self.resolution_metres = resolution_metres
+        self.success = False
+        self.finished = False
 
-    # TODO take a mask like DETSAC does now
     def fit(self, X, y,
             sample_weight=None,
-            aspect=None,
+            # These are all optional parameters just so that the method matches
+            # the base class signature... They are actually required!
+            polygon: Polygon = None,
+            skip_planes: Set[Tuple[int]] = None,
+            aspect: np.ndarray = None,
+            mask: np.ndarray = None,
             total_points_in_building: int = None,
-            include_group_checks: bool = True,
             debug: bool = False):
         """
         Extended implementation of RANSAC with additions for usage with LIDAR
@@ -125,10 +129,6 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
         a paper) - since we don't care about walls and the LIDAR is cropped to the
         building bounds the steep ones are likely to be false positives. I don't
         currently use the 'no shallow slopes' rule as it doesn't seem necessary.
-
-        * Constrain the selection of the initial sample of 3 points to points whose
-        detected aspect is close (not sourced from a paper) aspect can be detected
-        using a tool like SAGA or GDAL.
 
         * Reject planes where the area of the polygon formed by the inliers in the xy
         plane is significantly less than the area of the convex hull of that polygon.
@@ -164,18 +164,18 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
             min_samples = np.ceil(self.min_samples * X.shape[0])
         elif self.min_samples >= 1:
             if self.min_samples % 1 != 0:
-                raise RANSACValueError("Absolute number of samples must be an "
-                                       "integer value.")
+                raise ValueError("Absolute number of samples must be an "
+                                 "integer value.")
             min_samples = self.min_samples
         else:
-            raise RANSACValueError("Value for `min_samples` must be scalar and "
+            raise ValueError("Value for `min_samples` must be scalar and "
                              "positive.")
         if min_samples > X.shape[0]:
-            raise RANSACValueError("`min_samples` may not be larger than number "
-                                   "of samples: n_samples = %d." % (X.shape[0]))
+            raise ValueError("`min_samples` may not be larger than number "
+                             "of samples: n_samples = %d." % (X.shape[0]))
 
         if self.stop_probability < 0 or self.stop_probability > 1:
-            raise RANSACValueError("`stop_probability` must be in range [0, 1].")
+            raise ValueError("`stop_probability` must be in range [0, 1].")
 
         if self.residual_threshold is None:
             # MAD (median absolute deviation)
@@ -201,14 +201,11 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
             loss_function = self.loss
 
         else:
-            raise RANSACValueError(
+            raise ValueError(
                 "loss should be 'absolute_loss', 'squared_loss' or a callable."
                 "Got %s. " % self.loss)
 
         random_state = check_random_state(self.random_state)
-        # commented out, seed is enormous:
-        # if debug:
-        #     print(f"random state: {random_state.get_state()}")
 
         try:  # Not all estimator accept a random_state
             base_estimator.set_params(random_state=random_state)
@@ -220,25 +217,27 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
         estimator_name = type(base_estimator).__name__
         if (sample_weight is not None and not
                 estimator_fit_has_sample_weight):
-            raise RANSACValueError("%s does not support sample_weight. Samples"
-                                   " weights are only used for the calibration"
-                                   " itself." % estimator_name)
+            raise ValueError("%s does not support sample_weight. Samples"
+                             " weights are only used for the calibration"
+                             " itself." % estimator_name)
         if sample_weight is not None:
             sample_weight = _check_sample_weight(sample_weight, X)
 
         # RANSAC for LIDAR additions:
         min_X = [np.amin(X[:, 0]), np.amin(X[:, 1])]
+
         sd_best = np.inf
         bad_samples = set()
         if debug:
             bad_sample_reasons = defaultdict(int)
 
         n_inliers_best = 1
-        score_best = -np.inf
+        score_best = np.inf
         inlier_mask_best = None
         X_inlier_best = None
         y_inlier_best = None
         inlier_best_idxs_subset = None
+        best_sample_idxs = None
         self.n_skips_no_inliers_ = 0
         self.n_skips_invalid_data_ = 0
         self.n_skips_invalid_model_ = 0
@@ -257,10 +256,14 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
                 break
 
             # choose random sample set
-            subset_idxs = _sample(n_samples, min_samples, random_state=random_state, aspect=aspect)
+            subset_idxs = _sample(n_samples, min_samples, random_state=random_state, mask=mask)
+            if subset_idxs is None:
+                self.success = False
+                self.finished = True
+                return self
 
             # RANSAC for LIDAR addition:
-            if tuple(subset_idxs) in bad_samples:
+            if tuple(subset_idxs) in bad_samples or tuple(subset_idxs) in skip_planes:
                 if debug:
                     bad_sample_reasons["ALREADY_SAMPLED"] += 1
                 continue
@@ -268,31 +271,19 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
             X_subset = X[subset_idxs]
             y_subset = y[subset_idxs]
 
-            # check if random sample set is valid
-            if (self.is_data_valid is not None
-                    and not self.is_data_valid(X_subset, y_subset)):
-                self.n_skips_invalid_data_ += 1
-                if debug:
-                    bad_sample_reasons["INVALID"] += 1
-                continue
-
             # fit model for current random sample set
-            if sample_weight is None:
-                base_estimator.fit(X_subset, y_subset)
-            else:
-                base_estimator.fit(X_subset, y_subset,
-                                   sample_weight=sample_weight[subset_idxs])
+            base_estimator.fit(X_subset, y_subset)
 
             # RANSAC for LIDAR addition: if slope of fit plane is too steep ...
-            slope = _slope(base_estimator.coef_[0], base_estimator.coef_[1])
+            slope = slope_deg(base_estimator.coef_[0], base_estimator.coef_[1])
             if self.max_slope and slope > self.max_slope:
-                bad_samples.add(tuple(subset_idxs))
+                skip_planes.add(tuple(subset_idxs))
                 if debug:
                     bad_sample_reasons["MAX_SLOPE"] += 1
                 continue
             # RANSAC for LIDAR addition: if slope too shallow ...
             if self.min_slope and slope < self.min_slope:
-                bad_samples.add(tuple(subset_idxs))
+                skip_planes.add(tuple(subset_idxs))
                 if debug:
                     bad_sample_reasons["MIN_SLOPE"] += 1
                 continue
@@ -302,20 +293,14 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
             if slope <= self.flat_roof_threshold_degrees:
                 residual_threshold = self.flat_roof_residual_threshold
 
-            # check if estimated model is valid
-            if (self.is_model_valid is not None and not
-                    self.is_model_valid(base_estimator, X_subset, y_subset)):
-                self.n_skips_invalid_model_ += 1
-                if debug:
-                    bad_sample_reasons["MODEL_INVALID"] += 1
-                continue
-
             # residuals of all data for current random sample model
             y_pred = base_estimator.predict(X)
             residuals_subset = loss_function(y, y_pred)
+            # don't allow plane to be fit to points already on a different plane:
+            residuals_subset[mask == 0] = 9999  # TODO constant
 
             # classify data into inliers and outliers
-            inlier_mask_subset: np.ndarray = residuals_subset < residual_threshold
+            inlier_mask_subset = residuals_subset < residual_threshold
             n_inliers_subset = np.sum(inlier_mask_subset)
 
             # less inliers -> skip current random sample
@@ -326,7 +311,7 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
             # fit to plane.
             # See Tarsha-Kurdi, 2007
             if n_inliers_subset < self.min_points_per_plane:
-                bad_samples.add(tuple(subset_idxs))
+                skip_planes.add(tuple(subset_idxs))
                 self.n_skips_no_inliers_ += 1
                 if debug:
                     bad_sample_reasons["MIN_POINTS_PER_PLANE"] += 1
@@ -336,45 +321,61 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
             inlier_idxs_subset = sample_idxs[inlier_mask_subset]
             X_inlier_subset = X[inlier_idxs_subset]
             y_inlier_subset = y[inlier_idxs_subset]
+            y_inlier_pred = y_pred[inlier_idxs_subset]
 
             # score of inlier data set
-            # score_subset = base_estimator.score(X_inlier_subset,
-            #                                     y_inlier_subset)
-            # RANSAC for LIDAR addition: use stddev of inlier distance to plane
-            # for score
+            score_subset = metrics.mean_absolute_error(y_inlier_subset, y_inlier_pred)
+            # score_subset = base_estimator.score(X_inlier_subset, y_inlier_subset)
+
             sd = np.std(residuals_subset[inlier_mask_subset])
 
-            # same number of inliers but worse score -> skip current random
-            # sample
-            # if (n_inliers_subset == n_inliers_best
-            #         and score_subset < score_best):
-            #     continue
+            if score_subset < ROOFDET_GOOD_SCORE and score_best < ROOFDET_GOOD_SCORE:
+                if n_inliers_subset <= n_inliers_best or (n_inliers_subset == n_inliers_best and score_subset > score_best):
+                    # We don't add the sample to `skip_planes` here as it might still be
+                    # the best sample in a subsequent run of RANSAC, but we still want to
+                    # skip them within this run...
+                    bad_samples.add(tuple(subset_idxs))
+                    if debug:
+                        bad_sample_reasons["LESS_INLIERS"] += 1
+                    continue
+            elif score_subset > score_best or (score_subset == score_best and n_inliers_subset <= n_inliers_best):
+                # We don't add the sample to `skip_planes` here as it might still be
+                # the best sample in a subsequent run of RANSAC, but we still want to
+                # skip them within this run...
+                bad_samples.add(tuple(subset_idxs))
+                if debug:
+                    bad_sample_reasons["WORSE_SCORE"] += 1
+                continue
+
             # RANSAC for LIDAR addition: use stddev of inlier distance to plane
             # as score instead
             # See Tarsha-Kurdi, 2007
-            if sd > sd_best or (sd == sd_best and n_inliers_subset <= n_inliers_best):
-                bad_samples.add(tuple(subset_idxs))
-                if debug:
-                    bad_sample_reasons["WORSE_SD"] += 1
-                continue
+            # if sd > sd_best or (sd == sd_best and n_inliers_subset <= n_inliers_best):
+            #     # We don't add the sample to `skip_planes` here as it might still be
+            #     # the best sample in a subsequent run of RANSAC, but we still want to
+            #     # skip them within this run...
+            #     bad_samples.add(tuple(subset_idxs))
+            #     if debug:
+            #         bad_sample_reasons["WORSE_SD"] += 1
+            #     continue
 
             # RANSAC for LIDAR addition:
             # if difference between circular mean of pixel aspects and slope aspect is too high:
             # if circular deviation of pixel aspects too high:
             if slope > self.flat_roof_threshold_degrees:
                 aspect_inliers = np.radians(aspect[inlier_mask_subset])
-                plane_aspect = _aspect_rad(base_estimator.coef_[0], base_estimator.coef_[1])
-                aspect_circ_mean = _circular_mean(aspect_inliers)
-                aspect_diff = _rad_diff(plane_aspect, aspect_circ_mean)
+                plane_aspect = aspect_rad(base_estimator.coef_[0], base_estimator.coef_[1])
+                aspect_circ_mean = circular_mean_rad(aspect_inliers)
+                aspect_diff = rad_diff(plane_aspect, aspect_circ_mean)
                 if aspect_diff > math.radians(self.max_aspect_circular_mean_degrees):
-                    bad_samples.add(tuple(subset_idxs))
+                    skip_planes.add(tuple(subset_idxs))
                     if debug:
                         bad_sample_reasons["CIRCULAR_MEAN"] += 1
                     continue
 
-                aspect_circ_sd = _circular_sd(aspect_inliers)
+                aspect_circ_sd = circular_sd_rad(aspect_inliers)
                 if aspect_circ_sd > self.max_aspect_circular_sd:
-                    bad_samples.add(tuple(subset_idxs))
+                    skip_planes.add(tuple(subset_idxs))
                     if debug:
                         bad_sample_reasons["CIRCULAR_SD"] += 1
                     continue
@@ -395,31 +396,14 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
             roof_plane_area = group_areas[largest]
             if roof_plane_area < self.min_points_per_plane or roof_plane_area < (
                     total_points_in_building * self.min_points_per_plane_perc):
-                bad_samples.add(tuple(subset_idxs))
                 if debug:
                     bad_sample_reasons["MIN_POINTS_PER_LARGEST_GROUP"] += 1
+                skip_planes.add(tuple(subset_idxs))
                 continue
 
-            # RANSAC for LIDAR addition: if inliers form multiple groups, reject
-            # See Tarsha-Kurdi, 2007
-            # Adapted from Tarsha-Kurdi to allow a few discontinuous pixels as long as
-            # The `include_group_checks` flag allows disabling these 2 checks, as they
-            # were causing issues for buildings with many unconnected roof sections
-            # on the same plane:
-            if num_groups > 1 and include_group_checks:
-                # Allow a small amount of small outliers:
-                if len(group_areas) > self.max_num_groups:
-                    bad_samples.add(tuple(subset_idxs))
-                    if debug:
-                        bad_sample_reasons["TOO_MANY_GROUPS"] += 1
-                    continue
-                # TODO maybe remove this like in DETSAC? I don't see the point of it.
-                for groupid, area in group_areas.items():
-                    if groupid != largest and area / roof_plane_area > self.max_group_area_ratio_to_largest:
-                        bad_samples.add(tuple(subset_idxs))
-                        if debug:
-                            bad_sample_reasons["LARGEST_GROUP_TOO_SMALL"] += 1
-                        continue
+            # re-extract (connected) inlier data set
+            inlier_mask_subset = _exclude_unconnected(X, min_X, inlier_mask_subset, res=self.resolution_metres)
+            inlier_idxs_subset = sample_idxs[inlier_mask_subset]
 
             # RANSAC for LiDAR addition: check ratio of points area to ratio of convex
             # hull of points area.
@@ -430,7 +414,7 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
             convex_hull_area = np.count_nonzero(convex_hull)
             cv_hull_ratio = roof_plane_area / convex_hull_area
             if cv_hull_ratio < self.min_convex_hull_ratio:
-                bad_samples.add(tuple(subset_idxs))
+                skip_planes.add(tuple(subset_idxs))
                 if debug:
                     bad_sample_reasons["CONVEX_HULL_RATIO"] += 1
                 continue
@@ -439,26 +423,59 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
             perimeter = perimeter_crofton(only_largest, directions=4)
             thinness_ratio = (4 * np.pi * roof_plane_area) / (perimeter * perimeter)
             if thinness_ratio < _min_thinness_ratio(roof_plane_area):
-                bad_samples.add(tuple(subset_idxs))
+                skip_planes.add(tuple(subset_idxs))
                 if debug:
                     bad_sample_reasons["THINNESS_RATIO"] += 1
                 continue
 
+            azimuths = _get_potential_aspects(X_inlier_subset, polygon)
+            if len(azimuths) == 0:
+                if debug:
+                    bad_sample_reasons["NO_NEARBY_FACE"] += 1
+                skip_planes.add(tuple(subset_idxs))
+                continue
+
+            if slope > self.flat_roof_threshold_degrees:
+                target_az = aspect_deg(base_estimator.coef_[0], base_estimator.coef_[1])
+                az_diff_thresh = AZIMUTH_ALIGNMENT_THRESHOLD
+            else:
+                target_az = 180
+                az_diff_thresh = FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD
+
+            az = min(azimuths, key=lambda az_: deg_diff(az_, target_az))
+            if deg_diff(az, target_az) < az_diff_thresh:
+                aspect_deg_ = az
+            else:
+                if debug:
+                    bad_sample_reasons["NO_CLOSE_ASPECT"] += 1
+                skip_planes.add(tuple(subset_idxs))
+                continue
+
             if debug:
-                print(f"new best SD plane found. SD {sd}. Old SD {sd_best}. Current trial: {self.n_trials_}")
+                print(f"new best score plane found. MAE {score_best} -> {score_subset} . inliers {n_inliers_best} -> {n_inliers_subset} .  Current trial: {self.n_trials_}")
 
             # save current random sample as best sample
             n_inliers_best = n_inliers_subset
             sd_best = sd
-            # TODO add more things to this like in DETSAC
+            score_best = score_subset
+
             plane_properties_best = {
+                "sd": sd_best,
+                "score": score_best,
                 "aspect_circ_mean": math.degrees(aspect_circ_mean) if aspect_circ_mean else None,
                 "aspect_circ_sd": aspect_circ_sd,
+                "thinness_ratio": thinness_ratio,
+                "cv_hull_ratio": cv_hull_ratio,
+                "plane_type": "RANSAC",
+                "plane_id": f"RANSAC_{tuple(sample_idxs)}",
+                "aspect_adjusted": aspect_deg_,
             }
+
             inlier_mask_best = inlier_mask_subset
             X_inlier_best = X_inlier_subset
             y_inlier_best = y_inlier_subset
             inlier_best_idxs_subset = inlier_idxs_subset
+            best_sample_idxs = sample_idxs
 
             # RANSAC for LiDAR addition:
             # I've disabled the dynamic max_trials thing as it's based on proportion of
@@ -487,51 +504,25 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
 
         # if none of the iterations met the required criteria
         if inlier_mask_best is None:
-            if ((self.n_skips_no_inliers_ + self.n_skips_invalid_data_ +
-                    self.n_skips_invalid_model_) > self.max_skips):
-                raise RANSACValueError(
-                    "RANSAC skipped more iterations than `max_skips` without"
-                    " finding a valid consensus set. Iterations were skipped"
-                    " because each randomly chosen sub-sample failed the"
-                    " passing criteria. See estimator attributes for"
-                    " diagnostics (n_skips*).")
-            else:
-                raise RANSACValueError(
-                    "RANSAC could not find a valid consensus set. All"
-                    " `max_trials` iterations were skipped because each"
-                    " randomly chosen sub-sample failed the passing criteria."
-                    " See estimator attributes for diagnostics (n_skips*).")
-        else:
-            if (self.n_skips_no_inliers_ + self.n_skips_invalid_data_ +
-                    self.n_skips_invalid_model_) > self.max_skips:
-                warnings.warn("RANSAC found a valid consensus set but exited"
-                              " early due to skipping more iterations than"
-                              " `max_skips`. See estimator attributes for"
-                              " diagnostics (n_skips*).",
-                              ConvergenceWarning)
+            self.success = False
+            self.finished = True
+            return self
 
         # estimate final model using all inliers
-        if sample_weight is None:
-            base_estimator.fit(X_inlier_best, y_inlier_best)
-        else:
-            base_estimator.fit(
-                X_inlier_best,
-                y_inlier_best,
-                sample_weight=sample_weight[inlier_best_idxs_subset])
+        base_estimator.fit(X_inlier_best, y_inlier_best)
 
         # RANSAC for LIDAR change:
         # Re-fit data to final model:
         y_pred = base_estimator.predict(X)
         residuals_subset = loss_function(y, y_pred)
+        # don't allow plane to be fit to points already on a different plane:
+        residuals_subset[mask == 0] = 9999  # TODO constant
         inlier_mask_best = residuals_subset < residual_threshold
         mask_without_excluded = _exclude_unconnected(X, min_X, inlier_mask_best, res=self.resolution_metres)
 
-        # TODO this should ignorelist the sample -
-        #      and the sample ignorelist should continue between runs... (except for things that are ignored just because they are worse than the current best)
         if np.sum(mask_without_excluded) < self.min_points_per_plane:
             self.success = False
-            # raise RANSACValueError(f"Less than {self.min_points_per_plane} points within "
-            #                        f"{residual_threshold} of plane after final fit")
+            skip_planes.add(tuple(best_sample_idxs))
         else:
             self.success = True
             self.estimator_ = base_estimator
@@ -539,87 +530,35 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
             self.sd = sd_best
             self.plane_properties = plane_properties_best
 
+            inlier_idxs_subset = sample_idxs[mask_without_excluded]
+            y_true = y[inlier_idxs_subset]
+            y_pred = self.estimator_.predict(X[inlier_idxs_subset])
+
+            a, b = base_estimator.coef_
+            d = base_estimator.intercept_
+            self.plane_properties.update({
+                "x_coef": a,
+                "y_coef": b,
+                "intercept": d,
+                "slope": slope_deg(a, b),
+                "aspect": aspect_deg(a, b),
+                "inliers_xy": X[mask_without_excluded],
+                "r2": metrics.r2_score(y_true, y_pred),
+                "mae": metrics.mean_absolute_error(y_true, y_pred),
+                "mse": metrics.mean_squared_error(y_true, y_pred),
+                "rmse": metrics.mean_squared_error(y_true, y_pred, squared=False),
+                "msle": metrics.mean_squared_log_error(y_true, y_pred),
+                "mape": metrics.mean_absolute_percentage_error(y_true, y_pred),
+            })
+
         if debug:
             if self.success:
                 a, b = self.estimator_.coef_
-                print(f"plane found: slope {_slope(a, b)} aspect {_aspect(a, b)} sd {self.sd} inliers {np.sum(mask_without_excluded)}")
+                print(f"plane found: slope {slope_deg(a, b)} aspect {aspect_deg(a, b)} sd {self.sd} inliers {np.sum(mask_without_excluded)}")
             else:
                 print(f"plane found, but rejected")
             print("")
         return self
-
-
-def _slope(a: float, b: float) -> float:
-    """
-    Return the slope of a plane defined by the X coefficient a and the Y coefficient b,
-    in degrees from flat.
-    """
-    return abs(math.degrees(math.atan(math.sqrt(a**2 + b**2))))
-
-
-def _aspect(a: float, b: float) -> float:
-    """
-    Return the aspect of a plane defined by the X coefficient a  and the Y coefficient b,
-    in degrees from North.
-    """
-    return _to_positive_angle(math.degrees(math.atan2(b, -a) + (math.pi / 2)))
-
-
-def _aspect_rad(a: float, b: float) -> float:
-    """
-    Return the aspect of a plane defined by the X coefficient a  and the Y coefficient b,
-    in radians between 0 and 2pi
-    """
-    a = math.atan2(b, -a) + (math.pi / 2)
-    return a if a >= 0 else a + (2 * math.pi)
-
-
-def _circular_mean(pop):
-    """
-    Circular mean of a population of radians.
-    Assumes radians between 0 and 2pi (might work with other ranges, not tested)
-    Returns a value between 0 and 2pi.
-    """
-    cm = math.atan2(np.mean(np.sin(pop)), np.mean(np.cos(pop)))
-    return cm if cm >= 0 else cm + (2 * math.pi)
-
-
-def _circular_sd(pop):
-    """
-    Circular standard deviation of a population of radians.
-    Assumes radians between 0 and 2pi (might work with other ranges, not tested).
-
-    See https://en.wikipedia.org/wiki/Directional_statistics#Measures_of_location_and_spread
-    """
-    return math.sqrt(-2 * math.log(
-        math.sqrt(sum(np.sin(pop)) ** 2 +
-                  sum(np.cos(pop)) ** 2) /
-        len(pop)))
-
-
-def _circular_variance(pop):
-    """
-    Circular variance of a population of radians.
-    Assumes radians between 0 and 2pi (might work with other ranges, not tested).
-
-    See https://en.wikipedia.org/wiki/Directional_statistics#Measures_of_location_and_spread
-    """
-    return 1 - (math.sqrt(sum(np.sin(pop)) ** 2 +
-                          sum(np.cos(pop)) ** 2) /
-                len(pop))
-
-
-def _rad_diff(r1, r2):
-    """
-    Smallest difference between radians.
-    Assumes radians between 0 and 2pi. Will return a positive number.
-    """
-    return min(abs(r1 - r2), (2 * math.pi) - abs(r1 - r2))
-
-
-def _to_positive_angle(angle):
-    angle = angle % 360
-    return angle + 360 if angle < 0 else angle
 
 
 def _exclude_unconnected(X, min_X, inlier_mask_best, res: float):
@@ -651,27 +590,17 @@ def _exclude_unconnected(X, min_X, inlier_mask_best, res: float):
     return mask
 
 
-def _sample(n_samples, min_samples, random_state, aspect):
-    max_aspect_range = 5
+def _sample(n_samples, min_samples, random_state, mask):
     sample_attempts = 0
 
     while sample_attempts < 1000:
         sample_attempts += 1
-        initial_sample = sample_without_replacement(n_samples, 1, random_state=random_state)[0]
-        initial_aspect = aspect[initial_sample]
+        sample = sample_without_replacement(n_samples, min_samples, random_state=random_state)
+        masked = mask[sample]
+        if np.all(masked):
+            return sample
 
-        aspect_diff = np.abs((aspect - initial_aspect + 180) % 360 - 180)
-
-        choose_from = np.asarray(aspect_diff < max_aspect_range).nonzero()[0]
-        choose_from = choose_from[choose_from != initial_sample]
-        if len(choose_from) < min_samples - 1:
-            continue
-        if (sample_attempts + 1) % 100 == 0:
-            max_aspect_range += 5
-        chosen = np.random.choice(choose_from, min_samples - 1)
-        return np.concatenate(([initial_sample], chosen))
-
-    raise RANSACValueError("Cannot find initial sample with aspect similarity")
+    return None
 
 
 def _pixel_groups(X_inlier_subset, min_X, res: float):
@@ -720,3 +649,28 @@ def _min_thinness_ratio(area) -> float:
         return 0.10
     else:
         return 0.07
+
+
+def _get_potential_aspects(X_inlier_subset, polygon: Polygon):
+    polygon = simplify_by_angle(polygon, tolerance_degrees=2.0)
+    line_segments = polygon_line_segments(polygon, min_length=1.0)
+    mp = MultiPoint(X_inlier_subset)
+    rp = mp.buffer(1.0)
+    rtree = STRtree(line_segments)
+    nearby = rtree.query(rp)
+    if len(nearby) == 0:
+        rp = mp.buffer(3.0)
+        nearby = rtree.query(rp)
+    if len(nearby) == 0:
+        rp = mp.buffer(10.0)
+        nearby = rtree.query(rp)
+    if len(nearby) == 0:
+        return []
+
+    azimuths_base = [int(azimuth_deg(ls.coords[0], ls.coords[1])) for ls in line_segments]
+    azimuths = set(azimuths_base)
+    for az in azimuths_base:
+        azimuths.add((az + 90) % 360)
+        azimuths.add((az + 180) % 360)
+        azimuths.add((az + 270) % 360)
+    return list(azimuths)

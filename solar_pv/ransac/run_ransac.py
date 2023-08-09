@@ -24,8 +24,8 @@ from solar_pv.constants import RANSAC_LARGE_BUILDING, \
 from solar_pv.ransac.detsac import DETSACRegressorForLIDAR
 from solar_pv.ransac.merge_adjacent import merge_adjacent
 from solar_pv.ransac.premade_planes import create_planes, create_planes_2, _image
-from solar_pv.ransac.ransac import RANSACRegressorForLIDAR, _aspect, \
-    _slope, RANSACValueError
+from solar_pv.ransac.ransac import RANSACRegressorForLIDAR
+from solar_pv.geos import slope_deg, aspect_deg
 from solar_pv.roof_polygons.roof_polygons_2 import create_roof_polygons
 from solar_pv.util import get_cpu_count
 
@@ -133,41 +133,9 @@ def _ransac_building(building: BuildingData,
     z = xyz[:, 2]
     mask = z > max_ground_height if max_ground_height else np.ones(aspect.shape)
 
-    if len(pixels_in_building) > RANSAC_LARGE_BUILDING / resolution_metres:
-        max_trials = RANSAC_LARGE_MAX_TRIALS
-        # Disables checks that forbid planes that cover multiple discontinuous groups
-        # of pixels, as large buildings often have separate roof areas that are on the
-        # same plane. Only the largest group will be used each time anyway, so this
-        # won't cause problems and all discontinuous groups should be picked up
-        # eventually.
-        include_group_checks = False
-    elif len(pixels_in_building) < RANSAC_SMALL_BUILDING / resolution_metres:
-        max_trials = RANSAC_SMALL_MAX_TRIALS
-        include_group_checks = True
-    else:
-        max_trials = RANSAC_MEDIUM_MAX_TRIALS
-        include_group_checks = True
-
-    planes = _do_ransac_building(toid, xyz, aspect, slope, mask, polygon, resolution_metres,
-                                 max_trials, include_group_checks, debug=debug)
-
-    return planes
-
-
-def _do_ransac_building(toid: str,
-                        xyz,
-                        aspect,
-                        slope,
-                        mask,
-                        polygon: Polygon,
-                        resolution_metres: float,
-                        max_trials: int,
-                        include_group_checks: bool,
-                        debug: bool):
     min_points_per_plane = min(8, int(8 / resolution_metres))  # 8 for 2m, 8 for 1m, 16 for 0.5m
     total_points_in_building = len(aspect)
     premade_planes = create_planes_2(xyz, aspect, slope, polygon, resolution_metres)
-    # premade_planes.extend(create_planes(xyz, polygon))
     skip_planes = set()
     xy = xyz[:, :2]
     z = xyz[:, 2]
@@ -176,71 +144,89 @@ def _do_ransac_building(toid: str,
     labels = np.full(z.shape, labels_nodata, dtype=int)
     planes = {}
 
-    plane_id = 0
+    plane_idx = 0
     while np.count_nonzero(mask) > min_points_per_plane:
-        try:
-            ransac = DETSACRegressorForLIDAR(residual_threshold=0.25,
-                                             flat_roof_residual_threshold=0.1,
-                                             max_trials=max_trials,
-                                             max_slope=75,
-                                             min_slope=0,
-                                             flat_roof_threshold_degrees=FLAT_ROOF_DEGREES_THRESHOLD,
-                                             min_points_per_plane=min_points_per_plane,
-                                             resolution_metres=resolution_metres)
-            ransac.fit(xy, z,
-                       aspect=aspect,
-                       mask=mask,
-                       premade_planes=premade_planes,
-                       skip_planes=skip_planes,
-                       total_points_in_building=total_points_in_building,
-                       include_group_checks=include_group_checks,
-                       debug=debug)
+        detsac = DETSACRegressorForLIDAR(residual_threshold=0.25,
+                                         flat_roof_residual_threshold=0.1,
+                                         max_slope=75,
+                                         min_slope=0,
+                                         flat_roof_threshold_degrees=FLAT_ROOF_DEGREES_THRESHOLD,
+                                         min_points_per_plane=min_points_per_plane,
+                                         resolution_metres=resolution_metres)
+        detsac.fit(xy, z,
+                   aspect=aspect,
+                   mask=mask,
+                   polygon=polygon,
+                   premade_planes=premade_planes,
+                   skip_planes=skip_planes,
+                   total_points_in_building=total_points_in_building,
+                   debug=debug)
 
-            if ransac.success:
-                inlier_mask = ransac.inlier_mask_
-                a, b = ransac.estimator_.coef_
-                d = ransac.estimator_.intercept_
-
-                # don't keep bad planes - their inliers become candidates for being
-                # merged into other planes (and the planes will still have been added to
-                # skip_planes, so we don't retry them)
-                # TODO constant
-                if ransac.plane_properties["score"] < 1.0:
-                    planes[plane_id] = {
-                        "toid": toid,
-                        "x_coef": a,
-                        "y_coef": b,
-                        "intercept": d,
-                        "slope": _slope(a, b),
-                        "aspect": _aspect(a, b),
-                        "inliers_xy": xy[inlier_mask],
-                        "sd": ransac.sd,
-                        "score": ransac.plane_properties["score"],
-                        "aspect_circ_mean": ransac.plane_properties["aspect_circ_mean"],
-                        "aspect_circ_sd": ransac.plane_properties["aspect_circ_sd"],
-                        "thinness_ratio": ransac.plane_properties["thinness_ratio"],
-                        "cv_hull_ratio": ransac.plane_properties["cv_hull_ratio"],
-                        "plane_type": ransac.plane_properties["plane_type"],
-                        "r2": ransac.plane_properties["r2"],
-                        "mae": ransac.plane_properties["mae"],
-                        "mse": ransac.plane_properties["mse"],
-                        "rmse": ransac.plane_properties["rmse"],
-                        "msle": ransac.plane_properties["msle"],
-                        "mape": ransac.plane_properties["mape"],
-                    }
-                    labels[inlier_mask] = plane_id
-                    plane_id += 1
-                    mask[inlier_mask] = 0
-
-        except RANSACValueError as e:
-            if debug:
-                print("No plane found - received RANSACValueError:")
-                print(e)
-                print("")
+        if detsac.finished:
             break
 
+        if detsac.success:
+            inlier_mask = detsac.inlier_mask_
+
+            # don't keep bad planes - their inliers become candidates for being
+            # merged into other planes (and the planes will still have been added to
+            # skip_planes, so we don't retry them)
+            # TODO constant for max MAE
+            if detsac.plane_properties["score"] < 1.0:
+                planes[plane_idx] = detsac.plane_properties
+                planes[plane_idx]["toid"] = toid
+                labels[inlier_mask] = plane_idx
+                plane_idx += 1
+                mask[inlier_mask] = 0
+
+    total_pixels = len(aspect)
+    if total_pixels > RANSAC_LARGE_BUILDING / resolution_metres:
+        max_trials = RANSAC_LARGE_MAX_TRIALS
+    elif total_pixels < RANSAC_SMALL_BUILDING / resolution_metres:
+        max_trials = RANSAC_SMALL_MAX_TRIALS
+    else:
+        max_trials = RANSAC_MEDIUM_MAX_TRIALS
+
+    # We only fall back to RANSAC if a decent fraction of pixels are left to find:
+    pixels_required_for_ransac = min_points_per_plane * 5
+
+    while np.count_nonzero(mask) > pixels_required_for_ransac:
+        ransac = RANSACRegressorForLIDAR(residual_threshold=0.25,
+                                         flat_roof_residual_threshold=0.1,
+                                         max_trials=max_trials,
+                                         max_slope=75,
+                                         min_slope=0,
+                                         flat_roof_threshold_degrees=FLAT_ROOF_DEGREES_THRESHOLD,
+                                         min_points_per_plane=min_points_per_plane,
+                                         resolution_metres=resolution_metres)
+        ransac.fit(xy, z,
+                   aspect=aspect,
+                   mask=mask,
+                   polygon=polygon,
+                   skip_planes=skip_planes,
+                   total_points_in_building=total_points_in_building,
+                   debug=debug)
+
+        if ransac.finished:
+            break
+
+        if ransac.success:
+            inlier_mask = ransac.inlier_mask_
+
+            # don't keep bad planes - their inliers become candidates for being
+            # merged into other planes (and the planes will still have been added to
+            # skip_planes, so we don't retry them)
+            # TODO constant for max MAE
+            if ransac.plane_properties["score"] < 1.0:
+                planes[plane_idx] = ransac.plane_properties
+                planes[plane_idx]["toid"] = toid
+                labels[inlier_mask] = plane_idx
+                plane_idx += 1
+                mask[inlier_mask] = 0
+
+    # label all the outlying pixels with individual IDs:
     outliers = np.count_nonzero(labels[mask == 1])
-    labels[mask == 1] = range(plane_id + 1, outliers + plane_id + 1)
+    labels[mask == 1] = range(plane_idx + 1, outliers + plane_idx + 1)
 
     merged_planes = merge_adjacent(xy, z, labels, planes, resolution_metres, labels_nodata)
     return merged_planes

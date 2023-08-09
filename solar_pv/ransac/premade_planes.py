@@ -14,7 +14,7 @@ from skimage import segmentation
 from skimage.future.graph import rag_mean_color, cut_threshold
 from sklearn.linear_model import LinearRegression
 
-from solar_pv.ransac.ransac import _aspect
+from solar_pv.geos import polygon_line_segments, simplify_by_angle, aspect_deg
 from solar_pv.roof_polygons.roof_polygons_2 import _building_orientations
 
 _SLOPES = [25, 28, 30, 33, 35, 40, 45, 50,
@@ -362,15 +362,9 @@ def create_planes(xyz: np.ndarray, polygon: Polygon) -> List[ArrayPlane]:
     planes = []
     points = [Point(p[0], p[1], p[2]) for p in xyz]
     rtree = STRtree(points)
-    polygon = _simplify_by_angle(polygon, deg_tol=2)
+    polygon = simplify_by_angle(polygon, tolerance_degrees=2)
 
-    line_segments = []
-
-    for ring in itertools.chain([polygon.exterior], polygon.interiors):
-        for p1, p2 in pairwise(ring.coords):
-            line = LineString([p1, p2])
-            if line.length > 1:
-                line_segments.append(line)
+    line_segments = polygon_line_segments(polygon)
 
     plane_id = 0
     for line in line_segments:
@@ -424,45 +418,3 @@ def _interpolate_between_points(p1, p2, fraction: float):
         x = p1[0] + (p2[0] - p1[0]) * fraction
         y = p1[1] + (p2[1] - p1[1]) * fraction
     return x, y
-
-
-def pairwise(iterable):
-    a, b = itertools.tee(iterable)
-    next(b, None)
-    return zip(a, b)
-
-
-def _simplify_by_angle(poly: Polygon, deg_tol: float = 1) -> Polygon:
-    shell = Polygon(poly.exterior.coords)
-    holes = [Polygon(ip.coords) for ip in poly.interiors]
-    simple_shell = _simplify_ring_by_angle(shell, deg_tol)
-    simple_holes = [_simplify_ring_by_angle(hole, deg_tol) for hole in holes]
-    simple_poly = simple_shell.difference(ops.unary_union(simple_holes))
-    return simple_poly
-
-
-def _simplify_ring_by_angle(poly: Polygon, deg_tol: float) -> Polygon:
-    """
-    deg_tol: degree tolerance for comparison between successive vectors
-    """
-    ext_poly_coords = poly.exterior.coords[:]
-    vector_rep = np.diff(ext_poly_coords, axis=0)
-    num_vectors = len(vector_rep)
-    angles_list = []
-    for i in range(0, num_vectors):
-        angles_list.append(np.abs(_get_angle(vector_rep[i], vector_rep[(i + 1) % num_vectors])))
-
-    # get mask satisfying tolerance
-    thresh_vals_by_deg = np.where(np.array(angles_list) > deg_tol)
-
-    new_idx = list(thresh_vals_by_deg[0] + 1)
-    new_vertices = [ext_poly_coords[idx] for idx in new_idx]
-
-    return Polygon(new_vertices)
-
-
-def _get_angle(vec_1, vec_2):
-    dot = np.dot(vec_1, vec_2)
-    det = np.cross(vec_1, vec_2)
-    angle_in_rad = np.arctan2(det, dot)
-    return np.degrees(angle_in_rad)

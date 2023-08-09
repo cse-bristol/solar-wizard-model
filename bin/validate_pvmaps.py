@@ -13,17 +13,17 @@ import shapely.wkt
 from osgeo import gdal
 import numpy as np
 
-from solar_pv import paths, gdal_helpers, geos
+from solar_pv import paths, gdal_helpers
 from solar_pv.db_funcs import connection, sql_command
-from solar_pv.geos import project_geom, from_geojson
+from solar_pv.geos import project_geom, from_geojson, square
 from solar_pv.lidar.bulk_lidar_client import LidarSource
 from solar_pv.lidar.en_to_grid_ref import en_to_grid_ref
 from solar_pv.lidar.lidar import Resolution, zip_to_geotiffs, \
     ZippedTiles
 from solar_pv.postgis import load_lidar
-from constants import FLAT_ROOF_DEGREES_THRESHOLD, SYSTEM_LOSS
-from mask import create_mask
-from pvgis import pvmaps
+from solar_pv.constants import FLAT_ROOF_DEGREES_THRESHOLD, SYSTEM_LOSS
+from solar_pv.mask import create_mask
+from solar_pv.pvgis import pvmaps
 from solar_pv.transformations import _7_PARAM_SHIFT
 
 
@@ -212,7 +212,7 @@ def model(project_name: str, kwp: float, wkt: str):
             for x, wh in enumerate(row):
                 if not np.isnan(wh):
                     e, n = gdal.ApplyGeoTransform(to_en, x, y)
-                    cell = geos.square(e - 0.5, n - 0.5, 1)
+                    cell = square(e - 0.5, n - 0.5, 1)
                     if cell.intersects(geom):
                         intersect = cell.intersection(geom)
                         monthly_kwh += wh * intersect.area * 0.001 * mdays[month] * peak_power_per_m2 * (1 - system_loss)

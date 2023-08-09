@@ -30,13 +30,13 @@ RANSAC_LARGE_BUILDING = 1000
 # good plane to a smaller set of points):
 RANSAC_SMALL_BUILDING = 100
 
-RANSAC_LARGE_MAX_TRIALS = 2000
-RANSAC_MEDIUM_MAX_TRIALS = 2000
-RANSAC_SMALL_MAX_TRIALS = 3000
+RANSAC_LARGE_MAX_TRIALS = 500
+RANSAC_MEDIUM_MAX_TRIALS = 500
+RANSAC_SMALL_MAX_TRIALS = 1000
 
 # If a roof plane's score is lower than this, stop optimising for score
 # and start optimising for number of points on the plane:
-ROOFDET_GOOD_SCORE = 0.15
+ROOFDET_GOOD_SCORE = 0.125
 
 # GDAL default tile geotiff tilesize:
 POSTGIS_TILESIZE = 256

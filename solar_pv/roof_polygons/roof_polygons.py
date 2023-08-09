@@ -15,7 +15,7 @@ from shapely.validation import make_valid
 
 from solar_pv import tables
 from solar_pv.db_funcs import connection, sql_command
-from solar_pv.geos import azimuth, square, largest_polygon
+from solar_pv.geos import azimuth_deg, square, largest_polygon
 from solar_pv.constants import FLAT_ROOF_DEGREES_THRESHOLD, \
     FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD, AZIMUTH_ALIGNMENT_THRESHOLD
 from solar_pv.roof_polygons.roof_polygon_archetypes import \
@@ -321,7 +321,7 @@ def _building_orientations(building_geom):
         p1 = building_geom.exterior.coords[i]
         p2 = building_geom.exterior.coords[i + 1]
         segment = LineString([p1, p2])
-        az = round(azimuth(p1, p2))
+        az = round(azimuth_deg(p1, p2))
         azimuths[az] += segment.length
 
     # 2. take the top azimuth and define other orientations based on it:
