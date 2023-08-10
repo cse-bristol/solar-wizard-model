@@ -5,11 +5,13 @@ from skimage.future.graph import RAG, merge_hierarchical
 from sklearn import metrics
 from sklearn.linear_model import LinearRegression
 
-from solar_pv.constants import ROOFDET_GOOD_SCORE
+from solar_pv.constants import ROOFDET_GOOD_SCORE, FLAT_ROOF_DEGREES_THRESHOLD, \
+    AZIMUTH_ALIGNMENT_THRESHOLD, FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD
 from solar_pv.ransac.premade_planes import _image
-from solar_pv.geos import slope_deg, aspect_deg
+from solar_pv.geos import slope_deg, aspect_deg, deg_diff
 
 DO_NOT_MERGE = 9999
+DO_MERGE = -9999
 
 
 def _edge_weight(graph, src: int, dst: int) -> float:
@@ -26,28 +28,53 @@ def _edge_weight(graph, src: int, dst: int) -> float:
         # weighted average:
         dst_inliers = len(dst_node['xy_subset'])
         src_inliers = len(src_node['xy_subset'])
-        curr_score = ((dst_node['score'] * dst_inliers) +
-                      (src_node['score'] * src_inliers)) / (dst_inliers + src_inliers)
+        curr_mae = ((dst_node['mae'] * dst_inliers) +
+                    (src_node['mae'] * src_inliers)) / (dst_inliers + src_inliers)
 
         xy_subset = np.concatenate([dst_node['xy_subset'], src_node['xy_subset']])
         z_subset = np.concatenate([dst_node['z_subset'], src_node['z_subset']])
         lr = LinearRegression()
         lr.fit(xy_subset, z_subset)
-        # new_score = lr.score(xy_subset, z_subset)
-        new_score = metrics.mean_absolute_error(z_subset, lr.predict(xy_subset))
-        # If the new score is still good enough, don't require it to be better than before
-        weight = new_score - curr_score if new_score > ROOFDET_GOOD_SCORE else -1
+
+        new_slope = slope_deg(lr.coef_[0], lr.coef_[1])
+        if new_slope > FLAT_ROOF_DEGREES_THRESHOLD and \
+                dst_node['slope'] > FLAT_ROOF_DEGREES_THRESHOLD and \
+                src_node['slope'] > FLAT_ROOF_DEGREES_THRESHOLD:
+            curr_r2 = ((dst_node['r2'] * dst_inliers) +
+                       (src_node['r2'] * src_inliers)) / (dst_inliers + src_inliers)
+            new_r2 = lr.score(xy_subset, z_subset)
+            # If the new score is still good enough, don't require it to be better than before
+            # TODO constant
+            weight = curr_r2 - new_r2 if new_r2 < 0.925 else DO_MERGE
+
+            # if new aspect is outside the range of adjusted aspects, do not merge:
+            new_aspect = aspect_deg(lr.coef_[0], lr.coef_[1])
+            if deg_diff(new_aspect, src_node['aspect_adjusted']) > AZIMUTH_ALIGNMENT_THRESHOLD \
+                    and deg_diff(new_aspect, dst_node['aspect_adjusted']) > AZIMUTH_ALIGNMENT_THRESHOLD:
+                weight = DO_NOT_MERGE
+        else:
+            new_mae = metrics.mean_absolute_error(z_subset, lr.predict(xy_subset))
+            # If the new score is still good enough, don't require it to be better than before
+            weight = new_mae - curr_mae if new_mae > ROOFDET_GOOD_SCORE else DO_MERGE
 
     # A plane and an outlier
     else:
-        curr_score = dst_node.get('score', src_node.get('score'))
+        curr_mae = dst_node.get('mae', src_node.get('mae'))
         xy_subset = np.concatenate([dst_node['xy_subset'], src_node['xy_subset']])
         z_subset = np.concatenate([dst_node['z_subset'], src_node['z_subset']])
         lr = LinearRegression()
         lr.fit(xy_subset, z_subset)
         # new_score = lr.score(xy_subset, z_subset)
-        new_score = metrics.mean_absolute_error(z_subset, lr.predict(xy_subset))
-        weight = new_score - curr_score
+        new_mae = metrics.mean_absolute_error(z_subset, lr.predict(xy_subset))
+        weight = new_mae - curr_mae
+
+        # if new aspect is outside the range of adjusted aspects, do not merge:
+        slope = slope_deg(lr.coef_[0], lr.coef_[1])
+        if slope > FLAT_ROOF_DEGREES_THRESHOLD and weight < 0:
+            new_aspect = aspect_deg(lr.coef_[0], lr.coef_[1])
+            aspect_adjusted = dst_node.get('aspect_adjusted', src_node.get('aspect_adjusted'))
+            if deg_diff(new_aspect, aspect_adjusted) > AZIMUTH_ALIGNMENT_THRESHOLD:
+                weight = DO_NOT_MERGE
 
     return weight
 
@@ -124,6 +151,16 @@ def _update_node_data(graph, src: int, dst: int):
     dst_node["aspect_circ_sd"] = 0
     dst_node["thinness_ratio"] = 0
     dst_node["cv_hull_ratio"] = 0
+
+    if 'aspect_adjusted' in src_node and 'aspect_adjusted' in dst_node:
+        # deg_diff(dst_node['aspect'], src_node['aspect_adjusted']) < AZIMUTH_ALIGNMENT_THRESHOLD:
+        a1 = dst_node["aspect_adjusted"]
+        a2 = src_node["aspect_adjusted"]
+        a1_diff = deg_diff(a1, dst_node['aspect'])
+        a2_diff = deg_diff(a2, dst_node['aspect'])
+        dst_node["aspect_adjusted"] = a1 if a1_diff < a2_diff else a2
+    elif 'aspect_adjusted' in src_node:
+        dst_node["aspect_adjusted"] = src_node.get('aspect_adjusted')
 
 
 def _hierarchical_merge(graph, labels, thresh: float = 0):
