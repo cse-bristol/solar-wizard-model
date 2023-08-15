@@ -60,6 +60,7 @@ def _edge_weight(graph, src: int, dst: int) -> float:
     # A plane and an outlier
     else:
         curr_mae = dst_node.get('mae', src_node.get('mae'))
+        curr_slope = dst_node.get('slope', src_node.get('slope'))
         xy_subset = np.concatenate([dst_node['xy_subset'], src_node['xy_subset']])
         z_subset = np.concatenate([dst_node['z_subset'], src_node['z_subset']])
         lr = LinearRegression()
@@ -68,8 +69,14 @@ def _edge_weight(graph, src: int, dst: int) -> float:
         new_mae = metrics.mean_absolute_error(z_subset, lr.predict(xy_subset))
         weight = new_mae - curr_mae
 
-        # if new aspect is outside the range of adjusted aspects, do not merge:
         slope = slope_deg(lr.coef_[0], lr.coef_[1])
+        # if roof has changed from flat to non-flat, do not merge:
+        if slope > FLAT_ROOF_DEGREES_THRESHOLD >= curr_slope:
+            weight = DO_NOT_MERGE
+        if slope <= FLAT_ROOF_DEGREES_THRESHOLD < curr_slope:
+            weight = DO_NOT_MERGE
+
+        # if new aspect is outside the range of the adjusted aspect, do not merge:
         if slope > FLAT_ROOF_DEGREES_THRESHOLD and weight < 0:
             new_aspect = aspect_deg(lr.coef_[0], lr.coef_[1])
             aspect_adjusted = dst_node.get('aspect_adjusted', src_node.get('aspect_adjusted'))

@@ -1,49 +1,82 @@
 # This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 import csv
+import json
 import unittest
 from os.path import join
 from typing import List
 
+from shapely import wkt
+
 from solar_pv.paths import TEST_DATA
-from solar_pv.ransac.run_ransac import _ransac_building
+from solar_pv.ransac.run_ransac import _ransac_building, RoofDetBuilding
+from solar_pv.test_utils.test_funcs import ParameterisedTestCase
 
 _RANSAC_DATA = join(TEST_DATA, "ransac")
 
 
-def _load_data(filename: str) -> List[dict]:
+def _load_data(filename: str) -> RoofDetBuilding:
     with open(filename) as f:
-        return [{k: float(v) if k != 'pixel_id' else v for k, v in row.items()}
-                for row in csv.DictReader(f)]
+        building = json.load(f)
+        building['polygon'] = wkt.loads(building['polygon'])
+    return building
 
 
-def _ransac(filename: str, res: float):
-    # TODO change format of test data - need polygon, min_gh etc
-    return len(_ransac_building(_load_data(join(_RANSAC_DATA, filename)), filename, res,
-                                debug=False))
+def _ransac(toid: str, res: float):
+    filename = f"{toid}.json" if not toid.endswith(".json") else toid
+    planes = _ransac_building(_load_data(join(_RANSAC_DATA, filename)), filename, res, debug=False)
+    return sorted([plane['aspect_adjusted'] for plane in planes])
 
 
-class RansacTestCase(unittest.TestCase):
-
-    def parameterised_test(self, mapping: List[tuple], fn):
-        for tup in mapping:
-            with self.subTest():
-                expected = tup[-1]
-                inputs = tup[:-1]
-                actual = fn(*inputs)
-                if isinstance(expected, int):
-                    assert expected == actual, f"\nExpected: {expected}\nActual  : {actual}\nInputs : {inputs}"
-                else:
-                    assert actual in expected, f"\nExpected: {expected}\nActual  : {actual}\nInputs : {inputs}"
+class RansacTestCase(ParameterisedTestCase):
 
     def test_ransac(self):
         self.parameterised_test([
-            ('end_terrace.csv', 1.0, (3, 4)),
-            ('all_one_plane.csv', 1.0, 1),
-            ('osgb1000020002724.csv', 1.0, 3),
-            ('osgb5000005156974578.csv', 1.0, (3, 4, 5)),
-            ('osgb1000020002610.csv', 1.0, 2),
-            # Occasional flat roof detected where after final fit-to-plane, no points
-            # are within the min distance:
-            ('osgb1000011999905.csv', 1.0, (3, 4, 5, 6)),
+            # Tricky Totterdown terraces:
+            ("osgb1000014994639", 1.0, [54, 234]),
+            ("osgb1000014994636", 1.0, [53, 233]),
+            ("osgb1000014994625", 1.0, [60, 241]),
+            ("osgb1000014994628", 1.0, [57, 239]),
+            ("osgb1000014994630", 1.0, [58, 238]),
+            ("osgb1000014994631", 1.0, [55, 237]),
+            ("osgb1000014994632", 1.0, [56, 236]),
+            ("osgb1000014994633", 1.0, [55, 235]),
+            ("osgb1000014994634", 1.0, [54, 236]),
+            ("osgb1000014994636", 1.0, [53, 233]),
+            ("osgb1000014994637", 1.0, [57, 235]),
+            ("osgb1000014994638", 1.0, [54, 234]),
+            ("osgb1000014994640", 1.0, [54, 234]),
+            ("osgb1000014994648", 1.0, [54, 234]),
+            ("osgb1000014994950", 1.0, [59, 236]),
+            ("osgb1000014994951", 1.0, [58, 236]),
+            ("osgb1000014994948", 1.0, [57, 237]),
+            ("osgb1000014994947", 1.0, [61, 236]),
+
+            # Irregular buildings:
+            ("osgb1000014995098", 1.0, [82, 84, 177, 264, 264]),
+            ("osgb1000014994877", 1.0, [209, 209, 209, 209]),  # Totterdown Mosque - currently fails due to dome
+
+            # Messy roofs - should find nothing
+            ("osgb1000014994794", 1.0, []),  # Totterdown pub - very messy roof - currently fails due to mess
+            ("osgb1000002529080353", 1.0, []),  # Cotham school - currently fails due to mess
+            ("osgb1000002529080355", 1.0, []),  # Cotham school - currently fails due to mess
+            ("osgb1000002529080354", 1.0, []),  # Cotham school - currently fails due to mess
+
+            # Flat roofs:
+            ("osgb1000014998049", 1.0, [138]),
+            ("osgb1000014998048", 1.0, [141, 226]),
+
+            # warehouses etc:
+            ("osgb1000014998052", 1.0, [10, 46, 155, 190, 226, 335]),  # Motorbike shop
+            ("osgb1000014998047", 1.0, [143, 144, 324, 324]),
+
+            # Various tricky buildings in Croyde
+            ("osgb1000021672464", 1.0, [166, 166, 167, 257, 347, 347, 347]),
+            ("osgb1000000337215292", 1.0, [155, 335]),
+            ("osgb1000021681586", 1.0, [58, 238]),
+            ("osgb1000021672474", 1.0, [74, 254]),
+            ("osgb1000021672476", 1.0, [71, 251, 251]),
+            ("osgb1000021672457", 1.0, [0, 90, 90, 180, 270]),
+            ("osgb1000021672466", 1.0, [85, 265]),
+            ("osgb1000000337226766", 1.0, [59, 59, 149, 239, 329]),
         ], _ransac)

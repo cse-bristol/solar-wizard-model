@@ -5,7 +5,7 @@
 # with the model parameter `flat_roof_degrees`, which is the slope at which panels
 # are mounted on flat roofs.
 # Source: first-user partners
-FLAT_ROOF_DEGREES_THRESHOLD = 5.0
+FLAT_ROOF_DEGREES_THRESHOLD = 4.9
 
 # If a roof plane has an aspect which is closer than this value to the azimuth of
 # one of the facings of a building, re-align the roof plane to that azimuth.

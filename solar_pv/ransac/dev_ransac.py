@@ -25,12 +25,10 @@ def ransac_toids(pg_uri: str, job_id: int, toids: Optional[List[str]], resolutio
 
     by_toid = _load(pg_uri, job_id, page=0, page_size=1000, toids=toids, force_load=True)
     all_planes = []
-    all_pixels = []
     for toid, building in by_toid.items():
         print(f"\nTOID: {toid}\n")
         planes = _ransac_building(building, toid, resolution_metres, debug=True)
         all_planes.extend(planes)
-        all_pixels.extend(building['pixels'])
 
         if len(planes) > 0:
             print("\nROOFDET: all planes:")
@@ -42,10 +40,10 @@ def ransac_toids(pg_uri: str, job_id: int, toids: Optional[List[str]], resolutio
             _write_test_data(toid, building)
 
     if len(all_planes) > 0:
-        _write_planes(toids, job_id, resolution_metres, out_dir, all_pixels, all_planes)
+        _write_planes(toids, job_id, resolution_metres, out_dir, all_planes)
 
 
-def _write_planes(toids: Optional[List[str]], job_id: int, resolution_metres: float, out_dir: str, pixels, planes):
+def _write_planes(toids: Optional[List[str]], job_id: int, resolution_metres: float, out_dir: str, planes):
     if toids is None:
         filename = f"job_{job_id}"
     elif len(toids) == 1:
@@ -54,10 +52,7 @@ def _write_planes(toids: Optional[List[str]], job_id: int, resolution_metres: fl
         filename = f"job_{job_id}_toids"
     t = int(time.time())
     geojson_out = join(out_dir, f"{filename}-{t}.geojson")
-    _write_geojson(geojson_out, resolution_metres, planes)
 
-
-def _write_geojson(filename: str, resolution_metres: float, planes):
     feature_coll = {"type": "FeatureCollection",
                     "crs": {"type": "name",
                             "properties": {"name": "urn:ogc:def:crs:EPSG::27700"}},
@@ -74,18 +69,16 @@ def _write_geojson(filename: str, resolution_metres: float, planes):
                                          "geometry": geojson,
                                          "properties": plane})
 
-    with open(filename, 'w') as f:
+    with open(geojson_out, 'w') as f:
         json.dump(feature_coll, f, default=str)
 
 
 def _write_test_data(toid, building):
     ransac_test_data_dir = join(paths.TEST_DATA, "ransac")
-    csv = join(ransac_test_data_dir, f"{toid}.csv")
-    with open(csv, 'w') as f:
-        f.write("pixel_id,x,y,elevation,aspect\n")
-        for pixel in building['pixels']:
-            f.write(f"{pixel['pixel_id']},{pixel['x']},{pixel['y']},{pixel['elevation']},{pixel['aspect']}\n")
-    print(f"Wrote test data to {csv}")
+    testfile = join(ransac_test_data_dir, f"{toid}.json")
+    with open(testfile, 'w') as f:
+        json.dump(building, f, default=str)
+    print(f"Wrote test data to {testfile}")
 
 
 def thinness_ratio_experiments():
@@ -201,16 +194,6 @@ if __name__ == "__main__":
     #     f"{os.getenv('DEV_DATA_DIR')}/ransac",
     #     write_test_data=False)
 
-    ransac_toids(
-        os.getenv("PGW_URI"),
-        1659,
-        [
-            "osgb1000014994639",
-        ],
-        1.0,
-        f"{os.getenv('DEV_DATA_DIR')}/ransac",
-        write_test_data=False)
-
     # ransac_toids(
     #     os.getenv("PGW_URI"),
     #     1649,
@@ -223,8 +206,16 @@ if __name__ == "__main__":
     # ransac_toids(
     #     os.getenv("PGW_URI"),
     #     1661,
-    #     # ["osgb1000021672464"],
-    #     None,
+    #     [
+    #         "osgb1000021672464",
+    #         "osgb1000000337215292",
+    #         "osgb1000021681586",
+    #         "osgb1000021672474",
+    #         "osgb1000021672476",
+    #         "osgb1000021672457",
+    #         "osgb1000021672466",
+    #         "osgb1000000337226766",
+    #     ],
     #     1.0,
     #     f"{os.getenv('DEV_DATA_DIR')}/ransac",
     #     write_test_data=False)

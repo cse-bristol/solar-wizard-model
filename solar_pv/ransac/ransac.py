@@ -52,7 +52,6 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
                  min_convex_hull_ratio=0.65,
                  max_num_groups=20,
                  max_group_area_ratio_to_largest=0.02,
-                 flat_roof_threshold_degrees=5,
                  max_aspect_circular_mean_degrees=90,
                  max_aspect_circular_sd=1.5):
         """
@@ -85,7 +84,6 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
         self.min_convex_hull_ratio = min_convex_hull_ratio
         self.max_num_groups = max_num_groups
         self.max_group_area_ratio_to_largest = max_group_area_ratio_to_largest
-        self.flat_roof_threshold_degrees = flat_roof_threshold_degrees
         self.max_aspect_circular_mean_degrees = max_aspect_circular_mean_degrees
         self.max_aspect_circular_sd = max_aspect_circular_sd
         self.flat_roof_residual_threshold = flat_roof_residual_threshold
@@ -291,7 +289,7 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
 
             # RANSAC for LiDAR addition: use a more restrictive threshold for flat
             # roofs, as they are more likely to be covered with obstacles, HVAC, pipes etc
-            if slope <= self.flat_roof_threshold_degrees:
+            if slope <= FLAT_ROOF_DEGREES_THRESHOLD:
                 residual_threshold = self.flat_roof_residual_threshold
 
             # residuals of all data for current random sample model
@@ -363,7 +361,7 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
             # RANSAC for LIDAR addition:
             # if difference between circular mean of pixel aspects and slope aspect is too high:
             # if circular deviation of pixel aspects too high:
-            if slope > self.flat_roof_threshold_degrees:
+            if slope > FLAT_ROOF_DEGREES_THRESHOLD:
                 aspect_inliers = np.radians(aspect[inlier_mask_subset])
                 plane_aspect = aspect_rad(base_estimator.coef_[0], base_estimator.coef_[1])
                 aspect_circ_mean = circular_mean_rad(aspect_inliers)
@@ -436,7 +434,7 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
                 skip_planes.add(tuple(subset_idxs))
                 continue
 
-            if slope > self.flat_roof_threshold_degrees:
+            if slope > FLAT_ROOF_DEGREES_THRESHOLD:
                 target_az = aspect_deg(base_estimator.coef_[0], base_estimator.coef_[1])
                 az_diff_thresh = AZIMUTH_ALIGNMENT_THRESHOLD
             else:

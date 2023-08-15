@@ -27,7 +27,7 @@ from sklearn.exceptions import ConvergenceWarning
 from skimage.measure import perimeter_crofton
 
 from solar_pv.constants import ROOFDET_GOOD_SCORE, AZIMUTH_ALIGNMENT_THRESHOLD, \
-    FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD
+    FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD, FLAT_ROOF_DEGREES_THRESHOLD
 from solar_pv.geos import polygon_line_segments, simplify_by_angle, azimuth_deg, slope_deg, \
     aspect_deg, aspect_rad, circular_mean_rad, circular_sd_rad, circular_variance_rad, rad_diff, \
     deg_diff, to_positive_angle
@@ -63,7 +63,6 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
                  min_convex_hull_ratio=0.65,
                  max_num_groups=20,
                  max_group_area_ratio_to_largest=0.02,
-                 flat_roof_threshold_degrees=5,
                  max_aspect_circular_mean_degrees=80,
                  max_aspect_circular_sd=1.5):
         """
@@ -99,7 +98,6 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
         self.min_convex_hull_ratio = min_convex_hull_ratio
         self.max_num_groups = max_num_groups
         self.max_group_area_ratio_to_largest = max_group_area_ratio_to_largest
-        self.flat_roof_threshold_degrees = flat_roof_threshold_degrees
         self.max_aspect_circular_mean_degrees = max_aspect_circular_mean_degrees
         self.max_aspect_circular_sd = max_aspect_circular_sd
         self.flat_roof_residual_threshold = flat_roof_residual_threshold
@@ -282,7 +280,7 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
             # RANSAC for LiDAR addition: use a more restrictive threshold for flat
             # roofs, as they are more likely to be covered with obstacles, HVAC, pipes etc
             slope = slope_deg(base_estimator.coef_[0], base_estimator.coef_[1])
-            if slope <= self.flat_roof_threshold_degrees:
+            if slope <= FLAT_ROOF_DEGREES_THRESHOLD:
                 residual_threshold = self.flat_roof_residual_threshold
 
             # DETSAC change: allow the initial sample points to be further from the plane
@@ -371,7 +369,7 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
             # RANSAC for LIDAR addition:
             # if difference between circular mean of pixel aspects and slope aspect is too high:
             # if circular deviation of pixel aspects too high:
-            if slope > self.flat_roof_threshold_degrees:
+            if slope > FLAT_ROOF_DEGREES_THRESHOLD:
                 aspect_inliers = np.radians(aspect[inlier_mask_subset])
                 plane_aspect = aspect_rad(base_estimator.coef_[0], base_estimator.coef_[1])
                 aspect_circ_mean = circular_mean_rad(aspect_inliers)
@@ -422,7 +420,7 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
                 skip_planes.add(plane.plane_id)
                 continue
 
-            if slope > self.flat_roof_threshold_degrees:
+            if slope > FLAT_ROOF_DEGREES_THRESHOLD:
                 target_az = aspect_deg(base_estimator.coef_[0], base_estimator.coef_[1])
                 az_diff_thresh = AZIMUTH_ALIGNMENT_THRESHOLD
                 aspect_deg_ = closest_azimuth(azimuths, target_az, az_diff_thresh)

@@ -1,3 +1,5 @@
+import json
+
 import itertools
 # This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
@@ -30,7 +32,7 @@ from solar_pv.roof_polygons.roof_polygons_2 import create_roof_polygons
 from solar_pv.util import get_cpu_count
 
 
-class BuildingData(TypedDict):
+class RoofDetBuilding(TypedDict):
     toid: str
     pixels: List[dict]
     polygon: Polygon
@@ -111,7 +113,7 @@ def _handle_building_page(pg_uri: str, job_id: int, page: int, page_size: int, p
         except Exception as e:
             print(f"Exception during RANSAC for TOID {toid}:")
             traceback.print_exception(e)
-            _print_test_data(building['pixels'])
+            _print_test_data(building)
             raise e
 
     planes = create_roof_polygons(pg_uri, job_id, planes, **params)
@@ -119,7 +121,7 @@ def _handle_building_page(pg_uri: str, job_id: int, page: int, page_size: int, p
     print(f"Page {page} of {page_size} buildings complete, took {round(time.time() - start_time, 2)} s.")
 
 
-def _ransac_building(building: BuildingData,
+def _ransac_building(building: RoofDetBuilding,
                      toid: str,
                      resolution_metres: float,
                      debug: bool = False) -> List[dict]:
@@ -150,7 +152,6 @@ def _ransac_building(building: BuildingData,
                                          flat_roof_residual_threshold=0.1,
                                          max_slope=75,
                                          min_slope=0,
-                                         flat_roof_threshold_degrees=FLAT_ROOF_DEGREES_THRESHOLD,
                                          min_points_per_plane=min_points_per_plane,
                                          resolution_metres=resolution_metres)
         detsac.fit(xy, z,
@@ -196,7 +197,6 @@ def _ransac_building(building: BuildingData,
                                          max_trials=max_trials,
                                          max_slope=75,
                                          min_slope=0,
-                                         flat_roof_threshold_degrees=FLAT_ROOF_DEGREES_THRESHOLD,
                                          min_points_per_plane=min_points_per_plane,
                                          resolution_metres=resolution_metres)
         ransac.fit(xy, z,
@@ -232,7 +232,7 @@ def _ransac_building(building: BuildingData,
     return merged_planes
 
 
-def _load(pg_uri: str, job_id: int, page: int, page_size: int, toids: List[str] = None, force_load: bool = False) -> Dict[str, BuildingData]:
+def _load(pg_uri: str, job_id: int, page: int, page_size: int, toids: List[str] = None, force_load: bool = False) -> Dict[str, RoofDetBuilding]:
     """
     Load LIDAR pixel data for RANSAC processing. page_size is number of
     buildings rather than pixels to prevent splitting a building's pixels across
@@ -358,8 +358,6 @@ def _mark_buildings_with_no_planes(pg_uri: str, job_id: int):
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE))
 
 
-def _print_test_data(building: List[dict]):
+def _print_test_data(building: RoofDetBuilding):
     """Print data for building in the format that the RANSAC tests expect"""
-    print("pixel_id,x,y,elevation,aspect\n")
-    for pixel in building:
-        print(f"{pixel['pixel_id']},{pixel['x']},{pixel['y']},{pixel['elevation']},{pixel['aspect']}")
+    print(json.dumps(building, default=str))
