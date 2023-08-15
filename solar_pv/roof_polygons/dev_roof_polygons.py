@@ -118,10 +118,10 @@ def make_roof_polygons(pg_uri: str, job_id: int, toid: str,
 
 
 def _make_roof_planes(pg_uri: str, job_id: int, toid: str, resolution_metres: float):
-    from solar_pv.ransac.run_ransac import _ransac_building, _load
+    from solar_pv.roof_detection.detect_roofs import _detect_building_roof_planes, _load
     by_toid = _load(pg_uri, job_id, page=0, page_size=1000, toids=[toid], force_load=True)
     building = by_toid[toid]
-    planes = _ransac_building(building, toid, resolution_metres, debug=True)
+    planes = _detect_building_roof_planes(building, toid, resolution_metres, debug=True)
     return planes
 
 

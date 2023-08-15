@@ -12,6 +12,7 @@ from solar_pv.geos import slope_deg, aspect_deg, deg_diff
 
 DO_NOT_MERGE = 9999
 DO_MERGE = -9999
+R2_GOOD = 0.925
 
 
 def _edge_weight(graph, src: int, dst: int) -> float:
@@ -44,8 +45,7 @@ def _edge_weight(graph, src: int, dst: int) -> float:
                        (src_node['r2'] * src_inliers)) / (dst_inliers + src_inliers)
             new_r2 = lr.score(xy_subset, z_subset)
             # If the new score is still good enough, don't require it to be better than before
-            # TODO constant
-            weight = curr_r2 - new_r2 if new_r2 < 0.925 else DO_MERGE
+            weight = curr_r2 - new_r2 if new_r2 < R2_GOOD else DO_MERGE
 
             # if new aspect is outside the range of adjusted aspects, do not merge:
             new_aspect = aspect_deg(lr.coef_[0], lr.coef_[1])

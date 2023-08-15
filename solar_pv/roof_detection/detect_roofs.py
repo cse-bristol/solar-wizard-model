@@ -25,7 +25,7 @@ from solar_pv.constants import RANSAC_LARGE_BUILDING, \
     RANSAC_SMALL_BUILDING, RANSAC_MEDIUM_MAX_TRIALS, ROOFDET_MAX_MAE
 from solar_pv.roof_detection.detsac import DETSACRegressorForLIDAR
 from solar_pv.roof_detection.merge_adjacent import merge_adjacent
-from solar_pv.roof_detection.premade_planes import create_planes, create_planes_2, _image
+from solar_pv.roof_detection.premade_planes import create_planes, create_planes, _image
 from solar_pv.roof_detection.ransac import RANSACRegressorForLIDAR
 from solar_pv.geos import slope_deg, aspect_deg
 from solar_pv.roof_polygons.roof_polygons_2 import create_roof_polygons
@@ -137,7 +137,7 @@ def _detect_building_roof_planes(building: RoofDetBuilding,
 
     min_points_per_plane = min(8, int(8 / resolution_metres))  # 8 for 2m, 8 for 1m, 16 for 0.5m
     total_points_in_building = len(aspect)
-    premade_planes = create_planes_2(xyz, aspect, slope, polygon, resolution_metres)
+    premade_planes = create_planes(xyz, aspect, slope, resolution_metres)
     skip_planes = set()
     xy = xyz[:, :2]
     z = xyz[:, 2]

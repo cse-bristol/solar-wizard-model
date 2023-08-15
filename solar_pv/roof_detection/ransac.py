@@ -28,6 +28,9 @@ from solar_pv.geos import simplify_by_angle, polygon_line_segments, azimuth_deg,
     aspect_deg, aspect_rad, circular_mean_rad, circular_sd_rad, rad_diff, deg_diff
 
 
+_NEVER_INLIER = 9999
+
+
 class RANSACRegressorForLIDAR(RANSACRegressor):
 
     def __init__(self, base_estimator=None, *,
@@ -296,7 +299,7 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
             y_pred = base_estimator.predict(X)
             residuals_subset = loss_function(y, y_pred)
             # don't allow plane to be fit to points already on a different plane:
-            residuals_subset[mask == 0] = 9999  # TODO constant
+            residuals_subset[mask == 0] = _NEVER_INLIER
 
             # classify data into inliers and outliers
             inlier_mask_subset = residuals_subset < residual_threshold
@@ -515,7 +518,7 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
         y_pred = base_estimator.predict(X)
         residuals_subset = loss_function(y, y_pred)
         # don't allow plane to be fit to points already on a different plane:
-        residuals_subset[mask == 0] = 9999  # TODO constant
+        residuals_subset[mask == 0] = _NEVER_INLIER
         inlier_mask_best = residuals_subset < residual_threshold
         mask_without_excluded = _exclude_unconnected(X, min_X, inlier_mask_best, res=self.resolution_metres)
 

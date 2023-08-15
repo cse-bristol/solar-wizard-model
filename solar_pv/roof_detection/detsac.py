@@ -31,10 +31,13 @@ from solar_pv.constants import ROOFDET_GOOD_SCORE, AZIMUTH_ALIGNMENT_THRESHOLD, 
 from solar_pv.geos import polygon_line_segments, simplify_by_angle, azimuth_deg, slope_deg, \
     aspect_deg, aspect_rad, circular_mean_rad, circular_sd_rad, circular_variance_rad, rad_diff, \
     deg_diff, to_positive_angle
-from solar_pv.roof_detection.premade_planes import Plane, ArrayPlane
+from solar_pv.roof_detection.premade_planes import Plane
 from solar_pv.roof_detection.ransac import _exclude_unconnected, \
     _sample, _pixel_groups, _group_areas, _min_thinness_ratio, _get_potential_aspects, \
     closest_azimuth
+
+
+_NEVER_INLIER = 9999
 
 
 class DETSACRegressorForLIDAR(RANSACRegressor):
@@ -113,7 +116,7 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
             # These are all optional parameters just so that the method matches
             # the base class signature... They are actually required!
             polygon: Polygon = None,
-            premade_planes: List[ArrayPlane] = None,
+            premade_planes: List[Plane] = None,
             skip_planes: Set[str] = None,
             aspect: np.ndarray = None,
             mask: np.ndarray = None,
@@ -250,7 +253,7 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
             residuals_subset_copy = residuals_subset.copy()
             residuals_subset_copy[(m1 & m2) == 1] = 0
             # never allow plane to be fit to points already on a different plane:
-            residuals_subset_copy[mask == 0] = 9999  # TODO constant
+            residuals_subset_copy[mask == 0] = _NEVER_INLIER
 
             # classify data into inliers and outliers
             inlier_mask_subset = residuals_subset_copy < residual_threshold
@@ -475,7 +478,7 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
         m2 = np.zeros(residuals_subset.shape, dtype=int)
         m2[best_sample_idxs] = 1
         residuals_subset[(m1 & m2) == 1] = 0
-        residuals_subset[mask == 0] = 9999  # TODO constant
+        residuals_subset[mask == 0] = _NEVER_INLIER
 
         inlier_mask_best = residuals_subset < residual_threshold
         mask_without_excluded = _exclude_unconnected(X, min_X, inlier_mask_best, res=self.resolution_metres)
