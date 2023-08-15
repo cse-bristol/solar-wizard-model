@@ -15,10 +15,10 @@ from osgeo import ogr, gdal
 
 from solar_pv.geos import square, to_geojson_dict
 from solar_pv.lidar.lidar import LIDAR_NODATA
-from solar_pv.ransac.run_ransac import _ransac_building, _load
+from solar_pv.roof_detection.detect_roofs import _detect_building_roof_planes, _load
 
 
-def ransac_toids(pg_uri: str, job_id: int, toids: Optional[List[str]], resolution_metres: float, out_dir: str, write_test_data: bool = True):
+def detect_toid_roofs(pg_uri: str, job_id: int, toids: Optional[List[str]], resolution_metres: float, out_dir: str, write_test_data: bool = True):
     logging.basicConfig(level=logging.INFO,
                         format='[%(asctime)s] %(levelname)s: %(message)s')
     os.makedirs(out_dir, exist_ok=True)
@@ -27,7 +27,7 @@ def ransac_toids(pg_uri: str, job_id: int, toids: Optional[List[str]], resolutio
     all_planes = []
     for toid, building in by_toid.items():
         print(f"\nTOID: {toid}\n")
-        planes = _ransac_building(building, toid, resolution_metres, debug=True)
+        planes = _detect_building_roof_planes(building, toid, resolution_metres, debug=True)
         all_planes.extend(planes)
 
         if len(planes) > 0:
@@ -74,8 +74,8 @@ def _write_planes(toids: Optional[List[str]], job_id: int, resolution_metres: fl
 
 
 def _write_test_data(toid, building):
-    ransac_test_data_dir = join(paths.TEST_DATA, "ransac")
-    testfile = join(ransac_test_data_dir, f"{toid}.json")
+    test_data_dir = join(paths.TEST_DATA, "roof_detection")
+    testfile = join(test_data_dir, f"{toid}.json")
     with open(testfile, 'w') as f:
         json.dump(building, f, default=str)
     print(f"Wrote test data to {testfile}")
@@ -120,7 +120,7 @@ if __name__ == "__main__":
     import os
     # thinness_ratio_experiments()
 
-    # ransac_toids(
+    # detect_toid_roofs(
     #     os.getenv("PGW_URI"),
     #     1659,
     #     [
@@ -194,7 +194,7 @@ if __name__ == "__main__":
     #     f"{os.getenv('DEV_DATA_DIR')}/ransac",
     #     write_test_data=False)
 
-    # ransac_toids(
+    # detect_toid_roofs(
     #     os.getenv("PGW_URI"),
     #     1649,
     #     ["osgb1000014994631"],
@@ -203,7 +203,7 @@ if __name__ == "__main__":
     #     f"{os.getenv('DEV_DATA_DIR')}/ransac",
     #     write_test_data=False)
 
-    # ransac_toids(
+    # detect_toid_roofs(
     #     os.getenv("PGW_URI"),
     #     1661,
     #     [
@@ -220,14 +220,14 @@ if __name__ == "__main__":
     #     f"{os.getenv('DEV_DATA_DIR')}/ransac",
     #     write_test_data=False)
 
-    # ransac_toids(
-    #     os.getenv("PGW_URI"),
-    #     1660,
-    #     [
-    #         "osgb5000005110302956",
-    #         "osgb1000014963168"
-    #     ],
-    #     # None,
-    #     1.0,
-    #     f"{os.getenv('DEV_DATA_DIR')}/ransac",
-    #     write_test_data=False)
+    detect_toid_roofs(
+        os.getenv("PGW_URI"),
+        1660,
+        [
+            "osgb5000005110302956",
+            "osgb1000014963168"
+        ],
+        # None,
+        1.0,
+        f"{os.getenv('DEV_DATA_DIR')}/ransac",
+        write_test_data=False)

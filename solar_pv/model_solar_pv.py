@@ -16,7 +16,7 @@ from solar_pv.postgis import raster_tile_coverage_count
 from solar_pv.outdated_lidar.outdated_lidar_check import check_lidar
 from solar_pv.panels.panels import place_panels
 from solar_pv.pvgis.pvgis import pvgis
-from solar_pv.ransac.run_ransac import run_ransac
+from solar_pv.roof_detection.detect_roofs import detect_roofs
 from solar_pv.rasters import generate_rasters
 
 
@@ -90,17 +90,17 @@ def model_solar_pv(pg_uri: str,
     check_lidar(pg_uri, job_id, resolution_metres=res)
 
     logging.info("Detecting roof planes...")
-    run_ransac(pg_uri, job_id,
-               max_roof_slope_degrees=max_roof_slope_degrees,
-               min_roof_area_m=min_roof_area_m,
-               min_roof_degrees_from_north=min_roof_degrees_from_north,
-               flat_roof_degrees=flat_roof_degrees,
-               large_building_threshold=large_building_threshold,
-               min_dist_to_edge_m=min_dist_to_edge_m,
-               min_dist_to_edge_large_m=min_dist_to_edge_large_m,
-               resolution_metres=res,
-               panel_width_m=panel_width_m,
-               panel_height_m=panel_height_m)
+    detect_roofs(pg_uri, job_id,
+                 max_roof_slope_degrees=max_roof_slope_degrees,
+                 min_roof_area_m=min_roof_area_m,
+                 min_roof_degrees_from_north=min_roof_degrees_from_north,
+                 flat_roof_degrees=flat_roof_degrees,
+                 large_building_threshold=large_building_threshold,
+                 min_dist_to_edge_m=min_dist_to_edge_m,
+                 min_dist_to_edge_large_m=min_dist_to_edge_large_m,
+                 resolution_metres=res,
+                 panel_width_m=panel_width_m,
+                 panel_height_m=panel_height_m)
 
     logging.info("Adding individual PV panels...")
     place_panels(

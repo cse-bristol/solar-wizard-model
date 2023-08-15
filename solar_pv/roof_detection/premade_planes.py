@@ -15,7 +15,6 @@ from skimage.future.graph import rag_mean_color, cut_threshold
 from sklearn.linear_model import LinearRegression
 
 from solar_pv.geos import polygon_line_segments, simplify_by_angle, aspect_deg
-from solar_pv.roof_polygons.roof_polygons_2 import _building_orientations
 
 _SLOPES = [25, 28, 30, 33, 35, 40, 45, 50,
            -25, -28, -30, -33, -35,

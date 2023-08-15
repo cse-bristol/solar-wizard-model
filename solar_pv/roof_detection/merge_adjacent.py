@@ -7,7 +7,7 @@ from sklearn.linear_model import LinearRegression
 
 from solar_pv.constants import ROOFDET_GOOD_SCORE, FLAT_ROOF_DEGREES_THRESHOLD, \
     AZIMUTH_ALIGNMENT_THRESHOLD, FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD
-from solar_pv.ransac.premade_planes import _image
+from solar_pv.roof_detection.premade_planes import _image
 from solar_pv.geos import slope_deg, aspect_deg, deg_diff
 
 DO_NOT_MERGE = 9999

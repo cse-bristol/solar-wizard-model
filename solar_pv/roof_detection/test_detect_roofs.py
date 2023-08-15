@@ -9,10 +9,10 @@ from typing import List
 from shapely import wkt
 
 from solar_pv.paths import TEST_DATA
-from solar_pv.ransac.run_ransac import _ransac_building, RoofDetBuilding
+from solar_pv.roof_detection.detect_roofs import _detect_building_roof_planes, RoofDetBuilding
 from solar_pv.test_utils.test_funcs import ParameterisedTestCase
 
-_RANSAC_DATA = join(TEST_DATA, "ransac")
+_ROOFDET_DATA = join(TEST_DATA, "roof_detection")
 
 
 def _load_data(filename: str) -> RoofDetBuilding:
@@ -22,15 +22,15 @@ def _load_data(filename: str) -> RoofDetBuilding:
     return building
 
 
-def _ransac(toid: str, res: float):
+def _roofdet(toid: str, res: float):
     filename = f"{toid}.json" if not toid.endswith(".json") else toid
-    planes = _ransac_building(_load_data(join(_RANSAC_DATA, filename)), filename, res, debug=False)
+    planes = _detect_building_roof_planes(_load_data(join(_ROOFDET_DATA, filename)), filename, res, debug=False)
     return sorted([plane['aspect_adjusted'] for plane in planes])
 
 
-class RansacTestCase(ParameterisedTestCase):
+class RoofDetTestCase(ParameterisedTestCase):
 
-    def test_ransac(self):
+    def test_roof_detection(self):
         self.parameterised_test([
             # Tricky Totterdown terraces:
             ("osgb1000014994639", 1.0, [54, 234]),
@@ -79,4 +79,4 @@ class RansacTestCase(ParameterisedTestCase):
             ("osgb1000021672457", 1.0, [0, 90, 90, 180, 270]),
             ("osgb1000021672466", 1.0, [85, 265]),
             ("osgb1000000337226766", 1.0, [59, 59, 149, 239, 329]),
-        ], _ransac)
+        ], _roofdet)

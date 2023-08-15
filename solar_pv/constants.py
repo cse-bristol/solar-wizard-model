@@ -38,6 +38,8 @@ RANSAC_SMALL_MAX_TRIALS = 1000
 # and start optimising for number of points on the plane:
 ROOFDET_GOOD_SCORE = 0.125
 
+ROOFDET_MAX_MAE = 1.0
+
 # GDAL default tile geotiff tilesize:
 POSTGIS_TILESIZE = 256
 

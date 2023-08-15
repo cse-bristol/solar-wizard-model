@@ -31,8 +31,8 @@ from solar_pv.constants import ROOFDET_GOOD_SCORE, AZIMUTH_ALIGNMENT_THRESHOLD, 
 from solar_pv.geos import polygon_line_segments, simplify_by_angle, azimuth_deg, slope_deg, \
     aspect_deg, aspect_rad, circular_mean_rad, circular_sd_rad, circular_variance_rad, rad_diff, \
     deg_diff, to_positive_angle
-from solar_pv.ransac.premade_planes import Plane, ArrayPlane
-from solar_pv.ransac.ransac import _exclude_unconnected, \
+from solar_pv.roof_detection.premade_planes import Plane, ArrayPlane
+from solar_pv.roof_detection.ransac import _exclude_unconnected, \
     _sample, _pixel_groups, _group_areas, _min_thinness_ratio, _get_potential_aspects, \
     closest_azimuth
 
@@ -120,47 +120,7 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
             total_points_in_building: int = None,
             debug: bool = False):
         """
-        Extended implementation of RANSAC with additions for usage with LIDAR
-        to detect roof planes.
-
-        Changes made:
-        * Tarsha-Kurdi, 2007 recommends rejecting planes where the (x,y) points in the
-        plane do not form a single contiguous region of the LIDAR. This mostly helps
-        but does exclude some valid planes where the correctly-fitted plane also happens
-        to fit to other pixels in disconnected areas of the roof. I have modified it to
-        allow planes where a small number of non-contiguous pixels fit, as long as
-        the area ratio of those non-contiguous pixels to the area of the main mass of
-        contiguous pixels is small.
-
-        * Do not optimise for number of points within `residual_threshold` distance
-        from plane, instead optimise for lowest SD of all points within `residual_threshold`
-        distance from plane (Tarsha-Kurdi, 2007). In a normal regression trying to fit as
-        many points as possible makes sense, but for roof plane fitting we know it is
-        very likely that there will be multiple planes to fit in a given data set, so
-        fitting more is not necessarily better.
-
-        * Give the option of forbidding very steep or shallow slopes (not sourced from
-        a paper) - since we don't care about walls and the LIDAR is cropped to the
-        building bounds the steep ones are likely to be false positives. I don't
-        currently use the 'no shallow slopes' rule as it doesn't seem necessary.
-
-        * Constrain the selection of the initial sample of 3 points to points whose
-        detected aspect is close (not sourced from a paper) aspect can be detected
-        using a tool like SAGA or GDAL.
-
-        * Reject planes where the area of the polygon formed by the inliers in the xy
-        plane is significantly less than the area of the convex hull of that polygon.
-        This is intended to reject planes which have cut across a roof and so have a
-        u-shaped intersect with the actual points.
-
-        * Reject planes where the `thinness ratio` is too low - i.e the shape of the
-        polygon is very long and thin. The `thinness ratio` is defined as
-        `4 * pi * area / perimeter^2`, and is a standard GIS approach to detecting
-        sliver polygons. Even if these were accurately detected roofs, they're no good
-        for PV panels so we can safely ignore them.
-
-        This only extracts one plane at a time so should be re-run until it can't find
-        any more, with the points in the found plane removed from the next round's input.
+        TODO document this
         """
         if self.base_estimator is not None:
             base_estimator = clone(self.base_estimator)

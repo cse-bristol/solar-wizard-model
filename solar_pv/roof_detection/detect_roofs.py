@@ -22,11 +22,11 @@ from solar_pv.postgis import pixels_for_buildings
 from solar_pv import tables
 from solar_pv.constants import RANSAC_LARGE_BUILDING, \
     RANSAC_LARGE_MAX_TRIALS, RANSAC_SMALL_MAX_TRIALS, FLAT_ROOF_DEGREES_THRESHOLD, \
-    RANSAC_SMALL_BUILDING, RANSAC_MEDIUM_MAX_TRIALS
-from solar_pv.ransac.detsac import DETSACRegressorForLIDAR
-from solar_pv.ransac.merge_adjacent import merge_adjacent
-from solar_pv.ransac.premade_planes import create_planes, create_planes_2, _image
-from solar_pv.ransac.ransac import RANSACRegressorForLIDAR
+    RANSAC_SMALL_BUILDING, RANSAC_MEDIUM_MAX_TRIALS, ROOFDET_MAX_MAE
+from solar_pv.roof_detection.detsac import DETSACRegressorForLIDAR
+from solar_pv.roof_detection.merge_adjacent import merge_adjacent
+from solar_pv.roof_detection.premade_planes import create_planes, create_planes_2, _image
+from solar_pv.roof_detection.ransac import RANSACRegressorForLIDAR
 from solar_pv.geos import slope_deg, aspect_deg
 from solar_pv.roof_polygons.roof_polygons_2 import create_roof_polygons
 from solar_pv.util import get_cpu_count
@@ -40,25 +40,25 @@ class RoofDetBuilding(TypedDict):
     max_ground_height: float
 
 
-def _ransac_cpu_count():
-    """Use 3/4s of available CPUs for RANSAC plane detection"""
+def _roof_det_cpu_count():
+    """Use 3/4s of available CPUs for roof plane detection"""
     return int(get_cpu_count() * 0.75)
 
 
-def run_ransac(pg_uri: str,
-               job_id: int,
-               max_roof_slope_degrees: int,
-               min_roof_area_m: int,
-               min_roof_degrees_from_north: int,
-               flat_roof_degrees: int,
-               large_building_threshold: float,
-               min_dist_to_edge_m: float,
-               min_dist_to_edge_large_m: float,
-               resolution_metres: float,
-               panel_width_m: float,
-               panel_height_m: float,
-               workers: int = _ransac_cpu_count(),
-               building_page_size: int = 50) -> None:
+def detect_roofs(pg_uri: str,
+                 job_id: int,
+                 max_roof_slope_degrees: int,
+                 min_roof_area_m: int,
+                 min_roof_degrees_from_north: int,
+                 flat_roof_degrees: int,
+                 large_building_threshold: float,
+                 min_dist_to_edge_m: float,
+                 min_dist_to_edge_large_m: float,
+                 resolution_metres: float,
+                 panel_width_m: float,
+                 panel_height_m: float,
+                 workers: int = _roof_det_cpu_count(),
+                 building_page_size: int = 50) -> None:
 
     if count(pg_uri, tables.schema(job_id), tables.ROOF_POLYGON_TABLE) > 0:
         logging.info("Not detecting roof planes, already detected.")
@@ -68,7 +68,7 @@ def run_ransac(pg_uri: str,
     segments = math.ceil(building_count / building_page_size)
     workers = min(segments, workers)
     logging.info(f"{building_count} buildings, in {segments} batches to process")
-    logging.info(f"Using {workers} processes for RANSAC")
+    logging.info(f"Using {workers} processes for roof plane detection")
     start_time = time.time()
 
     params = {
@@ -93,11 +93,11 @@ def run_ransac(pg_uri: str,
             if not res._success:
                 pool.terminate()
                 pool.join()
-                raise ValueError('Cancelling RANSAC due to failure in worker')
+                raise ValueError('Cancelling roof plane detection due to failure in worker')
             time.sleep(1)
 
     _mark_buildings_with_no_planes(pg_uri, job_id)
-    logging.info(f"RANSAC for {building_count} roofs took {round(time.time() - start_time, 2)} s.")
+    logging.info(f"roof plane detection for {building_count} roofs took {round(time.time() - start_time, 2)} s.")
 
 
 def _handle_building_page(pg_uri: str, job_id: int, page: int, page_size: int, params: dict):
@@ -107,11 +107,11 @@ def _handle_building_page(pg_uri: str, job_id: int, page: int, page_size: int, p
     planes = []
     for toid, building in buildings.items():
         try:
-            found = _ransac_building(building, toid, params['resolution_metres'])
+            found = _detect_building_roof_planes(building, toid, params['resolution_metres'])
             if len(found) > 0:
                 planes.extend(found)
         except Exception as e:
-            print(f"Exception during RANSAC for TOID {toid}:")
+            print(f"Exception during roof plane detection for TOID {toid}:")
             traceback.print_exception(e)
             _print_test_data(building)
             raise e
@@ -121,10 +121,10 @@ def _handle_building_page(pg_uri: str, job_id: int, page: int, page_size: int, p
     print(f"Page {page} of {page_size} buildings complete, took {round(time.time() - start_time, 2)} s.")
 
 
-def _ransac_building(building: RoofDetBuilding,
-                     toid: str,
-                     resolution_metres: float,
-                     debug: bool = False) -> List[dict]:
+def _detect_building_roof_planes(building: RoofDetBuilding,
+                                 toid: str,
+                                 resolution_metres: float,
+                                 debug: bool = False) -> List[dict]:
     pixels_in_building = building['pixels']
     polygon = building['polygon']
     max_ground_height = building['max_ground_height']
@@ -172,8 +172,7 @@ def _ransac_building(building: RoofDetBuilding,
             # don't keep bad planes - their inliers become candidates for being
             # merged into other planes (and the planes will still have been added to
             # skip_planes, so we don't retry them)
-            # TODO constant for max MAE
-            if detsac.plane_properties["score"] < 1.0:
+            if detsac.plane_properties["score"] < ROOFDET_MAX_MAE:
                 planes[plane_idx] = detsac.plane_properties
                 planes[plane_idx]["toid"] = toid
                 labels[inlier_mask] = plane_idx
@@ -216,8 +215,7 @@ def _ransac_building(building: RoofDetBuilding,
             # don't keep bad planes - their inliers become candidates for being
             # merged into other planes (and the planes will still have been added to
             # skip_planes, so we don't retry them)
-            # TODO constant for max MAE
-            if ransac.plane_properties["score"] < 1.0:
+            if ransac.plane_properties["score"] < ROOFDET_MAX_MAE:
                 planes[plane_idx] = ransac.plane_properties
                 planes[plane_idx]["toid"] = toid
                 labels[inlier_mask] = plane_idx
@@ -234,7 +232,7 @@ def _ransac_building(building: RoofDetBuilding,
 
 def _load(pg_uri: str, job_id: int, page: int, page_size: int, toids: List[str] = None, force_load: bool = False) -> Dict[str, RoofDetBuilding]:
     """
-    Load LIDAR pixel data for RANSAC processing. page_size is number of
+    Load LIDAR pixel data for roof plane detection. page_size is number of
     buildings rather than pixels to prevent splitting a building's pixels across
     pages.
     """
