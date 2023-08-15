@@ -9,7 +9,7 @@ FLAT_ROOF_DEGREES_THRESHOLD = 5.0
 
 # If a roof plane has an aspect which is closer than this value to the azimuth of
 # one of the facings of a building, re-align the roof plane to that azimuth.
-AZIMUTH_ALIGNMENT_THRESHOLD = 15
+AZIMUTH_ALIGNMENT_THRESHOLD = 15.5
 
 # Same as above, but for flat roofs:
 FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD = 46

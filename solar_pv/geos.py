@@ -34,11 +34,18 @@ def from_geojson(geojson):
     return shape(geojson)
 
 
-def to_geojson(geom):
+def to_geojson_str(geom):
     if isinstance(geom, BaseGeometry):
         geom_dict = mapping(geom)
         geojson = json.dumps(geom_dict)
         return geojson
+    return None
+
+
+def to_geojson_dict(geom):
+    if isinstance(geom, BaseGeometry):
+        geom_dict = mapping(geom)
+        return geom_dict
     return None
 
 

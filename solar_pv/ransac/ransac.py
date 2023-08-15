@@ -1,7 +1,7 @@
 # This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 from collections import defaultdict
-from typing import Set, Tuple
+from typing import Set, Tuple, List, Optional
 
 import numpy as np
 import warnings
@@ -22,7 +22,8 @@ from sklearn.exceptions import ConvergenceWarning
 from skimage.measure import perimeter_crofton
 
 from solar_pv.constants import AZIMUTH_ALIGNMENT_THRESHOLD, \
-    FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD, ROOFDET_GOOD_SCORE
+    FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD, ROOFDET_GOOD_SCORE, \
+    FLAT_ROOF_DEGREES_THRESHOLD
 from solar_pv.geos import simplify_by_angle, polygon_line_segments, azimuth_deg, slope_deg, \
     aspect_deg, aspect_rad, circular_mean_rad, circular_sd_rad, rad_diff, deg_diff
 
@@ -651,7 +652,7 @@ def _min_thinness_ratio(area) -> float:
         return 0.07
 
 
-def _get_potential_aspects(X_inlier_subset, polygon: Polygon):
+def _get_potential_aspects(X_inlier_subset, polygon: Polygon) -> List[int]:
     polygon = simplify_by_angle(polygon, tolerance_degrees=2.0)
     line_segments = polygon_line_segments(polygon, min_length=1.0)
     mp = MultiPoint(X_inlier_subset)
@@ -674,3 +675,11 @@ def _get_potential_aspects(X_inlier_subset, polygon: Polygon):
         azimuths.add((az + 180) % 360)
         azimuths.add((az + 270) % 360)
     return list(azimuths)
+
+
+def closest_azimuth(azimuths: List[float], aspect: float, thresh: float) -> Optional[float]:
+    az = min(azimuths, key=lambda az_: deg_diff(az_, aspect))
+    if deg_diff(az, aspect) < thresh:
+        return az
+    else:
+        return None

@@ -33,7 +33,8 @@ from solar_pv.geos import polygon_line_segments, simplify_by_angle, azimuth_deg,
     deg_diff, to_positive_angle
 from solar_pv.ransac.premade_planes import Plane, ArrayPlane
 from solar_pv.ransac.ransac import _exclude_unconnected, \
-    _sample, _pixel_groups, _group_areas, _min_thinness_ratio, _get_potential_aspects
+    _sample, _pixel_groups, _group_areas, _min_thinness_ratio, _get_potential_aspects, \
+    closest_azimuth
 
 
 class DETSACRegressorForLIDAR(RANSACRegressor):
@@ -424,14 +425,15 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
             if slope > self.flat_roof_threshold_degrees:
                 target_az = aspect_deg(base_estimator.coef_[0], base_estimator.coef_[1])
                 az_diff_thresh = AZIMUTH_ALIGNMENT_THRESHOLD
+                aspect_deg_ = closest_azimuth(azimuths, target_az, az_diff_thresh)
+                if aspect_deg_ is None:
+                    aspect_deg_ = closest_azimuth(azimuths, math.degrees(aspect_circ_mean), az_diff_thresh)
             else:
                 target_az = 180
                 az_diff_thresh = FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD
+                aspect_deg_ = closest_azimuth(azimuths, target_az, az_diff_thresh)
 
-            az = min(azimuths, key=lambda az_: deg_diff(az_, target_az))
-            if deg_diff(az, target_az) < az_diff_thresh:
-                aspect_deg_ = az
-            else:
+            if aspect_deg_ is None:
                 if debug:
                     bad_sample_reasons["NO_CLOSE_ASPECT"] += 1
                 skip_planes.add(plane.plane_id)

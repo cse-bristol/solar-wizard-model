@@ -133,8 +133,10 @@ def _update_node_data(graph, src: int, dst: int):
 
     if dst_node['outlier'] is src_node['outlier'] is False:
         dst_node['plane_type'] = dst_node['plane_type'] + "_MERGED_" + src_node['plane_type']
+        dst_node['plane_id'] = dst_node['plane_id'] + "_MERGED_" + src_node['plane_id']
     else:
         dst_node['plane_type'] = dst_node.get('plane_type', src_node.get('plane_type'))
+        dst_node['plane_id'] = dst_node.get('plane_id', src_node.get('plane_id'))
 
     dst_node['outlier'] = False
 

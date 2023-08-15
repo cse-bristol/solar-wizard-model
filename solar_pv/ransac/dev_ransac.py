@@ -1,15 +1,19 @@
 # This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
+import json
 import logging
 from os.path import join
 from typing import List, Optional
 
 import time
+from shapely import ops
+from shapely.geometry import MultiPoint, MultiPolygon
 
 from solar_pv import paths
 
 from osgeo import ogr, gdal
 
+from solar_pv.geos import square, to_geojson_dict
 from solar_pv.lidar.lidar import LIDAR_NODATA
 from solar_pv.ransac.run_ransac import _ransac_building, _load
 
@@ -45,140 +49,33 @@ def _write_planes(toids: Optional[List[str]], job_id: int, resolution_metres: fl
     if toids is None:
         filename = f"job_{job_id}"
     elif len(toids) == 1:
-        filename = toids[0]
+        filename = f"job_{job_id}_{toids[0]}"
     else:
-        filename = "toids"
+        filename = f"job_{job_id}_toids"
     t = int(time.time())
-    tiff_out = join(out_dir, f"{filename}-{t}.tif")
-    _write_tiff(tiff_out, resolution_metres, pixels, planes)
     geojson_out = join(out_dir, f"{filename}-{t}.geojson")
-    _write_geojson(tiff_out, geojson_out)
-    _write_geojson_fields(geojson_out, planes)
-    try:
-        os.remove(tiff_out)
-    except OSError:
-        pass
+    _write_geojson(geojson_out, resolution_metres, planes)
 
 
-def _write_tiff(filepath: str, res: float, pixels, planes):
-    import numpy
-    from osgeo import gdal, osr
-    from osgeo.gdalconst import GDT_Int32
+def _write_geojson(filename: str, resolution_metres: float, planes):
+    feature_coll = {"type": "FeatureCollection",
+                    "crs": {"type": "name",
+                            "properties": {"name": "urn:ogc:def:crs:EPSG::27700"}},
+                    "features": []}
+    for plane in planes:
+        halfr = resolution_metres / 2
+        r = resolution_metres
+        pixels = [square(xy[0] - halfr, xy[1] - halfr, r) for xy in plane['inliers_xy']]
+        geom = ops.unary_union(pixels)
+        geojson = to_geojson_dict(geom)
+        plane['inliers'] = len(plane['inliers_xy'])
+        del plane['inliers_xy']
+        feature_coll['features'].append({"type": "Feature",
+                                         "geometry": geojson,
+                                         "properties": plane})
 
-    gdal.UseExceptions()
-
-    ulx = min(pixels, key=lambda p: p['x'])['x']
-    uly = max(pixels, key=lambda p: p['y'])['y']
-    lrx = max(pixels, key=lambda p: p['x'])['x']
-    lry = min(pixels, key=lambda p: p['y'])['y']
-
-    xmax = int((lrx - ulx) / res) + 1
-    ymax = int((uly - lry) / res) + 1
-    # print(f"xmax {xmax} ymax {ymax}")
-
-    driver = gdal.GetDriverByName('GTiff')
-    out_ds = driver.Create(filepath, xmax, ymax, 1, GDT_Int32)
-    band = out_ds.GetRasterBand(1)
-    data = numpy.zeros((ymax, xmax), numpy.int16)
-
-    for x in range(0, xmax):
-        for y in range(0, ymax):
-            data[y, x] = LIDAR_NODATA
-
-    by_pixel_id = {}
-
-    for pixel in pixels:
-        by_pixel_id[pixel['pixel_id']] = pixel
-        # this sets all non-nodata pixels that aren't in a plane to 0:
-        # x = int(pixel["x"] - ulx)
-        # y = int(uly - pixel["y"])
-        # data[y, x] = 0
-
-    for plane_id, plane in enumerate(planes):
-        plane_id += 1
-        toid = plane['toid']
-        for inlier in plane["inliers_xy"]:
-            pixel = by_pixel_id[f"{toid}:{inlier[0]}:{inlier[1]}"]
-            x = int(pixel["x"] - ulx)
-            y = int(uly - pixel["y"])
-            data[y, x] = plane_id
-
-    band.WriteArray(data, 0, 0)
-    band.FlushCache()
-    band.SetNoDataValue(LIDAR_NODATA)
-    # ulx, xres, xskew, uly, yskew, yres
-    out_ds.SetGeoTransform([ulx - res / 2, res, 0, uly + res / 2, 0, -res])
-    srs = osr.SpatialReference()
-    srs.ImportFromEPSG(27700)
-    out_ds.SetProjection(srs.ExportToWkt())
-    # print(f"wrote tiff {filepath}")
-
-
-def _write_geojson(in_tiff: str, out_geojson: str, connectedness_8: bool = True):
-    gdal.UseExceptions()
-
-    in_file = gdal.Open(in_tiff)
-    band = in_file.GetRasterBand(1)
-
-    drv = ogr.GetDriverByName("GeoJSON")
-    dst_ds = drv.CreateDataSource(out_geojson)
-    srs = in_file.GetSpatialRef()
-    dst_layer = dst_ds.CreateLayer("planes", geom_type=ogr.wkbPolygon, srs=srs)
-
-    fd = ogr.FieldDefn("plane_id", ogr.OFTInteger)
-    dst_layer.CreateField(fd)
-    options = ['8CONNECTED=8'] if connectedness_8 else []
-
-    gdal.FPolygonize(band, band.GetMaskBand(), dst_layer, 0, options, callback=None)
-    print(f"\nwrote geojson {out_geojson}")
-
-
-def _write_geojson_fields(geojson: str, planes):
-    gdal.UseExceptions()
-    driver = ogr.GetDriverByName('GeoJSON')
-    dataSource = driver.Open(geojson, 1)
-
-    layer = dataSource.GetLayer()
-    layer.CreateField(ogr.FieldDefn("toid", ogr.OFTString))
-    layer.CreateField(ogr.FieldDefn("slope", ogr.OFTReal))
-    layer.CreateField(ogr.FieldDefn("aspect", ogr.OFTReal))
-    layer.CreateField(ogr.FieldDefn("sd", ogr.OFTReal))
-    layer.CreateField(ogr.FieldDefn("aspect_circ_mean", ogr.OFTReal))
-    layer.CreateField(ogr.FieldDefn("aspect_circ_sd", ogr.OFTReal))
-    layer.CreateField(ogr.FieldDefn("thinness_ratio", ogr.OFTReal))
-    layer.CreateField(ogr.FieldDefn("cv_hull_ratio", ogr.OFTReal))
-    layer.CreateField(ogr.FieldDefn("plane_type", ogr.OFTString))
-    layer.CreateField(ogr.FieldDefn("inliers", ogr.OFTInteger))
-
-    layer.CreateField(ogr.FieldDefn("r2", ogr.OFTReal))
-    layer.CreateField(ogr.FieldDefn("mae", ogr.OFTReal))
-    layer.CreateField(ogr.FieldDefn("mse", ogr.OFTReal))
-    layer.CreateField(ogr.FieldDefn("rmse", ogr.OFTReal))
-    layer.CreateField(ogr.FieldDefn("msle", ogr.OFTReal))
-    layer.CreateField(ogr.FieldDefn("mape", ogr.OFTReal))
-
-    for feature in layer:
-        plane_id = feature.GetField("plane_id")
-        if plane_id != 0:
-            plane = planes[plane_id - 1]
-            feature.SetField("toid", plane["toid"])
-            feature.SetField("slope", plane["slope"])
-            feature.SetField("aspect", plane["aspect"])
-            feature.SetField("sd", plane["sd"])
-            feature.SetField("aspect_circ_mean", plane["aspect_circ_mean"])
-            feature.SetField("aspect_circ_sd", plane["aspect_circ_sd"])
-            feature.SetField("thinness_ratio", plane["thinness_ratio"])
-            feature.SetField("cv_hull_ratio", plane["cv_hull_ratio"])
-            feature.SetField("plane_type", plane["plane_type"])
-            feature.SetField("inliers", len(plane["inliers_xy"]))
-
-            feature.SetField("r2", plane["r2"])
-            feature.SetField("mae", plane["mae"])
-            feature.SetField("mse", plane["mse"])
-            feature.SetField("rmse", plane["rmse"])
-            feature.SetField("msle", plane["msle"])
-            feature.SetField("mape", plane["mape"])
-            layer.SetFeature(feature)
+    with open(filename, 'w') as f:
+        json.dump(feature_coll, f, default=str)
 
 
 def _write_test_data(toid, building):
@@ -304,6 +201,16 @@ if __name__ == "__main__":
     #     f"{os.getenv('DEV_DATA_DIR')}/ransac",
     #     write_test_data=False)
 
+    ransac_toids(
+        os.getenv("PGW_URI"),
+        1659,
+        [
+            "osgb1000014994639",
+        ],
+        1.0,
+        f"{os.getenv('DEV_DATA_DIR')}/ransac",
+        write_test_data=False)
+
     # ransac_toids(
     #     os.getenv("PGW_URI"),
     #     1649,
@@ -322,14 +229,14 @@ if __name__ == "__main__":
     #     f"{os.getenv('DEV_DATA_DIR')}/ransac",
     #     write_test_data=False)
 
-    ransac_toids(
-        os.getenv("PGW_URI"),
-        1660,
-        [
-            "osgb5000005110302956",
-            "osgb1000014963168"
-        ],
-        # None,
-        1.0,
-        f"{os.getenv('DEV_DATA_DIR')}/ransac",
-        write_test_data=False)
+    # ransac_toids(
+    #     os.getenv("PGW_URI"),
+    #     1660,
+    #     [
+    #         "osgb5000005110302956",
+    #         "osgb1000014963168"
+    #     ],
+    #     # None,
+    #     1.0,
+    #     f"{os.getenv('DEV_DATA_DIR')}/ransac",
+    #     write_test_data=False)
