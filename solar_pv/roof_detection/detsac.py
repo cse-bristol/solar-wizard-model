@@ -332,26 +332,24 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
             # RANSAC for LIDAR addition:
             # if difference between circular mean of pixel aspects and slope aspect is too high:
             # if circular deviation of pixel aspects too high:
+            aspect_inliers = np.radians(aspect[inlier_mask_subset])
+            plane_aspect = aspect_rad(base_estimator.coef_[0], base_estimator.coef_[1])
+            aspect_circ_mean = circular_mean_rad(aspect_inliers)
+            aspect_diff = rad_diff(plane_aspect, aspect_circ_mean)
+            aspect_circ_sd = circular_sd_rad(aspect_inliers)
+
             if slope > FLAT_ROOF_DEGREES_THRESHOLD:
-                aspect_inliers = np.radians(aspect[inlier_mask_subset])
-                plane_aspect = aspect_rad(base_estimator.coef_[0], base_estimator.coef_[1])
-                aspect_circ_mean = circular_mean_rad(aspect_inliers)
-                aspect_diff = rad_diff(plane_aspect, aspect_circ_mean)
                 if aspect_diff > math.radians(self.max_aspect_circular_mean_degrees):
                     if debug:
                         bad_sample_reasons["CIRCULAR_MEAN"] += 1
                     skip_planes.add(plane.plane_id)
                     continue
 
-                aspect_circ_sd = circular_sd_rad(aspect_inliers)
                 if aspect_circ_sd > self.max_aspect_circular_sd:
                     if debug:
                         bad_sample_reasons["CIRCULAR_SD"] += 1
                     skip_planes.add(plane.plane_id)
                     continue
-            else:
-                aspect_circ_sd = None
-                aspect_circ_mean = None
 
             # RANSAC for LiDAR addition: check ratio of points area to ratio of convex
             # hull of points area.

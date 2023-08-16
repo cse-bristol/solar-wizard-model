@@ -364,26 +364,23 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
             # RANSAC for LIDAR addition:
             # if difference between circular mean of pixel aspects and slope aspect is too high:
             # if circular deviation of pixel aspects too high:
+            aspect_inliers = np.radians(aspect[inlier_mask_subset])
+            plane_aspect = aspect_rad(base_estimator.coef_[0], base_estimator.coef_[1])
+            aspect_circ_mean = circular_mean_rad(aspect_inliers)
+            aspect_diff = rad_diff(plane_aspect, aspect_circ_mean)
+            aspect_circ_sd = circular_sd_rad(aspect_inliers)
             if slope > FLAT_ROOF_DEGREES_THRESHOLD:
-                aspect_inliers = np.radians(aspect[inlier_mask_subset])
-                plane_aspect = aspect_rad(base_estimator.coef_[0], base_estimator.coef_[1])
-                aspect_circ_mean = circular_mean_rad(aspect_inliers)
-                aspect_diff = rad_diff(plane_aspect, aspect_circ_mean)
                 if aspect_diff > math.radians(self.max_aspect_circular_mean_degrees):
                     skip_planes.add(tuple(subset_idxs))
                     if debug:
                         bad_sample_reasons["CIRCULAR_MEAN"] += 1
                     continue
 
-                aspect_circ_sd = circular_sd_rad(aspect_inliers)
                 if aspect_circ_sd > self.max_aspect_circular_sd:
                     skip_planes.add(tuple(subset_idxs))
                     if debug:
                         bad_sample_reasons["CIRCULAR_SD"] += 1
                     continue
-            else:
-                aspect_circ_sd = None
-                aspect_circ_mean = None
 
             # TODO in DETSAC I moved all this to before the score/SD/inliers check, as
             #      we only care about those things (as well as the circ mean etc) for

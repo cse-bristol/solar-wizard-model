@@ -32,17 +32,19 @@ _PANEL_H_M = 1.64
 
 def make_job_roof_polygons(pg_uri: str, job_id: int,
                            resolution_metres: float, out_dir: str,
+                           toids: List[str] = None,
                            make_planes: bool = False,
                            write_test_data: bool = True):
     logging.basicConfig(level=logging.DEBUG,
                         format='[%(asctime)s] %(levelname)s: %(message)s')
 
     with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
-        toids = sql_command(
-            pg_conn,
-            "SELECT toid FROM {buildings}",
-            buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
-            result_extractor=lambda rows: [row[0] for row in rows])
+        if toids is None:
+            toids = sql_command(
+                pg_conn,
+                "SELECT toid FROM {buildings}",
+                buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
+                result_extractor=lambda rows: [row[0] for row in rows])
         t0 = time.time()
         logging.info(f"TOIDS: {len(toids)}")
 
@@ -204,9 +206,20 @@ if __name__ == "__main__":
     #     1.0,
     #     f"{os.getenv('DEV_DATA_DIR')}/roof-polys")
 
+    # make_job_roof_polygons(
+    #     os.getenv("PGW_URI"),
+    #     1657,
+    #     1.0,
+    #     f"{os.getenv('DEV_DATA_DIR')}/roof-polys",
+    #     make_planes=True)
+
     make_job_roof_polygons(
         os.getenv("PGW_URI"),
-        1657,
+        1660,
         1.0,
         f"{os.getenv('DEV_DATA_DIR')}/roof-polys",
+        toids=[
+            "osgb1000002529080353",
+            "osgb1000002529080355",
+            "osgb1000002529080354"],
         make_planes=True)

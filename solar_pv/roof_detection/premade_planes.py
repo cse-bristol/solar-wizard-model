@@ -84,6 +84,41 @@ def _dbscan(z):
     return labels
 
 
+def roughness(image):
+    """
+    Roughness detection based on the Terrain Ruggedness Index: (the mean difference
+    between a central pixel and its surrounding cells).
+
+    With some tweaks:
+    * corner cells of the 3x3 window are weighted slightly less
+    * uses angular difference rather than standard difference so that it works for
+      aspect rasters (assumes degree-based values)
+    """
+
+    win = np.array([[0.7, 1.0, 0.7],
+                    [1.0, 0.0, 1.0],
+                    [0.7, 1.0, 0.7]])
+
+    rows, columns = image.shape
+    diff_sum = np.zeros((rows, columns))
+
+    pad = 1
+    padded = np.pad(image, pad, mode='edge')
+
+    for (y, x), val in np.ndenumerate(win):
+        if val == 0:
+            continue
+        m = padded[y: rows + y, x: columns + x]
+        # Use angular difference so that e.g. aspect rasters can be used:
+        raw_diff = np.abs(m - image)
+        diff = np.minimum(raw_diff, 360 - raw_diff) * val
+        # diff = np.abs((m - image) * val)
+        diff_sum += diff
+
+    mean_diff = diff_sum / np.sum(win)
+    return mean_diff
+
+
 @dataclass
 class PlaneDef:
     plane_type: str
@@ -103,6 +138,9 @@ def create_planes(xyz: np.ndarray, aspect: np.ndarray, slope: np.ndarray, res: f
     z_image, _ = _image(xy, z, res, nodata)
 
     slope_image, _ = _image(xy, slope, res, nodata)
+
+    # roughness_image = roughness(aspect_image)
+    # roughness_mask = (roughness_image > 45) & (slope_image > 5)
 
     noise_val = -1
     z_labels = _dbscan(z)

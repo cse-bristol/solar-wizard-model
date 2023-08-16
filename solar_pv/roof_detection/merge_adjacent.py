@@ -1,7 +1,9 @@
 from typing import Dict
 
 import numpy as np
+from skimage import morphology
 from skimage.future.graph import RAG, merge_hierarchical
+from skimage.measure import perimeter_crofton
 from sklearn import metrics
 from sklearn.linear_model import LinearRegression
 
@@ -9,6 +11,7 @@ from solar_pv.constants import ROOFDET_GOOD_SCORE, FLAT_ROOF_DEGREES_THRESHOLD, 
     AZIMUTH_ALIGNMENT_THRESHOLD, FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD
 from solar_pv.roof_detection.premade_planes import _image
 from solar_pv.geos import slope_deg, aspect_deg, deg_diff
+from solar_pv.roof_detection.ransac import _group_areas
 
 DO_NOT_MERGE = 9999
 DO_MERGE = -9999
@@ -153,13 +156,22 @@ def _update_node_data(graph, src: int, dst: int):
     dst_node["rmse"] = metrics.mean_squared_error(z_subset, z_pred, squared=False)
     dst_node["msle"] = metrics.mean_squared_log_error(z_subset, z_pred)
     dst_node["mape"] = metrics.mean_absolute_percentage_error(z_subset, z_pred)
+    dst_node["sd"] = np.std(np.abs(z_subset, z_pred))
 
-    # TODO:
-    dst_node["sd"] = 0
+    z_image, idxs = _image(xy_subset, z_subset, nodata=-9999, res=dst_node['res'])
+    plane_mask = z_image != -9999
+    group_areas = _group_areas(plane_mask)
+    roof_plane_area = group_areas[1]
+    convex_hull = morphology.convex_hull_image(plane_mask)
+    convex_hull_area = np.count_nonzero(convex_hull)
+    dst_node["cv_hull_ratio"] = roof_plane_area / convex_hull_area
+
+    perimeter = perimeter_crofton(plane_mask, directions=4)
+    dst_node["thinness_ratio"] = (4 * np.pi * roof_plane_area) / (perimeter * perimeter)
+
+    # TODO: circular mean and circular sd - needs aspect to be passed in
     dst_node["aspect_circ_mean"] = 0
     dst_node["aspect_circ_sd"] = 0
-    dst_node["thinness_ratio"] = 0
-    dst_node["cv_hull_ratio"] = 0
 
     if 'aspect_adjusted' in src_node and 'aspect_adjusted' in dst_node:
         # deg_diff(dst_node['aspect'], src_node['aspect_adjusted']) < AZIMUTH_ALIGNMENT_THRESHOLD:
@@ -203,6 +215,7 @@ def _rag_score(xy, z, labels, planes: Dict[int, dict], res: float, nodata: int, 
         graph.nodes[n].update({'labels': [n],
                                'xy_subset': xy_subset,
                                'z_subset': z_subset,
+                               'res': res,
                                'outlier': True})
         if n in planes:
             graph.nodes[n].update(planes[n])
@@ -233,4 +246,5 @@ def merge_adjacent(xy, z, labels, planes: Dict[int, dict],
     if thresh >= DO_NOT_MERGE:
         raise ValueError(f"threshold ({thresh}) was >= DO_NOT_MERGE ({DO_NOT_MERGE})")
     g = _rag_score(xy, z, labels, planes, res, nodata, connectivity=connectivity)
+    labels[labels == nodata] = 0
     return _hierarchical_merge(g, labels, thresh=thresh)

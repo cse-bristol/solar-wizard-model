@@ -72,6 +72,8 @@ def _write_planes(toids: Optional[List[str]], job_id: int, resolution_metres: fl
     with open(geojson_out, 'w') as f:
         json.dump(feature_coll, f, default=str)
 
+    print(f"Wrote debug data to file {geojson_out}")
+
 
 def _write_test_data(toid, building):
     test_data_dir = join(paths.TEST_DATA, "roof_detection")
@@ -224,8 +226,12 @@ if __name__ == "__main__":
         os.getenv("PGW_URI"),
         1660,
         [
-            "osgb5000005110302956",
-            "osgb1000014963168"
+            # "osgb5000005110302956",
+            # "osgb1000014963168",
+
+            "osgb1000002529080353",
+            "osgb1000002529080355",
+            "osgb1000002529080354",
         ],
         # None,
         1.0,
