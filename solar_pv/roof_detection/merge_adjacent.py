@@ -9,6 +9,7 @@ from sklearn.linear_model import LinearRegression
 
 from solar_pv.constants import ROOFDET_GOOD_SCORE, FLAT_ROOF_DEGREES_THRESHOLD, \
     AZIMUTH_ALIGNMENT_THRESHOLD, FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD
+from solar_pv.types import RoofPlane
 from solar_pv.roof_detection.premade_planes import _image
 from solar_pv.geos import slope_deg, aspect_deg, deg_diff
 from solar_pv.roof_detection.ransac import _group_areas
@@ -202,7 +203,7 @@ def _hierarchical_merge(graph, labels, thresh: float = 0):
     return merged_planes
 
 
-def _rag_score(xy, z, labels, planes: Dict[int, dict], res: float, nodata: int, connectivity: int = 1):
+def _rag_score(xy, z, labels, planes: Dict[int, RoofPlane], res: float, nodata: int, connectivity: int = 1):
     label_image, idxs = _image(xy, labels, res, nodata=nodata)
     graph = RAG(label_image, connectivity=connectivity)
     if graph.has_node(nodata):
@@ -227,7 +228,7 @@ def _rag_score(xy, z, labels, planes: Dict[int, dict], res: float, nodata: int, 
     return graph
 
 
-def merge_adjacent(xy, z, labels, planes: Dict[int, dict],
+def merge_adjacent(xy, z, labels, planes: Dict[int, RoofPlane],
                    res: float, nodata: int, connectivity: int = 1, thresh: float = 0):
     """
     Create a RAG (region adjacency graph) where the nodes are either a plane, or a single

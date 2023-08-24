@@ -239,7 +239,7 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
         X_inlier_best = None
         y_inlier_best = None
         inlier_best_idxs_subset = None
-        best_sample_idxs = None
+        best_subset_idxs = None
         self.n_skips_no_inliers_ = 0
         self.n_skips_invalid_data_ = 0
         self.n_skips_invalid_model_ = 0
@@ -427,7 +427,7 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
                     bad_sample_reasons["THINNESS_RATIO"] += 1
                 continue
 
-            azimuths = _get_potential_aspects(X_inlier_subset, polygon)
+            azimuths = get_potential_aspects(X_inlier_subset, polygon)
             if len(azimuths) == 0:
                 if debug:
                     bad_sample_reasons["NO_NEARBY_FACE"] += 1
@@ -466,7 +466,7 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
                 "thinness_ratio": thinness_ratio,
                 "cv_hull_ratio": cv_hull_ratio,
                 "plane_type": "RANSAC",
-                "plane_id": f"RANSAC_{tuple(sample_idxs)}",
+                "plane_id": f"RANSAC_{tuple(subset_idxs)}",
                 "aspect_adjusted": aspect_deg_,
             }
 
@@ -474,7 +474,7 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
             X_inlier_best = X_inlier_subset
             y_inlier_best = y_inlier_subset
             inlier_best_idxs_subset = inlier_idxs_subset
-            best_sample_idxs = sample_idxs
+            best_subset_idxs = subset_idxs
 
             # RANSAC for LiDAR addition:
             # I've disabled the dynamic max_trials thing as it's based on proportion of
@@ -521,7 +521,7 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
 
         if np.sum(mask_without_excluded) < self.min_points_per_plane:
             self.success = False
-            skip_planes.add(tuple(best_sample_idxs))
+            skip_planes.add(tuple(best_subset_idxs))
         else:
             self.success = True
             self.estimator_ = base_estimator
@@ -650,23 +650,23 @@ def _min_thinness_ratio(area) -> float:
         return 0.07
 
 
-def _get_potential_aspects(X_inlier_subset, polygon: Polygon) -> List[int]:
+def get_potential_aspects(X_inlier_subset, polygon: Polygon) -> List[int]:
     polygon = simplify_by_angle(polygon, tolerance_degrees=2.0)
     line_segments = polygon_line_segments(polygon, min_length=1.0)
     mp = MultiPoint(X_inlier_subset)
     rp = mp.buffer(1.0)
     rtree = STRtree(line_segments)
-    nearby = rtree.query(rp)
+    nearby = rtree.query(rp, predicate='intersects')
     if len(nearby) == 0:
         rp = mp.buffer(3.0)
-        nearby = rtree.query(rp)
+        nearby = rtree.query(rp, predicate='intersects')
     if len(nearby) == 0:
         rp = mp.buffer(10.0)
-        nearby = rtree.query(rp)
+        nearby = rtree.query(rp, predicate='intersects')
     if len(nearby) == 0:
         return []
 
-    azimuths_base = [int(azimuth_deg(ls.coords[0], ls.coords[1])) for ls in line_segments]
+    azimuths_base = [int(azimuth_deg(line_segments[idx].coords[0], line_segments[idx].coords[1])) for idx in nearby]
     azimuths = set(azimuths_base)
     for az in azimuths_base:
         azimuths.add((az + 90) % 360)

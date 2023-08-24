@@ -10,7 +10,6 @@ import warnings
 import math
 from scipy import ndimage
 from shapely.geometry import LineString, MultiPoint, Polygon
-from shapely.strtree import STRtree
 from skimage.morphology import local_minima
 from skimage.segmentation import watershed
 
@@ -33,7 +32,7 @@ from solar_pv.geos import polygon_line_segments, simplify_by_angle, azimuth_deg,
     deg_diff, to_positive_angle
 from solar_pv.roof_detection.premade_planes import Plane
 from solar_pv.roof_detection.ransac import _exclude_unconnected, \
-    _sample, _pixel_groups, _group_areas, _min_thinness_ratio, _get_potential_aspects, \
+    _sample, _pixel_groups, _group_areas, _min_thinness_ratio, get_potential_aspects, \
     closest_azimuth
 
 
@@ -374,7 +373,7 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
                 skip_planes.add(plane.plane_id)
                 continue
 
-            azimuths = _get_potential_aspects(X_inlier_subset, polygon)
+            azimuths = get_potential_aspects(X_inlier_subset, polygon)
             if len(azimuths) == 0:
                 if debug:
                     bad_sample_reasons["NO_NEARBY_FACE"] += 1

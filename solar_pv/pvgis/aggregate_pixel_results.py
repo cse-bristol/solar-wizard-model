@@ -165,9 +165,8 @@ def _aggregate_pixel_data(panels, pixels, roofs,
             panel[_month_field(i)] = 0
 
         contributing_pixels = 0
-        for pixel in rtree.query(panel_geom):
-            if not pixel.intersects(panel_geom):
-                continue
+        for idx in rtree.query(panel_geom, predicate='intersects'):
+            pixel = pixel_squares[idx]
 
             contributing_pixels += 1
             pct_intersects = pixel.intersection(panel_geom).area / pixel.area
@@ -219,9 +218,8 @@ def _aggregate_pixel_data(panels, pixels, roofs,
 
         roof_geom = MultiPolygon(roof_panels[roof_plane_id])
         contributing_pixels = 0
-        for pixel in rtree.query(roof_geom):
-            if not pixel.intersects(roof_geom):
-                continue
+        for idx in rtree.query(roof_geom, predicate='intersects'):
+            pixel = pixel_squares[idx]
 
             contributing_pixels += 1
             pdata = pixel_data[id(pixel)]

@@ -2,18 +2,19 @@
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 import json
 import logging
+import math
 from os.path import join
 from typing import List, Optional
 
 import time
 from shapely import ops
-from shapely.geometry import MultiPoint, MultiPolygon
+from shapely.geometry import MultiPoint, MultiPolygon, CAP_STYLE, JOIN_STYLE
 
 from solar_pv import paths
 
 from osgeo import ogr, gdal
 
-from solar_pv.geos import square, to_geojson_dict
+from solar_pv.geos import square, to_geojson_dict, de_zigzag, simplify_by_angle
 from solar_pv.lidar.lidar import LIDAR_NODATA
 from solar_pv.roof_detection.detect_roofs import _detect_building_roof_planes, _load
 
@@ -62,6 +63,14 @@ def _write_planes(toids: Optional[List[str]], job_id: int, resolution_metres: fl
         r = resolution_metres
         pixels = [square(xy[0] - halfr, xy[1] - halfr, r) for xy in plane['inliers_xy']]
         geom = ops.unary_union(pixels)
+
+        # plane['aspect'] = plane['aspect_adjusted']
+        # geom = _initial_polygon(plane, resolution_metres)
+        # geom = _grid_polygon(plane, resolution_metres)
+        # geom = simplify_by_angle(geom)
+        # geom = de_zigzag(geom)
+        # geom = geom.buffer(math.sqrt(resolution_metres / 2) / 2, cap_style=CAP_STYLE.square, join_style=JOIN_STYLE.mitre, resolution=1)
+
         geojson = to_geojson_dict(geom)
         plane['inliers'] = len(plane['inliers_xy'])
         del plane['inliers_xy']
@@ -226,12 +235,13 @@ if __name__ == "__main__":
         os.getenv("PGW_URI"),
         1660,
         [
-            # "osgb5000005110302956",
-            # "osgb1000014963168",
+            "osgb5000005110302956",
+            "osgb1000014963168",
 
-            "osgb1000002529080353",
-            "osgb1000002529080355",
-            "osgb1000002529080354",
+            # messy:
+            # "osgb1000002529080353",
+            # "osgb1000002529080355",
+            # "osgb1000002529080354",
         ],
         # None,
         1.0,

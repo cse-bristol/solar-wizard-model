@@ -26,8 +26,6 @@ _FLAT_ROOF_DEGREES = 10
 _LARGE_BUILDING_THRESHOLD = 200
 _MIN_DIST_TO_EDGE_M = 0.1
 _MIN_DIST_TO_EDGE_LARGE_M = 0.1
-_PANEL_W_M = 0.99
-_PANEL_H_M = 1.64
 
 
 def make_job_roof_polygons(pg_uri: str, job_id: int,
@@ -64,8 +62,6 @@ def make_job_roof_polygons(pg_uri: str, job_id: int,
                                              large_building_threshold=_LARGE_BUILDING_THRESHOLD,
                                              min_dist_to_edge_m=_MIN_DIST_TO_EDGE_M,
                                              min_dist_to_edge_large_m=_MIN_DIST_TO_EDGE_LARGE_M,
-                                             panel_width_m=_PANEL_W_M,
-                                             panel_height_m=_PANEL_H_M,
                                              resolution_metres=resolution_metres)
             logging.info(f"Created {len(polygons)} planes for toid {toid}")
             all_planes.extend(polygons)
@@ -111,8 +107,6 @@ def make_roof_polygons(pg_uri: str, job_id: int, toid: str,
                                    large_building_threshold=_LARGE_BUILDING_THRESHOLD,
                                    min_dist_to_edge_m=_MIN_DIST_TO_EDGE_M,
                                    min_dist_to_edge_large_m=_MIN_DIST_TO_EDGE_LARGE_M,
-                                   panel_width_m=_PANEL_W_M,
-                                   panel_height_m=_PANEL_H_M,
                                    resolution_metres=resolution_metres)
 
     if write_test_data:
@@ -154,8 +148,10 @@ def _write_outputs(name: str, planes: List[dict], out_dir: str, building_geom: P
         "crs": {"type": "name", "properties": {"name": "urn:ogc:def:crs:EPSG::27700"}},
         "features": geojson_features
     }
-    with open(join(out_dir, f"{name}.geojson"), 'w') as f:
+    fname = join(out_dir, f"{name}.geojson")
+    with open(fname, 'w') as f:
         json.dump(geojson, f)
+    print(f"Wrote debug data to {fname}")
 
 
 def _load_toid_planes(pg_uri: str, job_id: int, toid: str):
@@ -215,11 +211,67 @@ if __name__ == "__main__":
 
     make_job_roof_polygons(
         os.getenv("PGW_URI"),
-        1660,
+        1659,
         1.0,
         f"{os.getenv('DEV_DATA_DIR')}/roof-polys",
         toids=[
-            "osgb1000002529080353",
-            "osgb1000002529080355",
-            "osgb1000002529080354"],
+            "osgb5000005116861453",
+            "osgb5000005116861461",
+            "osgb1000014994628",
+            "osgb1000014994636",
+            "osgb1000014994648",
+            "osgb1000014994630",
+            "osgb1000014994634",
+            "osgb1000014994631",
+            "osgb1000014994632",
+            "osgb1000014994629",
+            "osgb1000014994635",
+            "osgb1000014994633",
+            "osgb1000014994626",
+            "osgb1000014994627",
+            "osgb1000014994624",
+            "osgb1000014994625",
+            "osgb1000014994654",
+            "osgb1000014994658",
+            "osgb1000014994649",
+            "osgb1000014994652",
+            "osgb1000014994646",
+            "osgb1000014994653",
+            "osgb1000014994641",
+            "osgb1000014994651",
+            "osgb1000014994639",
+            "osgb1000014994644",
+            "osgb1000014994637",
+            "osgb1000014994650",
+            "osgb1000014994655",
+            "osgb1000014994657",
+            "osgb1000014994660",
+            "osgb1000014994656",
+            "osgb1000014994647",
+            "osgb1000014994643",
+            "osgb1000014994642",
+            "osgb1000014994645",
+            "osgb1000014994659",
+            "osgb1000014994638",
+            "osgb1000014994640",
+            "osgb1000014995257",
+            "osgb5000005116861456",
+            "osgb1000014995257",
+
+            "osgb1000014994950",
+            "osgb1000014994952",
+            "osgb1000014994947",
+            "osgb1000014994949",
+            "osgb1000014994951",
+            "osgb1000014994948",
+
+            "osgb1000014998052",
+
+            "osgb1000014994877",
+            "osgb1000014995098",
+            "osgb1000014994794",
+            "osgb1000014995098",
+            "osgb1000014998049",
+            "osgb1000014998048",
+        ],
         make_planes=True)

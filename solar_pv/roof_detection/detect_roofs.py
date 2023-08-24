@@ -1,43 +1,31 @@
 import json
 
-import itertools
 # This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 import logging
 import time
 import math
 import traceback
-from typing import List, Dict, TypedDict
+from typing import List, Dict
 import multiprocessing as mp
 
 from psycopg2.extras import DictCursor, execute_values, Json
-from psycopg2.sql import SQL, Identifier, Literal
+from psycopg2.sql import SQL, Identifier
 import numpy as np
-from shapely import wkt, ops
-from shapely.geometry import Polygon, LineString
-from sklearn.linear_model import LinearRegression
+from shapely import wkt
 
 from solar_pv.db_funcs import count, connection, sql_command
 from solar_pv.postgis import pixels_for_buildings
 from solar_pv import tables
 from solar_pv.constants import RANSAC_LARGE_BUILDING, \
-    RANSAC_LARGE_MAX_TRIALS, RANSAC_SMALL_MAX_TRIALS, FLAT_ROOF_DEGREES_THRESHOLD, \
-    RANSAC_SMALL_BUILDING, RANSAC_MEDIUM_MAX_TRIALS, ROOFDET_MAX_MAE
+    RANSAC_LARGE_MAX_TRIALS, RANSAC_SMALL_MAX_TRIALS, RANSAC_SMALL_BUILDING, RANSAC_MEDIUM_MAX_TRIALS, ROOFDET_MAX_MAE
 from solar_pv.roof_detection.detsac import DETSACRegressorForLIDAR
 from solar_pv.roof_detection.merge_adjacent import merge_adjacent
-from solar_pv.roof_detection.premade_planes import create_planes, create_planes, _image
+from solar_pv.roof_detection.premade_planes import create_planes
 from solar_pv.roof_detection.ransac import RANSACRegressorForLIDAR
-from solar_pv.geos import slope_deg, aspect_deg
 from solar_pv.roof_polygons.roof_polygons_2 import create_roof_polygons
+from solar_pv.types import RoofDetBuilding, RoofPlane, RoofPolygon
 from solar_pv.util import get_cpu_count
-
-
-class RoofDetBuilding(TypedDict):
-    toid: str
-    pixels: List[dict]
-    polygon: Polygon
-    min_ground_height: float
-    max_ground_height: float
 
 
 def _roof_det_cpu_count():
@@ -55,8 +43,6 @@ def detect_roofs(pg_uri: str,
                  min_dist_to_edge_m: float,
                  min_dist_to_edge_large_m: float,
                  resolution_metres: float,
-                 panel_width_m: float,
-                 panel_height_m: float,
                  workers: int = _roof_det_cpu_count(),
                  building_page_size: int = 50) -> None:
 
@@ -80,8 +66,6 @@ def detect_roofs(pg_uri: str,
         "min_dist_to_edge_m": min_dist_to_edge_m,
         "min_dist_to_edge_large_m": min_dist_to_edge_large_m,
         "resolution_metres": resolution_metres,
-        "panel_width_m": panel_width_m,
-        "panel_height_m": panel_height_m,
     }
     with mp.Pool(workers) as pool:
         wrapped_iterable = ((pg_uri, job_id, seg, building_page_size, params)
@@ -116,15 +100,15 @@ def _handle_building_page(pg_uri: str, job_id: int, page: int, page_size: int, p
             _print_test_data(building)
             raise e
 
-    planes = create_roof_polygons(pg_uri, job_id, planes, **params)
-    _save_planes(pg_uri, job_id, planes)
+    polygons = create_roof_polygons(pg_uri, job_id, planes, **params)
+    _save_planes(pg_uri, job_id, polygons)
     print(f"Page {page} of {page_size} buildings complete, took {round(time.time() - start_time, 2)} s.")
 
 
 def _detect_building_roof_planes(building: RoofDetBuilding,
                                  toid: str,
                                  resolution_metres: float,
-                                 debug: bool = False) -> List[dict]:
+                                 debug: bool = False) -> List[RoofPlane]:
     pixels_in_building = building['pixels']
     polygon = building['polygon']
     max_ground_height = building['max_ground_height']
@@ -144,7 +128,7 @@ def _detect_building_roof_planes(building: RoofDetBuilding,
 
     labels_nodata = -1
     labels = np.full(z.shape, labels_nodata, dtype=int)
-    planes = {}
+    planes: Dict[int, RoofPlane] = {}
 
     plane_idx = 0
     while np.count_nonzero(mask) > min_points_per_plane:
@@ -278,12 +262,13 @@ def _building_count(pg_uri: str, job_id: int):
             result_extractor=lambda rows: rows[0][0])
 
 
-def _save_planes(pg_uri: str, job_id: int, planes: List[dict]):
+def _save_planes(pg_uri: str, job_id: int, planes: List[RoofPolygon]):
     if len(planes) == 0:
         return
 
     for plane in planes:
         # TODO maybe don't have to save inliers_xy as it's only needed for dev_roof_polygons?
+        # TODO add RMSE etc
         plane['inliers_xy'] = plane['inliers_xy'].tolist()
         plane['meta'] = Json({
             "sd": plane["sd"],
@@ -293,7 +278,7 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[dict]):
             "thinness_ratio": plane["thinness_ratio"],
             "cv_hull_ratio": plane["cv_hull_ratio"],
             "plane_type": plane["plane_type"],
-            "aspect_adjusted": plane["aspect_adjusted"],
+            "aspect_raw": plane["aspect_raw"],
         })
 
     with connection(pg_uri) as pg_conn, pg_conn.cursor() as cursor:

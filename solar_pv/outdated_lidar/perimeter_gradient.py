@@ -7,6 +7,8 @@ from shapely import wkt, strtree
 from shapely.geometry import LineString, Point
 from shapely.ops import substring
 
+from solar_pv.geos import perpendicular_bisector
+
 
 @dataclass
 class HeightAggregator:
@@ -43,12 +45,6 @@ class HeightAggregator:
             return None
 
 
-def _perpendicular_bisector(line_segment: LineString, length: float):
-    l1 = line_segment.parallel_offset(length / 2, side='left')
-    l2 = line_segment.parallel_offset(length / 2, side='right')
-    return LineString([l1.centroid.coords[0], l2.centroid.coords[0]])
-
-
 def check_perimeter_gradient(building,
                              resolution_metres: float,
                              segment_length: int = 2,
@@ -72,13 +68,11 @@ def check_perimeter_gradient(building,
     outdated.
     """
     geom = wkt.loads(building['geom'])
-    pixels = []
-    pixels_by_id = {}
+    points = []
     for pixel in building['pixels']:
         point = Point(pixel['x'], pixel['y'])
-        pixels.append(point)
-        pixels_by_id[id(point)] = pixel
-    pixel_rtree = strtree.STRtree(pixels)
+        points.append(point)
+    pixel_rtree = strtree.STRtree(points)
 
     length = int(geom.exterior.length)
     total = 0
@@ -96,11 +90,11 @@ def check_perimeter_gradient(building,
         if segment.length < 0.01:
             continue
 
-        perp_bisector = _perpendicular_bisector(segment, bisector_length)
+        perp_bisector = perpendicular_bisector(segment, bisector_length)
 
         # Find all the pixels that lie on it:
-        points_on_cross = pixel_rtree.query(perp_bisector.buffer(resolution_metres / 2))
-        pixels_on_cross = [pixels_by_id[id(p)] for p in points_on_cross]
+        idxs = pixel_rtree.query(perp_bisector.buffer(resolution_metres / 2), predicate='intersects')
+        pixels_on_cross = [building['pixels'][idx] for idx in idxs]
 
         # Count the bisectors where the difference in average height between
         # internal and external pixels is below the threshold:

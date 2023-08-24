@@ -9,7 +9,8 @@ from typing import List
 from shapely import wkt
 
 from solar_pv.paths import TEST_DATA
-from solar_pv.roof_detection.detect_roofs import _detect_building_roof_planes, RoofDetBuilding
+from solar_pv.roof_detection.detect_roofs import _detect_building_roof_planes
+from solar_pv.types import RoofDetBuilding
 from solar_pv.test_utils.test_funcs import ParameterisedTestCase
 
 _ROOFDET_DATA = join(TEST_DATA, "roof_detection")
