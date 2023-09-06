@@ -1,6 +1,7 @@
 # This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 import random
+import traceback
 import unittest
 from typing import List
 
@@ -13,7 +14,7 @@ class ParameterisedTestCase(unittest.TestCase):
             try:
                 actual = fn(*inputs)
             except Exception as e:
-                print(e)
+                traceback.print_exc()
                 actual = e
             test_name = str(inputs)[:100] if len(inputs) > 1 else str(inputs[0])[:100]
             with self.subTest(test_name):

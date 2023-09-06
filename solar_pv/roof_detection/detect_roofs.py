@@ -23,7 +23,7 @@ from solar_pv.roof_detection.detsac import DETSACRegressorForLIDAR
 from solar_pv.roof_detection.merge_adjacent import merge_adjacent
 from solar_pv.roof_detection.premade_planes import create_planes
 from solar_pv.roof_detection.ransac import RANSACRegressorForLIDAR
-from solar_pv.roof_polygons.roof_polygons_2 import create_roof_polygons
+from solar_pv.roof_polygons.roof_polygons import create_roof_polygons
 from solar_pv.types import RoofDetBuilding, RoofPlane, RoofPolygon
 from solar_pv.util import get_cpu_count
 

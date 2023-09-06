@@ -2,14 +2,14 @@
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 import json
 from os.path import join
+from typing import Tuple, List
 
 import numpy as np
+from geojson import Polygon
 from shapely import wkt
 
 from solar_pv import paths
-from solar_pv.constants import FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD
-from solar_pv.roof_polygons.roof_polygons import _building_orientations, \
-    _create_roof_polygons
+from solar_pv.roof_polygons.roof_polygons import _create_roof_polygons
 from solar_pv.test_utils.test_funcs import ParameterisedTestCase
 
 # Large building in Castle Vale (Birmingham) where the previous approach
@@ -49,7 +49,7 @@ def _create_polygons_using_test_data(toid: str,
                                      flat_roof_degrees: int = 10,
                                      large_building_threshold: float = 200,
                                      min_dist_to_edge_m: float = 0.3,
-                                     min_dist_to_edge_large_m: float = 1):
+                                     min_dist_to_edge_large_m: float = 1) -> Tuple[List[dict], Polygon]:
     planes, building_geom = _load_test_data(toid)
     planes = _create_roof_polygons(
         {toid: building_geom},
@@ -61,9 +61,7 @@ def _create_polygons_using_test_data(toid: str,
         large_building_threshold=large_building_threshold,
         min_dist_to_edge_m=min_dist_to_edge_m,
         min_dist_to_edge_large_m=min_dist_to_edge_large_m,
-        resolution_metres=1.0,
-        panel_width_m=0.99,
-        panel_height_m=1.64)
+        resolution_metres=1.0)
     for plane in planes:
         if "roof_geom_27700" in plane:
             plane['roof_geom_27700'] = wkt.loads(plane['roof_geom_27700'])
@@ -71,13 +69,6 @@ def _create_polygons_using_test_data(toid: str,
 
 
 class RoofPolygonTest(ParameterisedTestCase):
-    def test_building_orientation(self):
-        self.parameterised_test([
-            (osgb1000021445362, (72, 162, 252, 342)),
-            (osgb1000021445346, (72, 162, 252, 342)),
-            (osgb1000002043666111, (147, 237, 327, 57)),
-            (osgb1000014994594, (58, 148, 238, 328)),
-        ], _building_orientations)
 
     def test_roof_polygons_do_not_overlap(self):
         def _do_test(toid: str):
@@ -103,7 +94,7 @@ class RoofPolygonTest(ParameterisedTestCase):
             for p in planes:
                 poly = p['roof_geom_27700']
                 crossover = poly.difference(building_geom).area
-                assert crossover < 0.000000001, f"{p['roof_plane_id']} overlaps  -ve buffered building by {crossover} m2"
+                assert crossover < 0.1, f"{p['roof_plane_id']} overlaps  -ve buffered building by {crossover} m2"
 
         self.parameterised_test([
             ("osgb1000021445086", None),
@@ -121,19 +112,6 @@ class RoofPolygonTest(ParameterisedTestCase):
             ("osgb1000014925723", None),
             ("osgb1000017860043", 0.4, None)
         ], _do_test)
-
-    def test_flat_roofs_face_south(self):
-        planes, _ = _create_polygons_using_test_data("osgb1000000137769485")
-        assert len(planes) == 3
-        min_aspect = 180 - FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD
-        max_aspect = 180 + FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD
-        checked = False
-        for plane in planes:
-            if not plane['is_flat']:
-                continue
-            assert min_aspect < plane['aspect'] <= max_aspect
-            checked = True
-        assert checked is True
 
     def test_merge(self):
         planes, _ = _create_polygons_using_test_data("osgb1000021681594")

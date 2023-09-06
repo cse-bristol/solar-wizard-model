@@ -1,30 +1,36 @@
 # This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 import json
+import time
 import traceback
 from collections import defaultdict
-from typing import List, Dict
+from typing import List, Dict, Optional, cast, Tuple
 
 import math
 import numpy as np
+from networkx import Graph, cycle_basis
 from psycopg2.sql import Identifier
 import psycopg2.extras
-from shapely import wkt, affinity, ops
-from shapely.geometry import LineString, Polygon, CAP_STYLE, JOIN_STYLE
+from shapely import wkt, affinity, ops, set_precision, MultiLineString, Polygon, \
+    LineString, Point
+from shapely.geometry import LineString, Polygon, CAP_STYLE, JOIN_STYLE, MultiPoint, \
+    MultiPolygon, Point
+from shapely.prepared import prep
+from shapely.strtree import STRtree
 from shapely.validation import make_valid
 
 from solar_pv import tables
 from solar_pv.db_funcs import connection, sql_command
-from solar_pv.geos import azimuth_deg, square, largest_polygon
-from solar_pv.constants import FLAT_ROOF_DEGREES_THRESHOLD, \
-    FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD, AZIMUTH_ALIGNMENT_THRESHOLD
-from solar_pv.roof_polygons.roof_polygon_archetypes import \
-    construct_archetypes, get_archetype
+from solar_pv.geos import azimuth_deg, square, largest_polygon, get_grid_cells, \
+    de_zigzag, multi, densify_polygon, geoms
+from solar_pv.constants import FLAT_ROOF_DEGREES_THRESHOLD
+from solar_pv.types import RoofPlane, RoofPolygon
 
 
 def create_roof_polygons(pg_uri: str,
                          job_id: int,
-                         planes: List[dict],
+                         toid: str,
+                         planes: List[RoofPlane],
                          max_roof_slope_degrees: int,
                          min_roof_area_m: int,
                          min_roof_degrees_from_north: int,
@@ -32,12 +38,9 @@ def create_roof_polygons(pg_uri: str,
                          large_building_threshold: float,
                          min_dist_to_edge_m: float,
                          min_dist_to_edge_large_m: float,
-                         panel_width_m: float,
-                         panel_height_m: float,
-                         resolution_metres: float) -> List[dict]:
+                         resolution_metres: float) -> List[RoofPolygon]:
     """Add roof polygons and other related fields to the dicts in `planes`"""
-    toids = list({plane['toid'] for plane in planes})
-    building_geoms = _building_geoms(pg_uri, job_id, toids)
+    building_geoms = _building_geoms(pg_uri, job_id, [toid])
     return _create_roof_polygons(
         building_geoms,
         planes,
@@ -48,13 +51,11 @@ def create_roof_polygons(pg_uri: str,
         large_building_threshold=large_building_threshold,
         min_dist_to_edge_m=min_dist_to_edge_m,
         min_dist_to_edge_large_m=min_dist_to_edge_large_m,
-        panel_width_m=panel_width_m,
-        panel_height_m=panel_height_m,
         resolution_metres=resolution_metres)
 
 
 def _create_roof_polygons(building_geoms: Dict[str, Polygon],
-                          planes: List[dict],
+                          planes: List[RoofPlane],
                           max_roof_slope_degrees: int,
                           min_roof_area_m: int,
                           min_roof_degrees_from_north: int,
@@ -62,52 +63,41 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
                           large_building_threshold: float,
                           min_dist_to_edge_m: float,
                           min_dist_to_edge_large_m: float,
-                          panel_width_m: float,
-                          panel_height_m: float,
-                          resolution_metres: float) -> List[dict]:
-    polygons_by_toid = defaultdict(list)
-    roof_polygons = []
-    archetypes = construct_archetypes(panel_width_m, panel_height_m)
-    max_archetype_area = max(archetypes, key=lambda a: a.polygon.area).polygon.area
+                          resolution_metres: float) -> List[RoofPolygon]:
 
-    # Sort planes so that southerly aspects are considered first
-    # (as already-created polygons take priority when ensuring two roof planes don't overlap)
-    planes.sort(key=lambda p: (p['toid'], abs(180 - p['aspect'])))
+    roof_polygons: List[RoofPolygon] = []
 
+    if len(planes) == 0:
+        return []
+
+    # building_aspect = max(planes, key=lambda p: len(p['inliers_xy']))['aspect_adjusted']
     plane_polys = []
     for plane in planes:
+        # TODO move all this non-polygon related stuff up into roofdet
+        plane = cast(dict, plane)
         toid = plane['toid']
+        plane['aspect_raw'] = plane['aspect']
+        plane['aspect'] = plane['aspect_adjusted']
+        del plane['aspect_adjusted']
         building_geom = building_geoms[toid]
         try:
-            # set is_flat, update slope and aspect of flat roofs
+            # set is_flat, update slope of flat roofs
             is_flat = plane['slope'] <= FLAT_ROOF_DEGREES_THRESHOLD
             plane['is_flat'] = is_flat
             if is_flat:
                 plane['slope'] = flat_roof_degrees
 
-            # update orientations
-            orientations = _building_orientations(building_geom)
-            aspect_adjusted = False
-            if not is_flat:
-                for orientation in orientations:
-                    if abs(orientation - plane['aspect']) < AZIMUTH_ALIGNMENT_THRESHOLD:
-                        plane['aspect'] = orientation
-                        aspect_adjusted = True
-                        break
-            else:
-                for orientation in orientations:
-                    if abs(orientation - 180) < FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD:
-                        plane['aspect'] = orientation
-                        aspect_adjusted = True
-                        break
-            plane['aspect_adjusted'] = aspect_adjusted
+            roof_poly = _make_polygon(plane, resolution_metres)
 
-            roof_poly = _initial_polygon(plane, resolution_metres)
-            if not roof_poly or roof_poly.is_empty:
-                continue
+            roof_poly = _constrain_to_building(building_geom,
+                                               roof_poly,
+                                               large_building_threshold,
+                                               min_dist_to_edge_large_m,
+                                               min_dist_to_edge_m)
 
-            plane['roof_poly'] = roof_poly
-            plane_polys.append(plane)
+            if roof_poly and not roof_poly.is_empty:
+                plane['roof_poly'] = roof_poly
+                plane_polys.append(plane)
 
         except Exception as e:
             traceback.print_exception(e)
@@ -117,17 +107,19 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
 
     plane_polys = _merge_touching(plane_polys, resolution_metres)
 
+    # TODO is this needed?
+    for p in plane_polys:
+        p['roof_poly'] = set_precision(p['roof_poly'], 0.01)
+    _remove_overlaps(plane_polys)
+
     for plane in plane_polys:
         toid = plane['toid']
         building_geom = building_geoms[toid]
         try:
-            is_flat = plane['is_flat']
             roof_poly = plane['roof_poly']
-            aspect_adjusted = plane['aspect_adjusted']
-            del plane['roof_poly']
-            del plane['aspect_adjusted']
 
-            # constrain roof polygons to building geometry, enforcing min dist to edge:
+            # Constrain a second time in case _merge_touching caused
+            # it to re-overflow
             roof_poly = _constrain_to_building(building_geom,
                                                roof_poly,
                                                large_building_threshold,
@@ -137,51 +129,21 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
             if not roof_poly or roof_poly.is_empty:
                 continue
 
-            # remove overlaps :
-            roof_poly = _remove_overlaps(toid, roof_poly, polygons_by_toid)
-
-            if not roof_poly or roof_poly.is_empty:
-                continue
-
-            # Potentially use a pre-made roof archetype instead:
-            plane['archetype'] = False
-            if not is_flat \
-                    and aspect_adjusted \
-                    and roof_poly.area < (max_archetype_area * 1.5):
-                archetype = get_archetype(roof_poly, archetypes, plane['aspect'])
-                if archetype is not None:
-                    roof_poly = archetype.polygon
-                    plane['archetype'] = True
-                    plane['archetype_pattern'] = json.dumps(archetype.pattern)
-
-                    # constrain roof polygons (again):
-                    roof_poly = _constrain_to_building(building_geom,
-                                                       roof_poly,
-                                                       large_building_threshold,
-                                                       min_dist_to_edge_large_m,
-                                                       min_dist_to_edge_m)
-
-                    if not roof_poly or roof_poly.is_empty:
-                        continue
-
-                    # remove overlaps (again):
-                    roof_poly = _remove_overlaps(toid, roof_poly, polygons_by_toid)
-
-                    if not roof_poly or roof_poly.is_empty:
-                        continue
-
-            # any other planes in the same toid will now not be allowed to overlap this one:
-            polygons_by_toid[toid].append(roof_poly)
+            del plane['roof_poly']
 
             # Set usability:
             if plane['slope'] > max_roof_slope_degrees:
                 plane['usable'] = False
+                plane['not_usable_reason'] = "SLOPE"
             elif plane['aspect'] < min_roof_degrees_from_north:
                 plane['usable'] = False
+                plane['not_usable_reason'] = "ASPECT"
             elif plane['aspect'] > 360 - min_roof_degrees_from_north:
                 plane['usable'] = False
-            elif roof_poly.area < min_roof_area_m and plane['archetype'] is False:
+                plane['not_usable_reason'] = "ASPECT"
+            elif roof_poly.area < min_roof_area_m:
                 plane['usable'] = False
+                plane['not_usable_reason'] = "AREA"
             else:
                 plane['usable'] = True
 
@@ -202,36 +164,64 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
     return roof_polygons
 
 
-def _initial_polygon(plane, resolution_metres):
-    """
-    Make the initial roof polygon (basically by just drawing round
-    all the pixels rotated to match the aspect)
-    """
-    pixels = []
-    for p in plane['inliers_xy']:
-        # Draw a square around the pixel centre:
-        edge = math.sqrt(resolution_metres ** 2 * 2.0) / 2
-        pixel = square(p[0] - edge, p[1] - edge, edge * 2)
+def _make_polygon(plane: RoofPlane, resolution_metres: float,
+                  max_area_diff: float = 5,
+                  max_area_diff_pct: float = 0.35) -> Optional[Polygon]:
+    # Make the initial roof polygon (basically by just drawing round
+    # all the pixels and then de-zigzagging)
+    halfr = resolution_metres / 2
+    r = resolution_metres
+    pixels = [square(xy[0] - halfr, xy[1] - halfr, r) for xy in plane['inliers_xy']]
+    geom = ops.unary_union(pixels)
+    geom = de_zigzag(geom)
+    roof_poly = largest_polygon(geom)
 
-        # Rotate the square to align with plane aspect:
-        pixel = affinity.rotate(pixel, -plane['aspect'])
-        pixels.append(pixel)
-    neg_buffer = -((math.sqrt(resolution_metres ** 2 * 2.0) - resolution_metres) / 2)
-    roof_poly = ops.unary_union(pixels).buffer(neg_buffer,
-                                               cap_style=CAP_STYLE.square,
-                                               join_style=JOIN_STYLE.mitre,
-                                               resolution=1)
+    if not roof_poly or roof_poly.is_empty:
+        return None
 
-    roof_poly = largest_polygon(roof_poly)
+    # If a bbox rotated to match the aspect is close enough area-wise to the initial
+    # polygon, just use that:
+    rotated: Polygon = affinity.rotate(roof_poly, plane['aspect'], origin=roof_poly.centroid)
+    bbox = rotated.envelope
+    area_diff = bbox.area - rotated.area
+    if area_diff < max_area_diff and area_diff / rotated.area < max_area_diff_pct:
+        return affinity.rotate(bbox, -plane['aspect'], origin=roof_poly.centroid)
+
+    # Otherwise grid it based on a grid oriented to the aspect and then de-zigzag
+    roof_poly = _grid_polygon(roof_poly, plane['aspect'], grid_size=1.0)
+    roof_poly = de_zigzag(roof_poly)
     return roof_poly
 
 
-def _merge_touching(planes, resolution_metres: float, max_slope_diff: int = 2) -> List[dict]:
+def _grid_polygon(roof_poly: Polygon, aspect: float, grid_size: float):
+    centroid = roof_poly.centroid
+
+    # Rotate the roof area CCW by aspect, to be gridded easily:
+    plane_points = affinity.rotate(roof_poly, aspect, origin=centroid)
+
+    # grid_size = math.sqrt(resolution_metres ** 2 * 2.0)
+    grid = get_grid_cells(plane_points, grid_size, grid_size, 0, 0, grid_start='bounds')
+    grid = affinity.rotate(MultiPolygon(grid), -aspect, origin=centroid).geoms
+    roof_poly = ops.unary_union(grid)
+    roof_poly = make_valid(roof_poly)
+    return roof_poly
+
+
+# def remove_tendrils(roof_poly: Polygon, buf: float = 0.6) -> Optional[Polygon]:
+#     splitter = roof_poly.buffer(-buf, cap_style=CAP_STYLE.square, join_style=JOIN_STYLE.mitre, resolution=1)
+#     splitter = splitter.buffer(buf, cap_style=CAP_STYLE.square, join_style=JOIN_STYLE.mitre, resolution=1)
+#     splitter = largest_polygon(splitter).exterior
+#     roof_poly = largest_polygon(split_with(roof_poly, splitter))
+#     return roof_poly
+
+
+def _merge_touching(planes, resolution_metres: float, max_slope_diff: int = 4) -> List[dict]:
     """
     Merge any planes that
     a) have the same aspect
     b) have a slope that differs less than `max_slope_diff`
     c) intersect each other
+    d) are not flat
     """
     merged = []
     _by_aspect = defaultdict(list)
@@ -252,38 +242,46 @@ def _merge_touching(planes, resolution_metres: float, max_slope_diff: int = 2) -
 
             slope = plane['slope']
             poly = plane['roof_poly']
-            mergeable = [p for p in plane_group if id(p) not in checked and abs(p['slope'] - slope) <= max_slope_diff and p['roof_poly'].intersects(poly)]
+            mergeable = []
+            for p in plane_group:
+                if id(p) not in checked \
+                        and p['is_flat'] is False \
+                        and abs(p['slope'] - slope) <= max_slope_diff \
+                        and p['roof_poly'].intersects(poly):
+                    mergeable.append(p)
 
-            for to_merge in mergeable:
-                checked.add(id(to_merge))
+            if len(mergeable) > 0:
+                for to_merge in mergeable:
+                    checked.add(id(to_merge))
 
-            plane['roof_poly'] = ops.unary_union([p['roof_poly'] for p in mergeable] + [poly])
-            plane['inliers_xy'] = np.concatenate([p['inliers_xy'] for p in mergeable] + [plane['inliers_xy']])
-            plane['roof_poly'] = _initial_polygon(plane, resolution_metres)
+                plane['roof_poly'] = ops.unary_union([p['roof_poly'] for p in mergeable] + [poly])
+                plane['inliers_xy'] = np.concatenate([p['inliers_xy'] for p in mergeable] + [plane['inliers_xy']])
+                plane['roof_poly'] = _make_polygon(plane, resolution_metres)
 
-            merged.append(plane)
+            if plane['roof_poly']:
+                merged.append(plane)
 
     return merged
 
 
-def _remove_overlaps(toid: str, roof_poly: Polygon, polygons_by_toid: Dict[str, List[Polygon]]):
-    intersecting_polys = [p for p in polygons_by_toid[toid] if p.intersects(roof_poly)]
-    if len(intersecting_polys) > 0:
-        other_polys = ops.unary_union(intersecting_polys).buffer(0.1,
-                                                                 cap_style=CAP_STYLE.square,
-                                                                 join_style=JOIN_STYLE.mitre,
-                                                                 resolution=1)
-        roof_poly = roof_poly.difference(other_polys)
-        roof_poly = largest_polygon(roof_poly)
-    roof_poly = make_valid(roof_poly)
-    return roof_poly
+def _remove_overlaps(roof_polygons: List[dict]) -> None:
+    # TODO maybe have an rtree here?
+    for i, rp1 in enumerate(roof_polygons):
+        for j, rp2 in enumerate(roof_polygons):
+            if i > j:
+                p1, p2 = _split_evenly(rp1['roof_poly'], rp2['roof_poly'])
+                rp1['roof_poly'] = p1
+                rp2['roof_poly'] = p2
 
 
 def _constrain_to_building(building_geom: Polygon,
                            roof_poly: Polygon,
                            large_building_threshold: float,
                            min_dist_to_edge_large_m: float,
-                           min_dist_to_edge_m: float):
+                           min_dist_to_edge_m: float) -> Optional[Polygon]:
+    if not roof_poly or roof_poly.is_empty:
+        return None
+
     if building_geom.area < large_building_threshold:
         neg_buffer = -min_dist_to_edge_m
     else:
@@ -295,6 +293,7 @@ def _constrain_to_building(building_geom: Polygon,
     return roof_poly
 
 
+# TODO already loading these in roofdet now - probably just make it a field on RoofPlane
 def _building_geoms(pg_uri: str, job_id: int, toids: List[str]) -> Dict[str, Polygon]:
     with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
         buildings = sql_command(
@@ -313,25 +312,6 @@ def _building_geoms(pg_uri: str, job_id: int, toids: List[str]) -> Dict[str, Pol
         return by_toid
 
 
-def _building_orientations(building_geom):
-    # 1. decompose into straight-line segments and find the total length of all
-    #    segments by azimuth:
-    azimuths = defaultdict(int)
-    for i in range(len(building_geom.exterior.coords) - 1):
-        p1 = building_geom.exterior.coords[i]
-        p2 = building_geom.exterior.coords[i + 1]
-        segment = LineString([p1, p2])
-        az = round(azimuth_deg(p1, p2))
-        azimuths[az] += segment.length
-
-    # 2. take the top azimuth and define other orientations based on it:
-    most_common_az = max(azimuths, key=azimuths.get)
-    return (most_common_az,
-            (most_common_az + 90) % 360,
-            (most_common_az + 180) % 360,
-            (most_common_az + 270) % 360)
-
-
 def _to_test_data(toid: str, planes: List[dict], building_geom: Polygon) -> dict:
     planes_ = []
     for plane in planes:
@@ -348,9 +328,133 @@ def _to_test_data(toid: str, planes: List[dict], building_geom: Polygon) -> dict
     }
 
 
-if __name__ == '__main__':
-    # osgb1000021445362
-    building = "POLYGON((414361.1232490772 290262.23400396167,414409.5504070239 290278.1342139624,414415.4006675822 290280.0542393503,414471.3731655209 290298.6244831074,414470.770202179 290300.4714865399,414468.6033339495 290307.10949886445,414459.3769210793 290304.00545850757,414441.74597865756 290357.49755691225,414325.47880112164 290319.17405041336,414308.8197971075 290369.3841407508,414308.51978340244 290369.2741394106,414298.5203799294 290399.3441932516,414132.9129867344 290344.2934709728,414135.7228180804 290335.8534561896,414142.9723824033 290314.05341792613,414156.99300942366 290318.7134788263,414166.1624884436 290292.07343293744,414174.3719738624 290266.67338728433,414186.0024945787 290270.54343770375,414187.3475547756 290270.9904435359,414189.71666078945 290271.7774538043,414191.0345818997 290267.81544678786,414191.7985362576 290265.52144272684,414200.1619107024 290268.3054789929,414198.08203513006 290274.5574900773,414215.1637993486 290280.23356417514,414219.4039890516 290281.64358257974,414224.20420378755 290283.2396034165,414231.87754701043 290285.79063672764,414234.1454114872 290278.97162458533,414237.82257598895 290280.19464054896,414235.55471148936 290287.0136526985,414272.98638497293 290299.4538153364,414278.2766211545 290301.2038383153,414280.55672312283 290301.9638482371,414282.66659775644 290295.6338369153,414286.61636157666 290283.73381555616,414257.0650398705 290273.90368719946,414263.67464599875 290254.0436516954,414264.8146970443 290254.423656641,414266.5445933154 290249.2036472733,414271.5748183474 290250.8736690781,414269.8449220526 290256.0936784502,414292.05591556017 290263.47377481405,414293.2159675826 290263.86377986136,414296.1657916052 290254.98376389145,414308.9163619888 290259.2238192296,414325.7371141676 290264.81389226054,414328.4982376316 290265.731904253,414331.91439038474 290266.86791909434,414332.9794380326 290267.22292372346,414335.132534303 290267.9389330762,414341.76783091604 290270.1439619087,414342.0978110054 290269.1419600831,414344.0416942787 290263.2569493969,414346.0175756192 290257.27393852605,414361.1232490772 290262.23400396167))"
-    building = wkt.loads(building)
-    a, b, c, d = _building_orientations(building)
-    print(a, b, c, d)
+def _split_evenly(p1: Polygon, p2: Polygon,
+                  min_area: float = 0.01,
+                  min_dist_between_planes: float = 0.1,
+                  voronoi_point_density: float = 0.1) -> Tuple[Polygon, Polygon]:
+    """
+    Split 2 overlapping polygons evenly
+    TODO more docs
+    """
+    overlap = p1.intersection(p2)
+    if overlap is None or overlap.is_empty:
+        return p1, p2
+
+    overlap = multi(overlap)
+    splitter = []
+    for overlap_part in overlap.geoms:
+        if overlap_part.geom_type != 'Polygon' or overlap_part.area < min_area:
+            continue
+
+        # Check if this is a simple overlap where the line between the 2 points
+        # where the boundaries of p1 and p2 overlap is (nearly completely) contained
+        # within the overlap
+        straight_central_line = []
+        for g in p1.boundary.intersection(p2.boundary).geoms:
+            if not g.intersects(overlap_part):
+                continue
+            if g.geom_type == 'Point':
+                straight_central_line.append(g)
+            elif g.geom_type == 'LineString':
+                straight_central_line.append(g.centroid)
+            else:
+                raise ValueError(f"Intersection of boundary of 2 roof planes was not point or linestring: was {g.geom_type}")
+
+        straight_central_line = LineString(straight_central_line)
+        if overlap_part.buffer(0.1).contains(straight_central_line):
+            splitter.append(straight_central_line.buffer(min_dist_between_planes / 2,
+                                                         cap_style=CAP_STYLE.square,
+                                                         join_style=JOIN_STYLE.mitre,
+                                                         resolution=1))
+            continue
+
+        # Not a simple overlap - has turns and so on.
+        # Use the road centreline finding algorithm outlined in
+        # https://proceedings.esri.com/library/userconf/proc96/TO400/PAP370/P370.HTM
+        overlap_part = densify_polygon(overlap_part, voronoi_point_density)
+        edges = geoms(ops.voronoi_diagram(overlap_part, edges=True))
+
+        graph = Graph()
+        for edge in edges:
+            if overlap_part.contains(edge) or (edge.length <= voronoi_point_density and overlap_part.intersects(edge)):
+                node1 = edge.coords[0]
+                node2 = edge.coords[-1]
+                graph.add_node(node1)
+                graph.add_node(node2)
+                graph.add_edge(node1, node2, geom=edge)
+
+        if len(graph) == 0:
+            continue
+
+        # Will never finish if there are cycles in the graph - so break them randomly
+        for cycle in cycle_basis(graph):
+            n1 = cycle[0]
+            n2 = cycle[1]
+            graph.remove_edge(n1, n2)
+
+        # Prune the voronoi edges back until we have a single string of line
+        # segments which only has 2 ends (2 nodes with degree=1)
+        candidate_edges = []
+        degrees = dict(graph.degree)
+        while max(degrees.values()) > 2:
+            for node, degree in list(degrees.items()):
+                if degree == 1:
+                    for n1, n2, data in list(graph.edges(node, data=True)):
+                        candidate_edges.append(data['geom'])
+                        graph.remove_edge(n1, n2)
+                        degrees[n1] -= 1
+                        degrees[n2] -= 1
+                    graph.remove_node(node)
+
+        # Now there should be just 2 nodes with degree=1 (either end of the centre-line)
+        deg1_nodes = 0
+        for node, degree in graph.degree:
+            if degree == 1:
+                deg1_nodes += 1
+        assert deg1_nodes == 2
+
+        # Add back in any edges that do not create a fork (so we create a
+        # string of line segments which only has 2 ends).
+        # candidate_edges is treated as a stack as the edges have to be evaluated in
+        # LIFO order so that we build out from the centre-line
+        while len(candidate_edges) > 0:
+            edge = candidate_edges.pop()
+            node1 = edge.coords[0]
+            node2 = edge.coords[-1]
+            if (node1 in graph or node2 in graph) \
+                    and (node1 not in graph or graph.degree(node1) < 2)\
+                    and (node2 not in graph or graph.degree(node2) < 2):
+                graph.add_edge(node1, node2, geom=edge)
+
+        usable_edges = [e[2].get('geom') for e in graph.edges(data=True)]
+
+        # There should still be just 2 nodes with degree=1
+        # Find the end points of the line and extend them to touch the closest point
+        # of the intersection between the boundaries of p1 and p2
+        end_points = []
+        for node, degree in list(graph.degree):
+            if degree == 1:
+                end_points.append(Point(node))
+        assert len(end_points) == 2
+
+        tp = MultiPoint(straight_central_line.coords)
+        usable_edges.append(LineString([end_points[0], ops.nearest_points(end_points[0], tp)[1]]))
+        usable_edges.append(LineString([end_points[1], ops.nearest_points(end_points[1], tp)[1]]))
+
+        part_splitter = []
+        for ls in geoms(ops.linemerge(usable_edges)):
+            part_splitter.append(ls.simplify(1.0))
+        part_splitter = MultiLineString(part_splitter)
+        print(part_splitter.wkt)
+        splitter.append(part_splitter.buffer(min_dist_between_planes / 2,
+                                             cap_style=CAP_STYLE.square,
+                                             join_style=JOIN_STYLE.mitre,
+                                             resolution=1))
+
+    if len(splitter) == 0:
+        return p1, p2
+
+    splitter = ops.unary_union(splitter)
+    p1_new = largest_polygon(p1.difference(splitter))
+    p2_new = largest_polygon(p2.difference(splitter))
+    return p1_new, p2_new
