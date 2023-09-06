@@ -7,11 +7,11 @@ from typing import List, Tuple, Union, cast
 import math
 import numpy as np
 from shapely.geometry.base import BaseGeometry, BaseMultipartGeometry
-from shapely import ops, affinity, set_precision, LinearRing
+from shapely import LinearRing
 from shapely.prepared import prep
 from shapely.strtree import STRtree
 from shapely.geometry import Polygon, shape, MultiPolygon, mapping, LineString, \
-    MultiPoint, MultiLineString, Point
+    MultiPoint, MultiLineString
 from shapely import wkt, ops
 
 from solar_pv.db_funcs import sql_command
@@ -272,9 +272,18 @@ def de_zigzag(poly: Polygon, limit: float = 2.8) -> Polygon:
     """
     De-zigzag a polygon by moving each point halfway towards the next point (unless
     the distance to the next point is over `limit`)
-    TODO holes
     """
-    p = largest_polygon(poly).exterior.coords
+
+    p = largest_polygon(poly)
+    holes = [ip.coords[:] for ip in p.interiors]
+
+    shell = _de_zigzag_ring(p.exterior.coords[:], limit)
+    holes = [_de_zigzag_ring(hole, limit) for hole in holes]
+    res = shell.difference(ops.unary_union(holes))
+    return res
+
+
+def _de_zigzag_ring(p, limit: float = 2.8) -> Polygon:
     num_p = len(p)
     new_points = []
     for i in range(0, num_p):
@@ -326,119 +335,6 @@ def split_poly(poly: Polygon, splitter: LineString | MultiLineString | LinearRin
     union = poly.boundary.union(splitter)
     poly = prep(poly)
     return MultiPolygon([pg for pg in ops.polygonize(union) if poly.contains(pg.representative_point())])
-
-
-def split_evenly(p1: Polygon, p2: Polygon) -> Tuple[Polygon, Polygon]:
-    """
-    Split 2 overlapping polygons evenly
-    TODO more docs
-    """
-    overlap = p1.intersection(p2)
-    if overlap is None or overlap.is_empty:
-        return p1, p2
-
-    overlap = multi(overlap)
-    split_overlap_parts = []
-    for overlap_part in overlap.geoms:
-        if overlap_part.geom_type != 'Polygon' or overlap_part.area < 0.0001:
-            continue
-        overlap_part = densify_polygon(overlap_part, 0.3)
-        edges = ops.voronoi_diagram(overlap_part, edges=True)
-        usable_edges = []
-        candidate_edges = []
-        for edge in geoms(edges):
-            if overlap_part.contains(edge):
-                usable_edges.append(edge)
-            else:
-                candidate_edges.append(edge)
-
-        rtree = STRtree(usable_edges)
-        for edge in candidate_edges:
-            touching = rtree.query(edge, predicate='intersects')
-            if len(touching) < 2:
-                usable_edges.append(edge)
-                rtree = STRtree(usable_edges)
-
-        splitter = []
-        for ls in geoms(ops.linemerge(usable_edges)):
-            splitter.append(ls.simplify(1.0))
-        splitter = MultiLineString(splitter)
-        split_overlap_parts.extend(split_poly(overlap_part, splitter).geoms)
-
-    # if len(splitter) == 0:
-    #     return p1, p2
-    # splitter = MultiLineString(splitter)
-    # split_overlap_parts = split_poly()
-    # p1_new = largest_polygon(split_poly(p1, splitter))
-    # p2_new = largest_polygon(split_poly(p2, splitter))
-    p1_new = p1.difference(p2)
-    p2_new = p2.difference(p1)
-    p1_parts = [p1_new]
-    p2_parts = [p2_new]
-    for poly in split_overlap_parts:
-        # TODO constant
-        poly = set_precision(poly, 0.01)
-        p1_dist = poly.centroid.distance(p1_new)
-        p2_dist = poly.centroid.distance(p2_new)
-        if p1_dist <= p2_dist:
-            p1_parts.append(poly)
-        else:
-            p2_parts.append(poly)
-
-    p1_new = largest_polygon(ops.unary_union(p1_parts))
-    p2_new = largest_polygon(ops.unary_union(p2_parts))
-    return p1_new, p2_new
-
-    # intersection = p1.intersection(p2)
-    # if intersection is None or intersection.is_empty:
-    #     return p1, p2
-    #
-    # intersection = multi(intersection)
-    # splitters = []
-    #
-    # for poly in intersection.geoms:
-    #     if poly.geom_type != 'Polygon' or poly.area < 0.0001:
-    #         continue
-    #     poly = simplify_by_angle(poly)
-    #     splitters.append(LineString(poly.exterior.coords))
-    #     line_segments = polygon_line_segments(poly)
-    #     for line_segment in line_segments:
-    #         if line_segment.length < 0.1:
-    #             continue
-    #         pb = perpendicular_bisector(line_segment, 1000)
-    #         pb_i = poly.exterior.intersection(pb)
-    #         for point in multi(pb_i).geoms:
-    #             dist = point.distance(line_segment)
-    #             if dist > 0.1:
-    #                 splitter = affinity.scale(line_segment.parallel_offset(dist / 2, side='left'), xfact=2.0, yfact=2.0)
-    #                 splitter_2 = affinity.scale(line_segment.parallel_offset(dist / 2, side='right'), xfact=2.0, yfact=2.0)
-    #                 if splitter.intersects(poly):
-    #                     splitters.append(splitter)
-    #                 if splitter_2.intersects(poly):
-    #                     splitters.append(splitter_2)
-    #
-    # splitters = list(multi(ops.unary_union(splitters)).geoms)
-    # split_parts = ops.polygonize(splitters)
-    # p1_new = p1.difference(p2)
-    # p2_new = p2.difference(p1)
-    # p1_parts = [p1_new]
-    # p2_parts = [p2_new]
-    # for poly in split_parts:
-    #     if poly.intersects(intersection):
-    #         # TODO constant
-    #         poly = set_precision(poly, 0.01)
-    #         p1_dist = poly.centroid.distance(p1_new)
-    #         p2_dist = poly.centroid.distance(p2_new)
-    #         if p1_dist <= p2_dist:
-    #             p1_parts.append(poly)
-    #         else:
-    #             p2_parts.append(poly)
-    #
-    # p1_new = largest_polygon(ops.unary_union(p1_parts))
-    # p2_new = largest_polygon(ops.unary_union(p2_parts))
-    # # if p1_new.geom_type != 'Polygon' or p2_new.geom_type != 'Polygon':
-    # #     raise ValueError(f"made a non-polygon: {p1_new.geom_type} {p2_new.geom_type}")
-    # return p1_new, p2_new
 
 
 def slope_deg(a: float, b: float) -> float:

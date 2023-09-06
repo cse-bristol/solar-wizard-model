@@ -88,19 +88,18 @@ def _handle_building_page(pg_uri: str, job_id: int, page: int, page_size: int, p
     start_time = time.time()
     buildings = _load(pg_uri, job_id, page, page_size)
 
-    planes = []
+    polygons = []
     for toid, building in buildings.items():
         try:
             found = _detect_building_roof_planes(building, toid, params['resolution_metres'])
             if len(found) > 0:
-                planes.extend(found)
+                polygons.extend(create_roof_polygons(pg_uri, job_id, toid, found, **params))
         except Exception as e:
             print(f"Exception during roof plane detection for TOID {toid}:")
             traceback.print_exception(e)
             _print_test_data(building)
             raise e
 
-    polygons = create_roof_polygons(pg_uri, job_id, planes, **params)
     _save_planes(pg_uri, job_id, polygons)
     print(f"Page {page} of {page_size} buildings complete, took {round(time.time() - start_time, 2)} s.")
 

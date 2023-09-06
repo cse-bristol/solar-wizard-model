@@ -13,6 +13,7 @@ class RoofDetBuilding(TypedDict):
     max_ground_height: float
 
 
+# TODO combine these two types
 class RoofPlane(TypedDict):
     """Outputs from roof-plane detection"""
     toid: str
