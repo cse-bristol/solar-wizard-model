@@ -14,7 +14,7 @@ from solar_pv.postgis import pixels_for_buildings
 from solar_pv import tables
 from solar_pv.constants import SYSTEM_LOSS
 from solar_pv.pvgis.aggregate_pixel_results import _aggregate_pixel_data, \
-    _load_panels, _load_roof_planes
+    _load_roof_planes, _write_results
 
 PIXEL_DATA = join(paths.TEST_DATA, "pixel_aggregation")
 RASTER_TABLES = ['kwh_year',
@@ -69,7 +69,8 @@ RASTER_TABLES = ['kwh_year',
 
 
 def aggregate_pixels(pg_uri: str, job_id: int, toids: List[str] = None,
-                     write_test_data: bool = False, write_geojson: bool = False, out_dir: str = None):
+                     write_test_data: bool = False, write_geojson: bool = False, write_to_db: bool = False,
+                     out_dir: str = None):
     schema = tables.schema(job_id)
     raster_tables = [f"{schema}.{t}" for t in RASTER_TABLES]
     page = 0
@@ -80,40 +81,39 @@ def aggregate_pixels(pg_uri: str, job_id: int, toids: List[str] = None,
 
     with connection(pg_uri, cursor_factory=DictCursor) as pg_conn:
         print("loading data...")
-        all_panels = _load_panels(pg_conn, job_id, page, page_size, toids=toids)
         all_roofs = _load_roof_planes(pg_conn, job_id, page, page_size, toids=toids)
         all_pixels = pixels_for_buildings(pg_conn, job_id, page, page_size, raster_tables, toids=toids)
         print("loaded data.")
-        panels_to_write = []
         roofs_to_write = []
 
-        for toid, toid_panels in all_panels.items():
+        for toid, toid_roof_planes in all_roofs.items():
             try:
-                panels, roofs = _aggregate_pixel_data(
-                    panels=toid_panels,
+                roofs = _aggregate_pixel_data(
                     pixels=all_pixels[toid],
-                    roofs=all_roofs[toid],
+                    roof_planes=toid_roof_planes,
                     job_id=job_id,
                     pixel_fields=[t.split(".")[1] for t in raster_tables],
                     resolution=resolution,
                     peak_power_per_m2=peak_power_per_m2,
                     system_loss=system_loss,
                     debug=True)
-                panels_to_write.extend(panels)
                 roofs_to_write.extend(roofs)
             except Exception as e:
                 print(f"PVMAPS pixel data aggregation failed on building {toid}:")
-                print(json.dumps({'panels': toid_panels, 'pixels': all_pixels[toid], 'roofs': all_roofs[toid]}, sort_keys=True, default=str))
+                print(json.dumps({'pixels': all_pixels[toid], 'roofs': all_roofs[toid]}, sort_keys=True, default=str))
                 raise e
             if write_test_data:
                 print(f"Writing test data for TOID {toid}...")
-                _write_test_data(toid, {'panels': toid_panels, 'pixels': all_pixels[toid], 'roofs': all_roofs[toid]})
+                _write_test_data(toid, {'pixels': all_pixels[toid], 'roofs': all_roofs[toid]})
 
         if write_geojson:
             print("Writing whole job data...")
             t = int(time.time())
-            _write_panel_geojson(f"{job_id}_panels_{t}", out_dir, panels_to_write)
-            _write_pixel_geojson(f"{job_id}_panels_{t}", out_dir, all_pixels)
+            _write_roof_geojson(f"{job_id}_roofs_{t}", out_dir, roofs_to_write)
+            _write_pixel_geojson(f"{job_id}_pixels_{t}", out_dir, all_pixels)
+
+        if write_to_db:
+            _write_results(pg_conn, job_id, roofs_to_write)
 
 
 def _write_test_data(toid: str, building: dict):
@@ -127,15 +127,15 @@ def _write_test_data(toid: str, building: dict):
         json.dump(building, f, sort_keys=True, default=str)
 
 
-def _write_panel_geojson(name: str, out_dir: str, to_write: List[dict]):
+def _write_roof_geojson(name: str, out_dir: str, to_write: List[dict]):
     geojson_features = []
-    for panel in to_write:
-        geojson_geom = geometry.mapping(wkt.loads(panel['panel']))
-        del panel['panel']
+    for roof in to_write:
+        geojson_geom = geometry.mapping(wkt.loads(roof['roof_geom_27700']))
+        del roof['roof_geom_27700']
         geojson_feature = {
           "type": "Feature",
           "geometry": geojson_geom,
-          "properties": panel
+          "properties": roof
         }
         geojson_features.append(geojson_feature)
 
@@ -179,7 +179,7 @@ def write_testdata_geojson(toid: str, out_dir: str):
         data = json.load(f)
         pixels = data['pixels']
         panels = data['panels']
-        _write_panel_geojson(f"{toid}_panels.geojson", out_dir, panels)
+        _write_roof_geojson(f"{toid}_panels.geojson", out_dir, panels)
         _write_pixel_geojson(f"{toid}_pixels.geojson", out_dir, {toid: pixels})
 
 
@@ -193,10 +193,10 @@ if __name__ == "__main__":
     #     ],
     #     write_test_data=True)
 
-    # aggregate_pixels(
-    #     os.getenv("PGW_URI"),
-    #     1647,
-    #     out_dir=f"{os.getenv('DEV_DATA_DIR')}/pixel-agg",
-    #     write_geojson=True
-    # )
-    write_testdata_geojson("osgb1000016884534", f"{os.getenv('DEV_DATA_DIR')}/pixel-agg")
+    aggregate_pixels(
+        os.getenv("PGW_URI"),
+        1662,
+        out_dir=f"{os.getenv('DEV_DATA_DIR')}/pixel-agg",
+        write_to_db=True
+    )
+    # write_testdata_geojson("osgb1000016884534", f"{os.getenv('DEV_DATA_DIR')}/pixel-agg")

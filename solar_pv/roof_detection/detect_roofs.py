@@ -13,18 +13,20 @@ from psycopg2.extras import DictCursor, execute_values, Json
 from psycopg2.sql import SQL, Identifier
 import numpy as np
 from shapely import wkt
+from skimage import measure
 
 from solar_pv.db_funcs import count, connection, sql_command
 from solar_pv.postgis import pixels_for_buildings
 from solar_pv import tables
 from solar_pv.constants import RANSAC_LARGE_BUILDING, \
-    RANSAC_LARGE_MAX_TRIALS, RANSAC_SMALL_MAX_TRIALS, RANSAC_SMALL_BUILDING, RANSAC_MEDIUM_MAX_TRIALS, ROOFDET_MAX_MAE
+    RANSAC_LARGE_MAX_TRIALS, RANSAC_SMALL_MAX_TRIALS, RANSAC_SMALL_BUILDING, \
+    RANSAC_MEDIUM_MAX_TRIALS, ROOFDET_MAX_MAE, FLAT_ROOF_DEGREES_THRESHOLD
 from solar_pv.roof_detection.detsac import DETSACRegressorForLIDAR
 from solar_pv.roof_detection.merge_adjacent import merge_adjacent
-from solar_pv.roof_detection.premade_planes import create_planes
+from solar_pv.roof_detection.premade_planes import create_planes, _image
 from solar_pv.roof_detection.ransac import RANSACRegressorForLIDAR
 from solar_pv.roof_polygons.roof_polygons import create_roof_polygons
-from solar_pv.types import RoofDetBuilding, RoofPlane, RoofPolygon
+from solar_pv.datatypes import RoofDetBuilding, RoofPlane, RoofPolygon
 from solar_pv.util import get_cpu_count
 
 
@@ -100,7 +102,13 @@ def _handle_building_page(pg_uri: str, job_id: int, page: int, page_size: int, p
             _print_test_data(building)
             raise e
 
-    _save_planes(pg_uri, job_id, polygons)
+    try:
+        _save_planes(pg_uri, job_id, polygons)
+    except Exception as e:
+        print(f"Exception when saving roof planes:")
+        traceback.print_exception(e)
+        raise e
+
     print(f"Page {page} of {page_size} buildings complete, took {round(time.time() - start_time, 2)} s.")
 
 
@@ -210,6 +218,26 @@ def _detect_building_roof_planes(building: RoofDetBuilding,
     labels[mask == 1] = range(plane_idx + 1, outliers + plane_idx + 1)
 
     merged_planes = merge_adjacent(xy, z, labels, planes, resolution_metres, labels_nodata)
+
+    # TODO WIP: trying to detect flat roofs covered in obstacles...
+    # # flat_mask = [planes.get(l, {}).get('slope', 9999) <= FLAT_ROOF_DEGREES_THRESHOLD for l in labels]
+    # plane_mask = labels <= plane_idx
+    # # flat_img, _ = _image(xy, flat_mask, 1.0, 0)
+    # plane_img, _ = _image(xy, plane_mask, 1.0, 0)
+    # obstacle_groups = measure.label(np.pad(plane_img, 1), background=1, connectivity=1)
+    # TODO need to use new_labels - but to do that need to know what the new plane_idxs are...
+
+    # labels[labels <= plane_idx] = -1
+    # outlier_img, _ = _image(xy, labels, 1.0, -1)
+    # obstacle_groups = measure.label(np.pad(outlier_img, 1), background=-1, connectivity=1)
+    # un-pad
+
+    # TODO should obstacle groups exlude things that are part of non-flat planes? Probably yes.
+    #      so maybe this should be a RAG?
+    #      * make RAG from new_labels
+    #      * merge all adjacent outliers to find obstacle groups
+    #      * each flat plane is scored according to how many obstacle groups it connects to that only connect to flat planes
+
     return merged_planes
 
 
@@ -267,7 +295,6 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[RoofPolygon]):
 
     for plane in planes:
         # TODO maybe don't have to save inliers_xy as it's only needed for dev_roof_polygons?
-        # TODO add RMSE etc
         plane['inliers_xy'] = plane['inliers_xy'].tolist()
         plane['meta'] = Json({
             "sd": plane["sd"],
@@ -278,7 +305,14 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[RoofPolygon]):
             "cv_hull_ratio": plane["cv_hull_ratio"],
             "plane_type": plane["plane_type"],
             "aspect_raw": plane["aspect_raw"],
+            "r2": plane["r2"],
+            "mae": plane["mae"],
+            "mse": plane["mse"],
+            "rmse": plane["rmse"],
+            "msle": plane["msle"],
+            "mape": plane["mape"],
         })
+        plane['roof_geom_27700'] = plane['roof_geom_27700'].wkt
 
     with connection(pg_uri) as pg_conn, pg_conn.cursor() as cursor:
         execute_values(cursor, SQL("""
@@ -289,15 +323,13 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[RoofPolygon]):
                 y_coef, 
                 intercept, 
                 slope, 
-                aspect, 
-                sd, 
+                aspect,
                 is_flat, 
                 usable, 
                 easting, 
                 northing, 
                 raw_footprint, 
-                raw_area, 
-                archetype,
+                raw_area,
                 inliers_xy,
                 meta
             ) VALUES %s;
@@ -311,14 +343,12 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[RoofPolygon]):
                         %(intercept)s, 
                         %(slope)s, 
                         %(aspect)s, 
-                        %(sd)s, 
                         %(is_flat)s, 
                         %(usable)s, 
                         %(easting)s, 
                         %(northing)s, 
                         %(raw_footprint)s, 
-                        %(raw_area)s, 
-                        %(archetype)s,
+                        %(raw_area)s,
                         %(inliers_xy)s,
                         %(meta)s )""")
 

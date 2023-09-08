@@ -467,7 +467,7 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
                 "cv_hull_ratio": cv_hull_ratio,
                 "plane_type": "RANSAC",
                 "plane_id": f"RANSAC_{tuple(subset_idxs)}",
-                "aspect_adjusted": aspect_deg_,
+                "aspect": aspect_deg_,
             }
 
             inlier_mask_best = inlier_mask_subset
@@ -535,12 +535,14 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
 
             a, b = base_estimator.coef_
             d = base_estimator.intercept_
+            slope = slope_deg(a, b)
             self.plane_properties.update({
                 "x_coef": a,
                 "y_coef": b,
                 "intercept": d,
-                "slope": slope_deg(a, b),
-                "aspect": aspect_deg(a, b),
+                "slope": slope,
+                "is_flat": slope <= FLAT_ROOF_DEGREES_THRESHOLD,
+                "aspect_raw": aspect_deg(a, b),
                 "inliers_xy": X[mask_without_excluded],
                 "r2": metrics.r2_score(y_true, y_pred),
                 "mae": metrics.mean_absolute_error(y_true, y_pred),

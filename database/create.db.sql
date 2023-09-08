@@ -63,29 +63,14 @@ CREATE TABLE IF NOT EXISTS models.pv_building (
     PRIMARY KEY(job_id, toid)
 );
 
+-- TODO migration, change in albion-webapp etc
 CREATE TABLE IF NOT EXISTS models.pv_roof_plane (
     toid text NOT NULL,
     roof_plane_id int NOT NULL,
     job_id int NOT NULL,
-    horizon real[] NOT NULL,
-    slope double precision NOT NULL,
-    aspect double precision NOT NULL,
-    x_coef double precision NOT NULL,
-    y_coef double precision NOT NULL,
-    intercept double precision NOT NULL,
-    is_flat boolean NOT NULL,
-    PRIMARY KEY (roof_plane_id, job_id)
-);
 
-CREATE INDEX IF NOT EXISTS pvrp_job_id_idx ON models.pv_roof_plane (job_id);
-CREATE INDEX IF NOT EXISTS pvrp_toid_idx ON models.pv_roof_plane (toid);
+    roof_geom_4326 geometry(polygon, 4326) NOT NULL,
 
-CREATE TABLE IF NOT EXISTS models.pv_panel (
-    toid text NOT NULL,
-    roof_plane_id int NOT NULL,
-    panel_id bigint NOT NULL,
-    job_id int NOT NULL,
-    panel_geom_4326 geometry(polygon, 4326) NOT NULL,
     kwh_jan double precision NOT NULL,
     kwh_feb double precision NOT NULL,
     kwh_mar double precision NOT NULL,
@@ -100,13 +85,22 @@ CREATE TABLE IF NOT EXISTS models.pv_panel (
     kwh_dec double precision NOT NULL,
     kwh_year double precision NOT NULL,
     kwp double precision NOT NULL,
+    kwh_per_kwp double precision NOT NULL,
     horizon real[] NOT NULL,
     area double precision NOT NULL,
     footprint double precision NOT NULL,
-    PRIMARY KEY (panel_id, job_id)
+
+    x_coef double precision NOT NULL,
+    y_coef double precision NOT NULL,
+    intercept double precision NOT NULL,
+    slope double precision NOT NULL,
+    aspect double precision NOT NULL,
+    is_flat bool NOT NULL,
+    meta jsonb NOT NULL,
+
+    PRIMARY KEY (roof_plane_id, job_id)
 );
 
-CREATE INDEX IF NOT EXISTS pvp_job_id_idx ON models.pv_panel (job_id);
-CREATE INDEX IF NOT EXISTS pvp_toid_idx ON models.pv_panel (toid);
-CREATE INDEX IF NOT EXISTS pvp_rp_idx ON models.pv_panel (roof_plane_id);
-CREATE INDEX IF NOT EXISTS pvp_geom_idx ON models.pv_panel USING GIST (panel_geom_4326);
+CREATE INDEX IF NOT EXISTS pvrp_job_id_idx ON models.pv_roof_plane (job_id);
+CREATE INDEX IF NOT EXISTS pvrp_toid_idx ON models.pv_roof_plane (toid);
+CREATE INDEX IF NOT EXISTS pvp_geom_idx ON models.pv_roof_plane USING GIST (roof_geom_4326);

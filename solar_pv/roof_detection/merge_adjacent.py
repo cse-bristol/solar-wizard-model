@@ -9,7 +9,7 @@ from sklearn.linear_model import LinearRegression
 
 from solar_pv.constants import ROOFDET_GOOD_SCORE, FLAT_ROOF_DEGREES_THRESHOLD, \
     AZIMUTH_ALIGNMENT_THRESHOLD, FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD
-from solar_pv.types import RoofPlane
+from solar_pv.datatypes import RoofPlane
 from solar_pv.roof_detection.premade_planes import _image
 from solar_pv.geos import slope_deg, aspect_deg, deg_diff
 from solar_pv.roof_detection.ransac import _group_areas
@@ -53,8 +53,8 @@ def _edge_weight(graph, src: int, dst: int) -> float:
 
             # if new aspect is outside the range of adjusted aspects, do not merge:
             new_aspect = aspect_deg(lr.coef_[0], lr.coef_[1])
-            if deg_diff(new_aspect, src_node['aspect_adjusted']) > AZIMUTH_ALIGNMENT_THRESHOLD \
-                    and deg_diff(new_aspect, dst_node['aspect_adjusted']) > AZIMUTH_ALIGNMENT_THRESHOLD:
+            if deg_diff(new_aspect, src_node['aspect']) > AZIMUTH_ALIGNMENT_THRESHOLD \
+                    and deg_diff(new_aspect, dst_node['aspect']) > AZIMUTH_ALIGNMENT_THRESHOLD:
                 weight = DO_NOT_MERGE
         else:
             new_mae = metrics.mean_absolute_error(z_subset, lr.predict(xy_subset))
@@ -83,7 +83,7 @@ def _edge_weight(graph, src: int, dst: int) -> float:
         # if new aspect is outside the range of the adjusted aspect, do not merge:
         if slope > FLAT_ROOF_DEGREES_THRESHOLD and weight < 0:
             new_aspect = aspect_deg(lr.coef_[0], lr.coef_[1])
-            aspect_adjusted = dst_node.get('aspect_adjusted', src_node.get('aspect_adjusted'))
+            aspect_adjusted = dst_node.get('aspect', src_node.get('aspect'))
             if deg_diff(new_aspect, aspect_adjusted) > AZIMUTH_ALIGNMENT_THRESHOLD:
                 weight = DO_NOT_MERGE
 
@@ -139,7 +139,8 @@ def _update_node_data(graph, src: int, dst: int):
     dst_node['y_coef'] = lr.coef_[1]
     dst_node['intercept'] = lr.intercept_
     dst_node['slope'] = slope_deg(lr.coef_[0], lr.coef_[1])
-    dst_node['aspect'] = aspect_deg(lr.coef_[0], lr.coef_[1])
+    dst_node['is_flat'] = dst_node['slope'] <= FLAT_ROOF_DEGREES_THRESHOLD
+    dst_node['aspect_raw'] = aspect_deg(lr.coef_[0], lr.coef_[1])
     dst_node['inliers_xy'] = xy_subset
 
     if dst_node['outlier'] is src_node['outlier'] is False:
@@ -174,22 +175,21 @@ def _update_node_data(graph, src: int, dst: int):
     dst_node["aspect_circ_mean"] = 0
     dst_node["aspect_circ_sd"] = 0
 
-    if 'aspect_adjusted' in src_node and 'aspect_adjusted' in dst_node:
-        # deg_diff(dst_node['aspect'], src_node['aspect_adjusted']) < AZIMUTH_ALIGNMENT_THRESHOLD:
-        a1 = dst_node["aspect_adjusted"]
-        a2 = src_node["aspect_adjusted"]
-        a1_diff = deg_diff(a1, dst_node['aspect'])
-        a2_diff = deg_diff(a2, dst_node['aspect'])
-        dst_node["aspect_adjusted"] = a1 if a1_diff < a2_diff else a2
-    elif 'aspect_adjusted' in src_node:
-        dst_node["aspect_adjusted"] = src_node.get('aspect_adjusted')
+    if 'aspect' in src_node and 'aspect' in dst_node:
+        a1 = dst_node["aspect"]
+        a2 = src_node["aspect"]
+        a1_diff = deg_diff(a1, dst_node['aspect_raw'])
+        a2_diff = deg_diff(a2, dst_node['aspect_raw'])
+        dst_node["aspect"] = a1 if a1_diff < a2_diff else a2
+    elif 'aspect' in src_node:
+        dst_node["aspect"] = src_node.get('aspect')
 
 
 def _hierarchical_merge(graph, labels, thresh: float = 0):
-    labels2 = merge_hierarchical(labels, graph, thresh=thresh, rag_copy=False,
-                                 in_place_merge=True,
-                                 merge_func=_update_node_data,
-                                 weight_func=_new_edge_weight)
+    new_labels = merge_hierarchical(labels, graph, thresh=thresh, rag_copy=False,
+                                    in_place_merge=True,
+                                    merge_func=_update_node_data,
+                                    weight_func=_new_edge_weight)
 
     merged_planes = []
     for n in graph.nodes:

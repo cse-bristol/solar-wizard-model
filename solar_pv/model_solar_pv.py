@@ -14,7 +14,6 @@ from solar_pv.db_funcs import process_pg_uri, \
     connection, sql_command, sql_script
 from solar_pv.postgis import raster_tile_coverage_count
 from solar_pv.outdated_lidar.outdated_lidar_check import check_lidar
-from solar_pv.panels.panels import place_panels
 from solar_pv.pvgis.pvgis import pvgis
 from solar_pv.roof_detection.detect_roofs import detect_roofs
 from solar_pv.rasters import generate_rasters
@@ -100,14 +99,14 @@ def model_solar_pv(pg_uri: str,
                  min_dist_to_edge_large_m=min_dist_to_edge_large_m,
                  resolution_metres=res)
 
-    logging.info("Adding individual PV panels...")
-    place_panels(
-        pg_uri=pg_uri,
-        job_id=job_id,
-        min_roof_area_m=min_roof_area_m,
-        panel_width_m=panel_width_m,
-        panel_height_m=panel_height_m,
-        panel_spacing_m=panel_spacing_m)
+    # logging.info("Adding individual PV panels...")
+    # place_panels(
+    #     pg_uri=pg_uri,
+    #     job_id=job_id,
+    #     min_roof_area_m=min_roof_area_m,
+    #     panel_width_m=panel_width_m,
+    #     panel_height_m=panel_height_m,
+    #     panel_spacing_m=panel_spacing_m)
 
     logging.info("Running PV-GIS...")
     pvgis(pg_uri=pg_uri,

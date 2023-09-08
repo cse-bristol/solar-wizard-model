@@ -24,7 +24,7 @@ from solar_pv.db_funcs import connection, sql_command
 from solar_pv.geos import azimuth_deg, square, largest_polygon, get_grid_cells, \
     de_zigzag, multi, densify_polygon, geoms
 from solar_pv.constants import FLAT_ROOF_DEGREES_THRESHOLD
-from solar_pv.types import RoofPlane, RoofPolygon
+from solar_pv.datatypes import RoofPlane, RoofPolygon
 
 
 def create_roof_polygons(pg_uri: str,
@@ -70,22 +70,15 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
     if len(planes) == 0:
         return []
 
-    # building_aspect = max(planes, key=lambda p: len(p['inliers_xy']))['aspect_adjusted']
-    plane_polys = []
-    for plane in planes:
-        # TODO move all this non-polygon related stuff up into roofdet
-        plane = cast(dict, plane)
-        toid = plane['toid']
-        plane['aspect_raw'] = plane['aspect']
-        plane['aspect'] = plane['aspect_adjusted']
-        del plane['aspect_adjusted']
-        building_geom = building_geoms[toid]
-        try:
-            # set is_flat, update slope of flat roofs
-            is_flat = plane['slope'] <= FLAT_ROOF_DEGREES_THRESHOLD
-            plane['is_flat'] = is_flat
-            if is_flat:
-                plane['slope'] = flat_roof_degrees
+    try:
+        plane_polys = []
+        for plane in planes:
+            plane = cast(RoofPolygon, plane)
+            toid = plane['toid']
+            building_geom = building_geoms[toid]
+            is_flat = plane['is_flat']
+            # TODO ideally store actual slope and panel_slope as separate things
+            plane['slope'] = flat_roof_degrees if is_flat else plane['slope']
 
             roof_poly = _make_polygon(plane, resolution_metres)
 
@@ -96,27 +89,19 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
                                                min_dist_to_edge_m)
 
             if roof_poly and not roof_poly.is_empty:
-                plane['roof_poly'] = roof_poly
+                plane['roof_geom_27700'] = roof_poly
                 plane_polys.append(plane)
 
-        except Exception as e:
-            traceback.print_exception(e)
-            print(json.dumps(_to_test_data(toid, [plane], building_geom),
-                             sort_keys=True, default=str))
-            raise e
+        plane_polys = _merge_touching(plane_polys, resolution_metres)
 
-    plane_polys = _merge_touching(plane_polys, resolution_metres)
+        for p in plane_polys:
+            p['roof_geom_27700'] = set_precision(p['roof_geom_27700'], 0.01)
+        _remove_overlaps(plane_polys)
 
-    # TODO is this needed?
-    for p in plane_polys:
-        p['roof_poly'] = set_precision(p['roof_poly'], 0.01)
-    _remove_overlaps(plane_polys)
-
-    for plane in plane_polys:
-        toid = plane['toid']
-        building_geom = building_geoms[toid]
-        try:
-            roof_poly = plane['roof_poly']
+        for plane in plane_polys:
+            toid = plane['toid']
+            building_geom = building_geoms[toid]
+            roof_poly = plane['roof_geom_27700']
 
             # Constrain a second time in case _merge_touching caused
             # it to re-overflow
@@ -128,8 +113,6 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
 
             if not roof_poly or roof_poly.is_empty:
                 continue
-
-            del plane['roof_poly']
 
             # Set usability:
             if plane['slope'] > max_roof_slope_degrees:
@@ -148,20 +131,23 @@ def _create_roof_polygons(building_geoms: Dict[str, Polygon],
                 plane['usable'] = True
 
             # Add other info:
-            plane['roof_geom_27700'] = roof_poly.wkt
+            plane['roof_geom_27700'] = roof_poly
             easting, northing = roof_poly.centroid.xy
             plane['easting'] = easting[0]
             plane['northing'] = northing[0]
             plane['raw_footprint'] = roof_poly.area
             plane['raw_area'] = roof_poly.area / math.cos(math.radians(plane['slope']))
             roof_polygons.append(plane)
-        except Exception as e:
-            traceback.print_exception(e)
-            print(json.dumps(_to_test_data(toid, [plane], building_geom),
-                             sort_keys=True, default=str))
-            raise e
 
-    return roof_polygons
+        return roof_polygons
+
+    except Exception as e:
+        toid = planes[0]['toid']
+        print(f"Exception during roof polygon creation for TOID {toid}:")
+        traceback.print_exception(e)
+        print(json.dumps(_to_test_data(planes[0]['toid'], planes, building_geoms[toid]),
+                         sort_keys=True, default=str))
+        raise e
 
 
 def _make_polygon(plane: RoofPlane, resolution_metres: float,
@@ -194,6 +180,8 @@ def _make_polygon(plane: RoofPlane, resolution_metres: float,
 
 
 def _grid_polygon(roof_poly: Polygon, aspect: float, grid_size: float):
+    # TODO maybe this should require that the grid cell intersection with roof_poly
+    #      is over a certain amount?
     centroid = roof_poly.centroid
 
     # Rotate the roof area CCW by aspect, to be gridded easily:
@@ -215,7 +203,7 @@ def _grid_polygon(roof_poly: Polygon, aspect: float, grid_size: float):
 #     return roof_poly
 
 
-def _merge_touching(planes, resolution_metres: float, max_slope_diff: int = 4) -> List[dict]:
+def _merge_touching(planes: List[RoofPolygon], resolution_metres: float, max_slope_diff: int = 4) -> List[RoofPolygon]:
     """
     Merge any planes that
     a) have the same aspect
@@ -241,37 +229,37 @@ def _merge_touching(planes, resolution_metres: float, max_slope_diff: int = 4) -
             checked.add(id(plane))
 
             slope = plane['slope']
-            poly = plane['roof_poly']
+            poly = plane['roof_geom_27700']
             mergeable = []
             for p in plane_group:
                 if id(p) not in checked \
                         and p['is_flat'] is False \
                         and abs(p['slope'] - slope) <= max_slope_diff \
-                        and p['roof_poly'].intersects(poly):
+                        and p['roof_geom_27700'].intersects(poly):
                     mergeable.append(p)
 
             if len(mergeable) > 0:
                 for to_merge in mergeable:
                     checked.add(id(to_merge))
 
-                plane['roof_poly'] = ops.unary_union([p['roof_poly'] for p in mergeable] + [poly])
+                plane['roof_geom_27700'] = ops.unary_union([p['roof_geom_27700'] for p in mergeable] + [poly])
                 plane['inliers_xy'] = np.concatenate([p['inliers_xy'] for p in mergeable] + [plane['inliers_xy']])
-                plane['roof_poly'] = _make_polygon(plane, resolution_metres)
+                plane['roof_geom_27700'] = _make_polygon(plane, resolution_metres)
 
-            if plane['roof_poly']:
+            if plane['roof_geom_27700']:
                 merged.append(plane)
 
     return merged
 
 
-def _remove_overlaps(roof_polygons: List[dict]) -> None:
+def _remove_overlaps(roof_polygons: List[RoofPolygon]) -> None:
     # TODO maybe have an rtree here?
     for i, rp1 in enumerate(roof_polygons):
         for j, rp2 in enumerate(roof_polygons):
             if i > j:
-                p1, p2 = _split_evenly(rp1['roof_poly'], rp2['roof_poly'])
-                rp1['roof_poly'] = p1
-                rp2['roof_poly'] = p2
+                p1, p2 = _split_evenly(rp1['roof_geom_27700'], rp2['roof_geom_27700'])
+                rp1['roof_geom_27700'] = p1
+                rp2['roof_geom_27700'] = p2
 
 
 def _constrain_to_building(building_geom: Polygon,
@@ -329,7 +317,7 @@ def _to_test_data(toid: str, planes: List[dict], building_geom: Polygon) -> dict
 
 
 def _split_evenly(p1: Polygon, p2: Polygon,
-                  min_area: float = 0.01,
+                  min_area: float = 0.25,
                   min_dist_between_planes: float = 0.1,
                   voronoi_point_density: float = 0.1) -> Tuple[Polygon, Polygon]:
     """
@@ -445,7 +433,6 @@ def _split_evenly(p1: Polygon, p2: Polygon,
         for ls in geoms(ops.linemerge(usable_edges)):
             part_splitter.append(ls.simplify(1.0))
         part_splitter = MultiLineString(part_splitter)
-        print(part_splitter.wkt)
         splitter.append(part_splitter.buffer(min_dist_between_planes / 2,
                                              cap_style=CAP_STYLE.square,
                                              join_style=JOIN_STYLE.mitre,

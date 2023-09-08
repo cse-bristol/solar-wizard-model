@@ -64,14 +64,12 @@ CREATE TABLE IF NOT EXISTS {roof_polygons} (
     intercept double precision NOT NULL,
     slope double precision NOT NULL,
     aspect double precision NOT NULL,
-    sd double precision NOT NULL,
     is_flat bool NOT NULL,
     usable bool NOT NULL,
     easting double precision NOT NULL,
     northing double precision NOT NULL,
     raw_footprint double precision NOT NULL,
     raw_area double precision NOT NULL,
-    archetype boolean NOT NULL,
     inliers_xy real[][] NOT NULL,
     meta jsonb NOT NULL
 );
@@ -82,17 +80,17 @@ CREATE INDEX ON {roof_polygons} USING GIST (roof_geom_27700);
 --
 -- Create the table for storing individual panel polygons:
 --
-CREATE TABLE IF NOT EXISTS {panel_polygons} (
-    panel_id SERIAL PRIMARY KEY,
-    roof_plane_id bigint NOT NULL REFERENCES {roof_polygons} (roof_plane_id),
-    toid text NOT NULL,
-    panel_geom_27700 geometry(polygon, 27700) NOT NULL,
-    footprint double precision NOT NULL,
-    area double precision NOT NULL
-);
-
-CREATE INDEX ON {panel_polygons} (roof_plane_id);
-CREATE INDEX ON {panel_polygons} USING GIST (panel_geom_27700);
+--CREATE TABLE IF NOT EXISTS {panel_polygons} (
+--    panel_id SERIAL PRIMARY KEY,
+--    roof_plane_id bigint NOT NULL REFERENCES {roof_polygons} (roof_plane_id),
+--    toid text NOT NULL,
+--    panel_geom_27700 geometry(polygon, 27700) NOT NULL,
+--    footprint double precision NOT NULL,
+--    area double precision NOT NULL
+--);
+--
+--CREATE INDEX ON {panel_polygons} (roof_plane_id);
+--CREATE INDEX ON {panel_polygons} USING GIST (panel_geom_27700);
 
 --
 -- elevation raster

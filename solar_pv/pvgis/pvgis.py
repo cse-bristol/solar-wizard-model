@@ -116,22 +116,27 @@ def pvgis(pg_uri: str,
 
     logging.info("Finished PVMAPS, loading into db...")
 
-    _write_results_to_db(
+    raster_tables = _write_results_to_db(
         pg_uri=pg_uri,
         job_id=job_id,
         solar_dir=solar_dir,
-        resolution_metres=resolution_metres,
-        peak_power_per_m2=peak_power_per_m2,
         yearly_kwh_raster=yearly_kwh_raster,
         monthly_wh_rasters=monthly_wh_rasters,
         horizon_rasters=horizon_rasters)
+
+    logging.info("Aggregating pixel-level results to roof planes...")
+
+    aggregate_pixel_results(pg_uri=pg_uri,
+                            job_id=job_id,
+                            raster_tables=raster_tables,
+                            resolution=resolution_metres,
+                            peak_power_per_m2=peak_power_per_m2,
+                            system_loss=SYSTEM_LOSS)
 
 
 def _write_results_to_db(pg_uri: str,
                          job_id: int,
                          solar_dir: str,
-                         resolution_metres: float,
-                         peak_power_per_m2: float,
                          yearly_kwh_raster: str,
                          monthly_wh_rasters: List[str],
                          horizon_rasters: List[str]):
@@ -160,9 +165,4 @@ def _write_results_to_db(pg_uri: str,
             rasters_to_postgis(pg_conn, [raster], raster_table, solar_dir, POSTGIS_TILESIZE, nodata_val=LIDAR_NODATA, srid=27700)
             raster_tables.append(raster_table)
 
-    aggregate_pixel_results(pg_uri=pg_uri,
-                            job_id=job_id,
-                            raster_tables=raster_tables,
-                            resolution=resolution_metres,
-                            peak_power_per_m2=peak_power_per_m2,
-                            system_loss=SYSTEM_LOSS)
+    return raster_tables

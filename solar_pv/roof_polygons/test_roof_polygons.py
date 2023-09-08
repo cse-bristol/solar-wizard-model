@@ -9,6 +9,7 @@ from geojson import Polygon
 from shapely import wkt
 
 from solar_pv import paths
+from solar_pv.datatypes import RoofPolygon
 from solar_pv.roof_polygons.roof_polygons import _create_roof_polygons
 from solar_pv.test_utils.test_funcs import ParameterisedTestCase
 
@@ -49,7 +50,7 @@ def _create_polygons_using_test_data(toid: str,
                                      flat_roof_degrees: int = 10,
                                      large_building_threshold: float = 200,
                                      min_dist_to_edge_m: float = 0.3,
-                                     min_dist_to_edge_large_m: float = 1) -> Tuple[List[dict], Polygon]:
+                                     min_dist_to_edge_large_m: float = 1) -> Tuple[List[RoofPolygon], Polygon]:
     planes, building_geom = _load_test_data(toid)
     planes = _create_roof_polygons(
         {toid: building_geom},
