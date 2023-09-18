@@ -47,10 +47,7 @@ class RoofPlane(TypedDict):
 class RoofPolygon(RoofPlane):
     """Outputs from roof plane -> roof polygon algorithm"""
 
+    roof_geom_raw_27700: Polygon
     roof_geom_27700: Polygon
-    easting: float
-    northing: float
-    raw_footprint: float
-    raw_area: float
     usable: bool
     not_usable_reason: str

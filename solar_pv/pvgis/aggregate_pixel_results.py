@@ -4,6 +4,8 @@
 import json
 import logging
 import multiprocessing as mp
+
+import numpy as np
 import time
 import traceback
 from calendar import mdays
@@ -14,7 +16,7 @@ import math
 import psycopg2.extras
 from psycopg2.extras import Json
 from psycopg2.sql import SQL, Identifier, Literal
-from shapely import wkt
+from shapely import wkt, Polygon
 from shapely.geometry import MultiPolygon
 from shapely.strtree import STRtree
 
@@ -60,7 +62,7 @@ def aggregate_pixel_results(pg_uri: str,
         wrapped_iterable = ((pg_uri, job_id, raster_tables, resolution,
                              peak_power_per_m2, system_loss, page, page_size)
                             for page in range(0, pages))
-        for res in pool.starmap(_aggregate_results_page, wrapped_iterable):
+        for res in pool.starmap(_aggregate_results_page, wrapped_iterable, chunksize=1):
             pass
 
     with connection(pg_uri) as pg_conn:
@@ -134,9 +136,9 @@ def _aggregate_pixel_data(roof_planes,
     """
 
     # Pixel fields:
-    kwh_year = pixel_fields[0]
-    wh_month = pixel_fields[1:13]
-    horizons = pixel_fields[13:]
+    kwh_year_field = pixel_fields[0]
+    wh_month_fields = pixel_fields[1:13]
+    horizon_fields = pixel_fields[13:]
 
     # create squares for each pixel:
     if debug:
@@ -154,33 +156,52 @@ def _aggregate_pixel_data(roof_planes,
     rtree = STRtree(pixel_squares)
     roofs_to_write = []
     for roof_plane in roof_planes:
-        roof_plane_geom = wkt.loads(roof_plane['roof_geom_27700'])
-        roof_plane['kwh_year'] = 0
-        roof_plane['horizon'] = [0 for _ in range(len(horizons))]
-        for i, wh_monthday in enumerate(wh_month):
-            roof_plane[_month_field(i)] = 0
+        geom_max = wkt.loads(roof_plane['roof_geom_27700'])
+        geom_min = wkt.loads(roof_plane['roof_geom_raw_27700'])
+
+        roof_plane['horizon'] = [0 for _ in range(len(horizon_fields))]
+
+        variations = [{'geom': geom_min, 'suffix': 'min'},
+                      {'geom': geom_max, 'suffix': 'max'}]
+
+        for variation in variations:
+            geom = variation['geom']
+            suffix = variation['suffix']
+            area = geom.area / math.cos(math.radians(roof_plane['slope']))
+
+            kwh_years = []
+            kwh_months = [[] for _ in wh_month_fields]
+            weights = []
+            for idx in rtree.query(geom, predicate='intersects'):
+                pixel = pixel_squares[idx]
+                pdata = pixels[idx]
+                # PVMAPS produces kWh values per pixel as if a pixel was a 1kWp installation
+                # so the values are adjusted accordingly.
+                factor = peak_power_per_m2 * (1 - system_loss)
+                kwh_years.append(pdata[kwh_year_field] * factor)
+                for i, wh_monthday in enumerate(wh_month_fields):
+                    # Convert a 1-day Wh to a kWh for the whole month:
+                    kwh_months[i].append(pdata[wh_monthday] * 0.001 * mdays[i + 1] * factor)
+                weights.append(pixel.intersection(geom).area / pixel.area)
+
+            for i, kwh_month in enumerate(kwh_months):
+                roof_plane[f'{_month_field(i)}_{suffix}'] = np.average(np.array(kwh_month) * area, weights=weights)
+
+            roof_plane[f'kwh_year_{suffix}'] = np.average(np.array(kwh_years) * area, weights=weights)
+            roof_plane[f'kwp_{suffix}'] = area * peak_power_per_m2
+            roof_plane[f'area_{suffix}'] = round(area, 2)
+
+            roof_plane[f'kwh_year_{suffix}'] = round(roof_plane[f'kwh_year_{suffix}'], 2)
+            roof_plane[f'kwp_{suffix}'] = round(roof_plane[f'kwp_{suffix}'], 2)
+            for i, wh_monthday in enumerate(wh_month_fields):
+                roof_plane[f'{_month_field(i)}_{suffix}'] = round(roof_plane[f'{_month_field(i)}_{suffix}'], 2)
 
         contributing_pixels = 0
-        for idx in rtree.query(roof_plane_geom, predicate='intersects'):
-            pixel = pixel_squares[idx]
+        for idx in rtree.query(geom_max, predicate='intersects'):
             pdata = pixels[idx]
-
             contributing_pixels += 1
-            pct_intersects = pixel.intersection(roof_plane_geom).area / pixel.area
-            # Sum of the kwh of each pixel that intersects the roof plane,
-            # multiplied by the proportion of the pixel that intersects the roof plane.
-            # PVMAPS produces kWh values per pixel as if a pixel was a 1kWp installation
-            # so the values are adjusted accordingly.
-            # System losses are also applied here.
-            factor = pct_intersects * peak_power_per_m2 * (1 - system_loss)
-            roof_plane['kwh_year'] += pdata[kwh_year] * factor
-
-            for i, wh_monthday in enumerate(wh_month):
-                # Convert a 1-day Wh to a kWh for the whole month:
-                roof_plane[_month_field(i)] += pdata[wh_monthday] * 0.001 * mdays[i + 1] * factor
-
             # Sum the horizon values for each slice:
-            for i, h in enumerate(horizons):
+            for i, h in enumerate(horizon_fields):
                 roof_plane['horizon'][i] += pdata[h]
 
         if contributing_pixels > 0:
@@ -189,19 +210,21 @@ def _aggregate_pixel_data(roof_planes,
             roof_plane['job_id'] = job_id
             roof_plane['peak_power_per_m2'] = peak_power_per_m2
 
-            roof_plane['kwp'] = roof_plane['area'] * peak_power_per_m2
-            roof_plane['kwh_per_kwp'] = roof_plane['kwh_year'] / roof_plane['kwp']
+            roof_plane['area_avg'] = (roof_plane['area_min'] + roof_plane['area_max']) / 2
+            roof_plane['kwh_year_avg'] = (roof_plane['kwh_year_min'] + roof_plane['kwh_year_max']) / 2
+            roof_plane['kwp_avg'] = (roof_plane['kwp_min'] + roof_plane['kwp_max']) / 2
+            roof_plane['kwh_per_kwp'] = roof_plane['kwh_year_avg'] / roof_plane['kwp_avg']
 
-            roof_plane['kwh_year'] = round(roof_plane['kwh_year'], 2)
-            roof_plane['kwp'] = round(roof_plane['kwp'], 2)
-            roof_plane['kwh_per_kwp'] = round(roof_plane['kwh_per_kwp'], 2)
-            for i, wh_monthday in enumerate(wh_month):
-                roof_plane[_month_field(i)] = round(roof_plane[_month_field(i)], 2)
+            for i, wh_monthday in enumerate(wh_month_fields):
+                _min = roof_plane[f'{_month_field(i)}_min']
+                _max = roof_plane[f'{_month_field(i)}_max']
+                roof_plane[f'{_month_field(i)}_avg'] = round((_min + _max) / 2, 2)
 
             roofs_to_write.append(roof_plane)
 
             if debug:
-                print(f"roof plane {roof_plane['roof_plane_id']} kWh: {roof_plane['kwh_year']}")
+                print(f"roof plane {roof_plane['roof_plane_id']} "
+                      f"kWh min/avg/max: {roof_plane['kwh_year_min']} {roof_plane['kwh_year_avg']} {roof_plane['kwh_year_max']}")
         else:
             print(f"Roof intersected no pixels: roof_plane_id {roof_plane['roof_plane_id']}, toid {roof_plane['toid']}")
 
@@ -220,14 +243,23 @@ def _write_results(pg_conn, job_id: int, roofs: List[dict]):
                     roof_plane_id,
                     job_id, 
                     roof_geom_4326,
-                    kwh_jan, kwh_feb, kwh_mar, kwh_apr, kwh_may, kwh_jun, 
-                    kwh_jul, kwh_aug, kwh_sep, kwh_oct, kwh_nov, kwh_dec,
-                    kwh_year,
-                    kwp,
+                    kwh_jan_min, kwh_jan_avg, kwh_jan_max, kwh_feb_min, kwh_feb_avg, kwh_feb_max, 
+                    kwh_mar_min, kwh_mar_avg, kwh_mar_max, kwh_apr_min, kwh_apr_avg, kwh_apr_max,
+                    kwh_may_min, kwh_may_avg, kwh_may_max, kwh_jun_min, kwh_jun_avg, kwh_jun_max,
+                    kwh_jul_min, kwh_jul_avg, kwh_jul_max, kwh_aug_min, kwh_aug_avg, kwh_aug_max,
+                    kwh_sep_min, kwh_sep_avg, kwh_sep_max, kwh_oct_min, kwh_oct_avg, kwh_oct_max,
+                    kwh_nov_min, kwh_nov_avg, kwh_nov_max, kwh_dec_min, kwh_dec_avg, kwh_dec_max,
+                    kwh_year_min,
+                    kwh_year_avg,
+                    kwh_year_max,
+                    kwp_min,
+                    kwp_avg,
+                    kwp_max,
                     kwh_per_kwp,
                     horizon,
-                    area,
-                    footprint,
+                    area_min,
+                    area_avg,
+                    area_max,
                     x_coef,
                     y_coef,
                     intercept,
@@ -250,14 +282,17 @@ def _write_results(pg_conn, job_id: int, roofs: List[dict]):
                                  '+y_0=-100000 +datum=OSGB36 +nadgrids=OSTN15_NTv2_OSGBtoETRS.gsb +units=m +no_defs',
                                  4326),
                     4326)::geometry(polygon, 4326),
-                %(kwh_m01)s, %(kwh_m02)s, %(kwh_m03)s, %(kwh_m04)s, %(kwh_m05)s, %(kwh_m06)s,
-                %(kwh_m07)s, %(kwh_m08)s, %(kwh_m09)s, %(kwh_m10)s, %(kwh_m11)s, %(kwh_m12)s, 
-                %(kwh_year)s, 
-                %(kwp)s, 
+                %(kwh_m01_min)s, %(kwh_m01_avg)s, %(kwh_m01_max)s, %(kwh_m02_min)s, %(kwh_m02_avg)s, %(kwh_m02_max)s,
+                %(kwh_m03_min)s, %(kwh_m03_avg)s, %(kwh_m03_max)s, %(kwh_m04_min)s, %(kwh_m04_avg)s, %(kwh_m04_max)s,
+                %(kwh_m05_min)s, %(kwh_m05_avg)s, %(kwh_m05_max)s, %(kwh_m06_min)s, %(kwh_m06_avg)s, %(kwh_m06_max)s,
+                %(kwh_m07_min)s, %(kwh_m07_avg)s, %(kwh_m07_max)s, %(kwh_m08_min)s, %(kwh_m08_avg)s, %(kwh_m08_max)s,
+                %(kwh_m09_min)s, %(kwh_m09_avg)s, %(kwh_m09_max)s, %(kwh_m10_min)s, %(kwh_m10_avg)s, %(kwh_m10_max)s,
+                %(kwh_m11_min)s, %(kwh_m11_avg)s, %(kwh_m11_max)s, %(kwh_m12_min)s, %(kwh_m12_avg)s, %(kwh_m12_max)s, 
+                %(kwh_year_min)s, %(kwh_year_avg)s, %(kwh_year_max)s,  
+                %(kwp_min)s, %(kwp_avg)s, %(kwp_max)s,  
                 %(kwh_per_kwp)s,
                 %(horizon)s, 
-                %(area)s, 
-                %(footprint)s,
+                %(area_min)s, %(area_avg)s, %(area_max)s,
                 %(x_coef)s,
                 %(y_coef)s,
                 %(intercept)s,
@@ -289,6 +324,7 @@ def _load_roof_planes(pg_conn, job_id: int, page: int, page_size: int, toids: Li
         SELECT
             rp.toid,
             ST_AsText(rp.roof_geom_27700) AS roof_geom_27700,
+            ST_AsText(rp.roof_geom_raw_27700) AS roof_geom_raw_27700,
             rp.roof_plane_id,
             rp.slope,
             rp.aspect,
@@ -296,8 +332,6 @@ def _load_roof_planes(pg_conn, job_id: int, page: int, page_size: int, toids: Li
             rp.y_coef,
             rp.intercept,
             rp.is_flat,
-            rp.raw_footprint AS footprint,
-            rp.raw_area AS area,
             rp.meta
         FROM building_page b 
         INNER JOIN {roof_polygons} rp ON b.toid = rp.toid

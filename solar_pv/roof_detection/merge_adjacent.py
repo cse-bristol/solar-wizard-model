@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, Tuple
 
 import numpy as np
 from skimage import morphology
@@ -186,21 +186,24 @@ def _update_node_data(graph, src: int, dst: int):
 
 
 def _hierarchical_merge(graph, labels, thresh: float = 0):
-    new_labels = merge_hierarchical(labels, graph, thresh=thresh, rag_copy=False,
-                                    in_place_merge=True,
-                                    merge_func=_update_node_data,
-                                    weight_func=_new_edge_weight)
+    merge_hierarchical(labels, graph, thresh=thresh, rag_copy=False,
+                       in_place_merge=True,
+                       merge_func=_update_node_data,
+                       weight_func=_new_edge_weight)
 
-    merged_planes = []
+    merged_planes = {}
     for n in graph.nodes:
         plane = graph.nodes[n]
         if plane['outlier'] is False:
+            # skimage and networkx seem to have different ideas about which the final label
+            # of a merged plane is...:
+            labels[np.isin(labels, plane['labels'])] = n
             del plane["xy_subset"]
             del plane["z_subset"]
             del plane["labels"]
-            merged_planes.append(plane)
+            merged_planes[n] = plane
 
-    return merged_planes
+    return merged_planes, labels
 
 
 def _rag_score(xy, z, labels, planes: Dict[int, RoofPlane], res: float, nodata: int, connectivity: int = 1):
@@ -229,7 +232,9 @@ def _rag_score(xy, z, labels, planes: Dict[int, RoofPlane], res: float, nodata: 
 
 
 def merge_adjacent(xy, z, labels, planes: Dict[int, RoofPlane],
-                   res: float, nodata: int, connectivity: int = 1, thresh: float = 0):
+                   res: float, nodata: int,
+                   connectivity: int = 1, thresh: float = 0,
+                   debug: bool = False) -> Tuple[Dict[int, RoofPlane], np.ndarray]:
     """
     Create a RAG (region adjacency graph) where the nodes are either a plane, or a single
     pixel that has not been fitted to any plane.
@@ -246,6 +251,10 @@ def merge_adjacent(xy, z, labels, planes: Dict[int, RoofPlane],
     """
     if thresh >= DO_NOT_MERGE:
         raise ValueError(f"threshold ({thresh}) was >= DO_NOT_MERGE ({DO_NOT_MERGE})")
+
     g = _rag_score(xy, z, labels, planes, res, nodata, connectivity=connectivity)
-    labels[labels == nodata] = 0
+
+    if debug:
+        print(f"Constructed graph with {len(planes)} planes, {g.number_of_nodes()} nodes, {g.number_of_edges()} edges")
+
     return _hierarchical_merge(g, labels, thresh=thresh)

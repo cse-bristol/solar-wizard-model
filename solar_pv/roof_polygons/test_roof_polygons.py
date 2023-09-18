@@ -48,24 +48,19 @@ def _create_polygons_using_test_data(toid: str,
                                      min_roof_area_m: int = 8,
                                      min_roof_degrees_from_north: int = 45,
                                      flat_roof_degrees: int = 10,
-                                     large_building_threshold: float = 200,
-                                     min_dist_to_edge_m: float = 0.3,
-                                     min_dist_to_edge_large_m: float = 1) -> Tuple[List[RoofPolygon], Polygon]:
+                                     min_dist_to_edge_m: float = 0.3) -> Tuple[List[RoofPolygon], Polygon]:
     planes, building_geom = _load_test_data(toid)
     planes = _create_roof_polygons(
-        {toid: building_geom},
+        building_geom,
         planes,
         max_roof_slope_degrees=max_roof_slope_degrees,
         min_roof_area_m=min_roof_area_m,
         min_roof_degrees_from_north=min_roof_degrees_from_north,
         flat_roof_degrees=flat_roof_degrees,
-        large_building_threshold=large_building_threshold,
         min_dist_to_edge_m=min_dist_to_edge_m,
-        min_dist_to_edge_large_m=min_dist_to_edge_large_m,
-        resolution_metres=1.0)
-    for plane in planes:
-        if "roof_geom_27700" in plane:
-            plane['roof_geom_27700'] = wkt.loads(plane['roof_geom_27700'])
+        resolution_metres=1.0,
+        debug=True)
+
     return planes, building_geom
 
 
@@ -111,7 +106,9 @@ class RoofPolygonTest(ParameterisedTestCase):
             ("osgb1000034178593", None),
             ("osgb5000005113406742", None),
             ("osgb1000014925723", None),
-            ("osgb1000017860043", 0.4, None)
+            ("osgb1000017860043", 0.4, None),
+            ("osgb1000036899466", 0.1, None),
+            ("osgb1000000054783152", 0.1, None),
         ], _do_test)
 
     def test_merge(self):

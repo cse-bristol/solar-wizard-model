@@ -197,7 +197,6 @@ if __name__ == "__main__":
     #         "osgb1000014994877",
     #         "osgb1000014995098",
     #         "osgb1000014994794",
-    #         "osgb1000014995098",
     #         "osgb1000014998049",
     #         "osgb1000014998048",
     #     ],
@@ -231,17 +230,29 @@ if __name__ == "__main__":
     #     f"{os.getenv('DEV_DATA_DIR')}/ransac",
     #     write_test_data=False)
 
+    # detect_toid_roofs(
+    #     os.getenv("PGW_URI"),
+    #     1660,
+    #     [
+    #         # "osgb5000005110302956",
+    #         # "osgb1000014963168",
+    #
+    #         # messy:
+    #         "osgb1000002529080353",
+    #         "osgb1000002529080355",
+    #         "osgb1000002529080354",
+    #     ],
+    #     # None,
+    #     1.0,
+    #     f"{os.getenv('DEV_DATA_DIR')}/ransac",
+    #     write_test_data=False)
+
     detect_toid_roofs(
         os.getenv("PGW_URI"),
-        1660,
+        1663,
         [
-            # "osgb5000005110302956",
-            # "osgb1000014963168",
-
-            # messy:
-            "osgb1000002529080353",
-            # "osgb1000002529080355",
-            # "osgb1000002529080354",
+            "osgb1000000054783152",
+            # "osgb1000036903249",
         ],
         # None,
         1.0,

@@ -13,17 +13,17 @@ from psycopg2.extras import DictCursor, execute_values, Json
 from psycopg2.sql import SQL, Identifier
 import numpy as np
 from shapely import wkt
-from skimage import measure
 
 from solar_pv.db_funcs import count, connection, sql_command
 from solar_pv.postgis import pixels_for_buildings
 from solar_pv import tables
 from solar_pv.constants import RANSAC_LARGE_BUILDING, \
     RANSAC_LARGE_MAX_TRIALS, RANSAC_SMALL_MAX_TRIALS, RANSAC_SMALL_BUILDING, \
-    RANSAC_MEDIUM_MAX_TRIALS, ROOFDET_MAX_MAE, FLAT_ROOF_DEGREES_THRESHOLD
+    RANSAC_MEDIUM_MAX_TRIALS, ROOFDET_MAX_MAE
+from solar_pv.roof_detection.detect_messy_roofs import detect_messy_roofs
 from solar_pv.roof_detection.detsac import DETSACRegressorForLIDAR
 from solar_pv.roof_detection.merge_adjacent import merge_adjacent
-from solar_pv.roof_detection.premade_planes import create_planes, _image
+from solar_pv.roof_detection.premade_planes import create_planes
 from solar_pv.roof_detection.ransac import RANSACRegressorForLIDAR
 from solar_pv.roof_polygons.roof_polygons import create_roof_polygons
 from solar_pv.datatypes import RoofDetBuilding, RoofPlane, RoofPolygon
@@ -41,9 +41,7 @@ def detect_roofs(pg_uri: str,
                  min_roof_area_m: int,
                  min_roof_degrees_from_north: int,
                  flat_roof_degrees: int,
-                 large_building_threshold: float,
                  min_dist_to_edge_m: float,
-                 min_dist_to_edge_large_m: float,
                  resolution_metres: float,
                  workers: int = _roof_det_cpu_count(),
                  building_page_size: int = 50) -> None:
@@ -64,15 +62,13 @@ def detect_roofs(pg_uri: str,
         "min_roof_area_m": min_roof_area_m,
         "min_roof_degrees_from_north": min_roof_degrees_from_north,
         "flat_roof_degrees": flat_roof_degrees,
-        "large_building_threshold": large_building_threshold,
         "min_dist_to_edge_m": min_dist_to_edge_m,
-        "min_dist_to_edge_large_m": min_dist_to_edge_large_m,
         "resolution_metres": resolution_metres,
     }
     with mp.Pool(workers) as pool:
         wrapped_iterable = ((pg_uri, job_id, seg, building_page_size, params)
                             for seg in range(0, segments))
-        res = pool.starmap_async(_handle_building_page, wrapped_iterable)
+        res = pool.starmap_async(_handle_building_page, wrapped_iterable, chunksize=1)
         # Hacky way to poll for failures in workers, doesn't seem to be a nicer way
         # of doing this:
         while not res.ready():
@@ -93,9 +89,16 @@ def _handle_building_page(pg_uri: str, job_id: int, page: int, page_size: int, p
     polygons = []
     for toid, building in buildings.items():
         try:
+            t0 = time.time()
             found = _detect_building_roof_planes(building, toid, params['resolution_metres'])
+
             if len(found) > 0:
-                polygons.extend(create_roof_polygons(pg_uri, job_id, toid, found, **params))
+                building_polygons = create_roof_polygons(building['polygon'], found, **params)
+                polygons.extend(building_polygons)
+
+            t1 = time.time()
+            if t1 - t0 > 60:
+                print(f"slow building: {toid} took {round(t1 - t0, 2)} s")
         except Exception as e:
             print(f"Exception during roof plane detection for TOID {toid}:")
             traceback.print_exception(e)
@@ -179,7 +182,7 @@ def _detect_building_roof_planes(building: RoofDetBuilding,
         max_trials = RANSAC_MEDIUM_MAX_TRIALS
 
     # We only fall back to RANSAC if a decent fraction of pixels are left to find:
-    pixels_required_for_ransac = min_points_per_plane * 5
+    pixels_required_for_ransac = max(min_points_per_plane * 5, total_points_in_building // 4)
 
     while np.count_nonzero(mask) > pixels_required_for_ransac:
         ransac = RANSACRegressorForLIDAR(residual_threshold=0.25,
@@ -213,32 +216,27 @@ def _detect_building_roof_planes(building: RoofDetBuilding,
                 plane_idx += 1
                 mask[inlier_mask] = 0
 
+    if len(planes) == 0:
+        return []
+
+    if debug:
+        print("Finished detecting roofs")
+
     # label all the outlying pixels with individual IDs:
     outliers = np.count_nonzero(labels[mask == 1])
     labels[mask == 1] = range(plane_idx + 1, outliers + plane_idx + 1)
 
-    merged_planes = merge_adjacent(xy, z, labels, planes, resolution_metres, labels_nodata)
+    merged_planes, new_labels = merge_adjacent(xy, z, labels, planes, resolution_metres, labels_nodata, debug=debug)
 
-    # TODO WIP: trying to detect flat roofs covered in obstacles...
-    # # flat_mask = [planes.get(l, {}).get('slope', 9999) <= FLAT_ROOF_DEGREES_THRESHOLD for l in labels]
-    # plane_mask = labels <= plane_idx
-    # # flat_img, _ = _image(xy, flat_mask, 1.0, 0)
-    # plane_img, _ = _image(xy, plane_mask, 1.0, 0)
-    # obstacle_groups = measure.label(np.pad(plane_img, 1), background=1, connectivity=1)
-    # TODO need to use new_labels - but to do that need to know what the new plane_idxs are...
+    if debug:
+        print("Merged planes and outliers")
 
-    # labels[labels <= plane_idx] = -1
-    # outlier_img, _ = _image(xy, labels, 1.0, -1)
-    # obstacle_groups = measure.label(np.pad(outlier_img, 1), background=-1, connectivity=1)
-    # un-pad
+    non_messy_planes = detect_messy_roofs(merged_planes, new_labels, xy, resolution_metres, debug=debug)
 
-    # TODO should obstacle groups exlude things that are part of non-flat planes? Probably yes.
-    #      so maybe this should be a RAG?
-    #      * make RAG from new_labels
-    #      * merge all adjacent outliers to find obstacle groups
-    #      * each flat plane is scored according to how many obstacle groups it connects to that only connect to flat planes
+    if debug:
+        print("Finished detecting mess")
 
-    return merged_planes
+    return non_messy_planes
 
 
 def _load(pg_uri: str, job_id: int, page: int, page_size: int, toids: List[str] = None, force_load: bool = False) -> Dict[str, RoofDetBuilding]:
@@ -313,12 +311,14 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[RoofPolygon]):
             "mape": plane["mape"],
         })
         plane['roof_geom_27700'] = plane['roof_geom_27700'].wkt
+        plane['roof_geom_raw_27700'] = plane['roof_geom_raw_27700'].wkt
 
     with connection(pg_uri) as pg_conn, pg_conn.cursor() as cursor:
         execute_values(cursor, SQL("""
             INSERT INTO {roof_polygons} (
                 toid, 
                 roof_geom_27700, 
+                roof_geom_raw_27700, 
                 x_coef, 
                 y_coef, 
                 intercept, 
@@ -326,10 +326,6 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[RoofPolygon]):
                 aspect,
                 is_flat, 
                 usable, 
-                easting, 
-                northing, 
-                raw_footprint, 
-                raw_area,
                 inliers_xy,
                 meta
             ) VALUES %s;
@@ -338,6 +334,7 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[RoofPolygon]):
         ), argslist=planes,
            template="""(%(toid)s, 
                         %(roof_geom_27700)s, 
+                        %(roof_geom_raw_27700)s, 
                         %(x_coef)s,
                         %(y_coef)s, 
                         %(intercept)s, 
@@ -345,10 +342,6 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[RoofPolygon]):
                         %(aspect)s, 
                         %(is_flat)s, 
                         %(usable)s, 
-                        %(easting)s, 
-                        %(northing)s, 
-                        %(raw_footprint)s, 
-                        %(raw_area)s,
                         %(inliers_xy)s,
                         %(meta)s )""")
 

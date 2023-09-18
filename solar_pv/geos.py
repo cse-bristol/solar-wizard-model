@@ -337,6 +337,13 @@ def split_poly(poly: Polygon, splitter: LineString | MultiLineString | LinearRin
     return MultiPolygon([pg for pg in ops.polygonize(union) if poly.contains(pg.representative_point())])
 
 
+def fill_holes(poly: Polygon) -> Polygon:
+    if poly.interiors:
+        return Polygon(list(poly.exterior.coords))
+    else:
+        return poly
+
+
 def slope_deg(a: float, b: float) -> float:
     """
     Return the slope of a plane defined by the X coefficient a and the Y coefficient b,

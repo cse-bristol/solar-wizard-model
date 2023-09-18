@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS {roof_polygons} (
     roof_plane_id SERIAL PRIMARY KEY,
     toid text NOT NULL,
     roof_geom_27700 geometry(polygon, 27700) NOT NULL,
+    roof_geom_raw_27700 geometry(polygon, 27700) NOT NULL,
     x_coef double precision NOT NULL,
     y_coef double precision NOT NULL,
     intercept double precision NOT NULL,
@@ -66,16 +67,13 @@ CREATE TABLE IF NOT EXISTS {roof_polygons} (
     aspect double precision NOT NULL,
     is_flat bool NOT NULL,
     usable bool NOT NULL,
-    easting double precision NOT NULL,
-    northing double precision NOT NULL,
-    raw_footprint double precision NOT NULL,
-    raw_area double precision NOT NULL,
     inliers_xy real[][] NOT NULL,
     meta jsonb NOT NULL
 );
 
 CREATE INDEX ON {roof_polygons} (toid);
 CREATE INDEX ON {roof_polygons} USING GIST (roof_geom_27700);
+CREATE INDEX ON {roof_polygons} USING GIST (roof_geom_raw_27700);
 
 --
 -- Create the table for storing individual panel polygons:

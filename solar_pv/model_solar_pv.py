@@ -52,6 +52,7 @@ def model_solar_pv(pg_uri: str,
     min_roof_degrees_from_north = _validate_int(min_roof_degrees_from_north, "min_roof_degrees_from_north", 0, 180)
     flat_roof_degrees = _validate_int(flat_roof_degrees, "flat_roof_degrees", 0, 90)
     peak_power_per_m2 = _validate_float(peak_power_per_m2, "peak_power_per_m2", 0)
+    # TODO remove unused
     panel_width_m = _validate_float(panel_width_m, "panel_width_m", 0.01)
     panel_height_m = _validate_float(panel_height_m, "panel_height_m", 0.01)
     panel_spacing_m = _validate_float(panel_spacing_m, "panel_spacing_m", 0)
@@ -94,9 +95,7 @@ def model_solar_pv(pg_uri: str,
                  min_roof_area_m=min_roof_area_m,
                  min_roof_degrees_from_north=min_roof_degrees_from_north,
                  flat_roof_degrees=flat_roof_degrees,
-                 large_building_threshold=large_building_threshold,
                  min_dist_to_edge_m=min_dist_to_edge_m,
-                 min_dist_to_edge_large_m=min_dist_to_edge_large_m,
                  resolution_metres=res)
 
     # logging.info("Adding individual PV panels...")

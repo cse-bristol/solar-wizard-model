@@ -26,13 +26,11 @@ def _aggregate(filename: str):
     peak_power_per_m2 = 0.2
     system_loss = SYSTEM_LOSS
     building = _load_data(join(_PIXEL_DATA, filename))
-    panels = building['panels']
     pixels = building['pixels']
     roofs = building['roofs']
     return _aggregate_pixel_data(
-        panels=panels,
         pixels=pixels,
-        roofs=roofs,
+        roof_planes=roofs,
         job_id=job_id,
         pixel_fields=[t.split(".")[1] for t in raster_tables],
         resolution=resolution,
@@ -56,8 +54,8 @@ class PixelAggregateTestCase(ParameterisedTestCase):
                 return val
 
         self.parameterised_test([
-            ('osgb1000014995063.json', 8075, 'kwh_year', 256.655),
-            ('osgb1000014995063.json', 8075, 'kwh_m01', 5.327),
-            ('osgb1000014995063.json', 8075, 'kwh_m06', 38.079),
+            ('osgb1000014995063.json', 8075, 'kwh_year_avg', 256.655),
+            ('osgb1000014995063.json', 8075, 'kwh_m01_avg', 5.327),
+            ('osgb1000014995063.json', 8075, 'kwh_m06_avg', 38.079),
             ('osgb1000014995063.json', 8075, 'horizon', [0.432, 0.412, 0.437, 0.445, 0.479, 0.495, 0.463, 0.404, 0.356, 0.29, 0.285, 0.199, 0.198, 0.079, 0.14, 0.141, 0.225, 0.266, 0.298, 0.289, 0.314, 0.329, 0.34, 0.337, 0.33, 0.272, 0.252, 0.163, 0.151, 0.095, 0.087, 0.064, 0.211, 0.215, 0.369, 0.399]),
         ], _panel_field)

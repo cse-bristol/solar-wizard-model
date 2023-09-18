@@ -16,16 +16,13 @@ from shapely.geometry import Polygon
 from solar_pv import paths
 from solar_pv.db_funcs import connection, sql_command
 from solar_pv import tables
-from solar_pv.roof_polygons.roof_polygons import _building_geoms, \
-    _create_roof_polygons, _to_test_data
+from solar_pv.roof_polygons.roof_polygons import _create_roof_polygons, _to_test_data
 
 _MAX_ROOF_SLOPE_DEGREES = 70
 _MIN_ROOF_AREA_M = 8
 _MIN_ROOF_DEGREES_FROM_NORTH = 0
 _FLAT_ROOF_DEGREES = 10
-_LARGE_BUILDING_THRESHOLD = 200
 _MIN_DIST_TO_EDGE_M = 0.1
-_MIN_DIST_TO_EDGE_LARGE_M = 0.1
 
 
 def make_job_roof_polygons(pg_uri: str, job_id: int,
@@ -46,7 +43,6 @@ def make_job_roof_polygons(pg_uri: str, job_id: int,
         t0 = time.time()
         logging.info(f"TOIDS: {len(toids)}")
 
-        building_geoms = _building_geoms(pg_uri, job_id, toids)
         all_planes = []
         for toid in toids:
             if make_planes:
@@ -55,16 +51,16 @@ def make_job_roof_polygons(pg_uri: str, job_id: int,
                 planes = _load_toid_planes(pg_uri, job_id, toid)
 
             logging.info(f"TOID: {toid}")
-            polygons = _create_roof_polygons(building_geoms,
+            building_geom = _building_geom(pg_uri, job_id, toid)
+            polygons = _create_roof_polygons(building_geom,
                                              planes,
                                              max_roof_slope_degrees=_MAX_ROOF_SLOPE_DEGREES,
                                              min_roof_area_m=_MIN_ROOF_AREA_M,
                                              min_roof_degrees_from_north=_MIN_ROOF_DEGREES_FROM_NORTH,
                                              flat_roof_degrees=_FLAT_ROOF_DEGREES,
-                                             large_building_threshold=_LARGE_BUILDING_THRESHOLD,
                                              min_dist_to_edge_m=_MIN_DIST_TO_EDGE_M,
-                                             min_dist_to_edge_large_m=_MIN_DIST_TO_EDGE_LARGE_M,
-                                             resolution_metres=resolution_metres)
+                                             resolution_metres=resolution_metres,
+                                             debug=True)
             logging.info(f"Created {len(polygons)} planes for toid {toid}")
             all_planes.extend(polygons)
 
@@ -95,24 +91,23 @@ def make_roof_polygons(pg_uri: str, job_id: int, toid: str,
         planes = _make_roof_planes(pg_uri, job_id, toid, resolution_metres)
     else:
         planes = _load_toid_planes(pg_uri, job_id, toid)
-    building_geoms = _building_geoms(pg_uri, job_id, [toid])
+    building_geom = _building_geom(pg_uri, job_id, toid)
 
     if write_test_data:
-        _write_test_data(toid, planes, building_geoms[toid], out_dir)
+        _write_test_data(toid, planes, building_geom, out_dir)
 
-    planes = _create_roof_polygons(building_geoms,
+    planes = _create_roof_polygons(building_geom,
                                    planes,
                                    max_roof_slope_degrees=_MAX_ROOF_SLOPE_DEGREES,
                                    min_roof_area_m=_MIN_ROOF_AREA_M,
                                    min_roof_degrees_from_north=_MIN_ROOF_DEGREES_FROM_NORTH,
                                    flat_roof_degrees=_FLAT_ROOF_DEGREES,
-                                   large_building_threshold=_LARGE_BUILDING_THRESHOLD,
                                    min_dist_to_edge_m=_MIN_DIST_TO_EDGE_M,
-                                   min_dist_to_edge_large_m=_MIN_DIST_TO_EDGE_LARGE_M,
-                                   resolution_metres=resolution_metres)
+                                   resolution_metres=resolution_metres,
+                                   debug=True)
 
     if write_test_data:
-        _write_outputs(toid, planes, out_dir, building_geoms[toid])
+        _write_outputs(toid, planes, out_dir, building_geom)
 
 
 def _make_roof_planes(pg_uri: str, job_id: int, toid: str, resolution_metres: float):
@@ -135,8 +130,9 @@ def _write_outputs(name: str, planes: List[dict], out_dir: str, building_geom: P
     for plane in planes:
         if building_geom:
             plane['building_geom'] = building_geom.wkt
-        geojson_geom = geometry.mapping(wkt.loads(plane['roof_geom_27700']))
+        geojson_geom = geometry.mapping(plane['roof_geom_27700'])
         del plane['roof_geom_27700']
+        del plane['roof_geom_raw_27700']
         del plane['inliers_xy']
         geojson_feature = {
           "type": "Feature",
@@ -152,7 +148,7 @@ def _write_outputs(name: str, planes: List[dict], out_dir: str, building_geom: P
     }
     fname = join(out_dir, f"{name}.geojson")
     with open(fname, 'w') as f:
-        json.dump(geojson, f)
+        json.dump(geojson, f, default=str)
     print(f"Wrote debug data to {fname}")
 
 
@@ -164,7 +160,7 @@ def _load_toid_planes(pg_uri: str, job_id: int, toid: str):
         planes = sql_command(
             pg_conn,
             """
-            SELECT toid, roof_plane_id, slope, aspect, inliers_xy
+            SELECT *
             FROM {roof_polygons} 
             WHERE toid = %(toid)s
             ORDER BY roof_plane_id
@@ -176,6 +172,19 @@ def _load_toid_planes(pg_uri: str, job_id: int, toid: str):
         for plane in planes:
             plane['inliers_xy'] = np.array(plane['inliers_xy'])
         return planes
+
+
+def _building_geom(pg_uri: str, job_id: int, toid: str) -> Polygon:
+    with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
+        return sql_command(
+            pg_conn,
+            """
+            SELECT toid, ST_AsText(geom_27700) AS geom_27700 
+            FROM {buildings}
+            WHERE toid = %(toid)s""",
+            {"toid": toid},
+            buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
+            result_extractor=lambda rows: wkt.loads(rows[0]['geom_27700']))
 
 
 if __name__ == "__main__":
@@ -211,73 +220,73 @@ if __name__ == "__main__":
     #     f"{os.getenv('DEV_DATA_DIR')}/roof-polys",
     #     make_planes=True)
 
-    make_job_roof_polygons(
-        os.getenv("PGW_URI"),
-        1662,
-        1.0,
-        f"{os.getenv('DEV_DATA_DIR')}/roof-polys",
-        toids=[
-            # "osgb5000005116861453",
-            # "osgb5000005116861461",
-            # "osgb1000014994628",
-            # "osgb1000014994636",
-            # "osgb1000014994648",
-            # "osgb1000014994630",
-            # "osgb1000014994634",
-            # "osgb1000014994631",
-            # "osgb1000014994632",
-            # "osgb1000014994629",
-            # "osgb1000014994635",
-            # "osgb1000014994633",
-            # "osgb1000014994626",
-            # "osgb1000014994627",
-            # "osgb1000014994624",
-            # "osgb1000014994625",
-            # "osgb1000014994654",
-            # "osgb1000014994658",
-            # "osgb1000014994649",
-            # "osgb1000014994652",
-            # "osgb1000014994646",
-            # "osgb1000014994653",
-            # "osgb1000014994641",
-            # "osgb1000014994651",
-            # "osgb1000014994639",
-            # "osgb1000014994644",
-            # "osgb1000014994637",
-            # "osgb1000014994650",
-            # "osgb1000014994655",
-            # "osgb1000014994657",
-            # "osgb1000014994660",
-            # "osgb1000014994656",
-            # "osgb1000014994647",
-            # "osgb1000014994643",
-            # "osgb1000014994642",
-            # "osgb1000014994645",
-            # "osgb1000014994659",
-            # "osgb1000014994638",
-            # "osgb1000014994640",
-            # "osgb1000014995257",
-            # "osgb5000005116861456",
-            # "osgb1000014995257",
-            #
-            # "osgb1000014994950",
-            # "osgb1000014994952",
-            # "osgb1000014994947",
-            # "osgb1000014994949",
-            # "osgb1000014994951",
-            # "osgb1000014994948",
-            #
-            # "osgb1000014998052",
-            #
-            # "osgb1000014994877",
-            # "osgb1000014995098",
-            # "osgb1000014994794",
-            # "osgb1000014995098",
-            # "osgb1000014998049",
-            # "osgb1000014998048",
-            "osgb1000014994361",
-        ],
-        make_planes=True)
+    # make_job_roof_polygons(
+    #     os.getenv("PGW_URI"),
+    #     1662,
+    #     1.0,
+    #     f"{os.getenv('DEV_DATA_DIR')}/roof-polys",
+    #     toids=[
+    #         # "osgb5000005116861453",
+    #         # "osgb5000005116861461",
+    #         # "osgb1000014994628",
+    #         # "osgb1000014994636",
+    #         # "osgb1000014994648",
+    #         # "osgb1000014994630",
+    #         # "osgb1000014994634",
+    #         # "osgb1000014994631",
+    #         # "osgb1000014994632",
+    #         # "osgb1000014994629",
+    #         # "osgb1000014994635",
+    #         # "osgb1000014994633",
+    #         # "osgb1000014994626",
+    #         # "osgb1000014994627",
+    #         # "osgb1000014994624",
+    #         # "osgb1000014994625",
+    #         # "osgb1000014994654",
+    #         # "osgb1000014994658",
+    #         # "osgb1000014994649",
+    #         # "osgb1000014994652",
+    #         # "osgb1000014994646",
+    #         # "osgb1000014994653",
+    #         # "osgb1000014994641",
+    #         # "osgb1000014994651",
+    #         # "osgb1000014994639",
+    #         # "osgb1000014994644",
+    #         # "osgb1000014994637",
+    #         # "osgb1000014994650",
+    #         # "osgb1000014994655",
+    #         # "osgb1000014994657",
+    #         # "osgb1000014994660",
+    #         # "osgb1000014994656",
+    #         # "osgb1000014994647",
+    #         # "osgb1000014994643",
+    #         # "osgb1000014994642",
+    #         # "osgb1000014994645",
+    #         # "osgb1000014994659",
+    #         # "osgb1000014994638",
+    #         # "osgb1000014994640",
+    #         # "osgb1000014995257",
+    #         # "osgb5000005116861456",
+    #         # "osgb1000014995257",
+    #         #
+    #         # "osgb1000014994950",
+    #         # "osgb1000014994952",
+    #         # "osgb1000014994947",
+    #         # "osgb1000014994949",
+    #         # "osgb1000014994951",
+    #         # "osgb1000014994948",
+    #         #
+    #         # "osgb1000014998052",
+    #         #
+    #         # "osgb1000014994877",
+    #         # "osgb1000014995098",
+    #         # "osgb1000014994794",
+    #         # "osgb1000014995098",
+    #         # "osgb1000014998049",
+    #         # "osgb1000014998048",
+    #         "osgb1000014994361",
+    #     ],
+    #     make_planes=True)
 
     # make_job_roof_polygons(
     #         os.getenv("PGW_URI"),
@@ -294,3 +303,14 @@ if __name__ == "__main__":
     #             "osgb1000002529080354",
     #         ],
     #         make_planes=True)
+
+    make_job_roof_polygons(
+            os.getenv("PGW_URI"),
+            1663,
+            1.0,
+            f"{os.getenv('DEV_DATA_DIR')}/roof-polys",
+            [
+                "osgb1000000054783152",
+                # "osgb1000036903249",
+            ],
+            make_planes=True)
