@@ -8,8 +8,7 @@ The model is documented at [documents/pv_model.md](documents/pv_model.md).
 
 The main entrypoint of the model is the function `model_solar_pv` in module `solar_pv.model_solar_pv`. Results are inserted into 3 postgres tables:
 * `models.pv_building` contains LiDAR-derived building height, and a reason (if any) why the building has been skipped in PV modelling, which can be one of 4 things: `NO_LIDAR_COVERAGE`, `OUTDATED_LIDAR_COVERAGE`, `NO_ROOF_PLANES_DETECTED`, or `ALL_ROOF_PLANES_UNUSABLE`.
-* `models.pv_roof_plane` contains the slope and aspect or the roof plane. A building can have 0 to many of these.
-* `models.pv_panel` contains per-modelled-panel monthly and yearly predicted kWh and a horizon profile. A roof plane can have 1 to many of these.
+* `models.pv_roof_plane` contains the slope and aspect of the roof plane, per-modelled-panel monthly and yearly predicted kWh, and a horizon profile. A building can have 0 to many of these.
 
 The model has the following software dependencies:
 * various python libraries (see `requirements.txt`, can also be installed using nix - see `default.nix`)
@@ -25,7 +24,7 @@ We have tried to make the model as independent as possible from our internal inf
 
 ### postgres and postGIS
 
-You will need a postGIS (postgres version >= 12; postGIS version >=3) database with some Albion data in it (see below).
+You will need a postGIS (postgres version >= 12; postGIS version >=3) database with some data in it (see below).
 
 The postGIS install will also need to have access to some proj datum grids, which are used for more accurate transformations between long/lat and easting/northing.
 
@@ -92,11 +91,3 @@ Optional variables:
 Some of the tests require the PVMAPS irradiation data.
 * Download the 10GB tar file from https://re.jrc.ec.europa.eu/pvmaps/pvgis_data.tar and either place it at, or symlink to it from, `test_data/pvmaps/pvgis_data_dir/pvgis_data.tar`
 * run `python3 -m unittest`
-
-## Development
-
-`default.nix` contains the dependencies required to setup a dev environment. The `default.nix` in this repo also has the dependencies required for the repositories `320-albion` and `320-albion-webapp`.
-
-Run `nix-build default.nix -o nixenv` to create something equivalent to a python virtualenv that you can tell your IDE to use as a virtualenv. 
-
-I also start pycharm from a nix-shell (command plain `nix-shell`, will use `default.nix`) using `/opt/pycharm-community-2020.3.3/bin/pycharm.sh  > /dev/null 2>&1 &` so that it can understand the dependencies properly. This isn't ideal as you have to rebuild nixenv and restart the nix-shell and pycharm whenever you change a dependency, but that doesn't happen often.

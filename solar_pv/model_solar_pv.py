@@ -32,12 +32,7 @@ def model_solar_pv(pg_uri: str,
                    flat_roof_degrees: int,
                    peak_power_per_m2: float,
                    pv_tech: str,
-                   panel_width_m: float,
-                   panel_height_m: float,
-                   panel_spacing_m: float,
-                   large_building_threshold: float,
                    min_dist_to_edge_m: float,
-                   min_dist_to_edge_large_m: float,
                    debug_mode: bool):
 
     pg_uri = _validate_str(pg_uri, "pg_uri")
@@ -52,13 +47,7 @@ def model_solar_pv(pg_uri: str,
     min_roof_degrees_from_north = _validate_int(min_roof_degrees_from_north, "min_roof_degrees_from_north", 0, 180)
     flat_roof_degrees = _validate_int(flat_roof_degrees, "flat_roof_degrees", 0, 90)
     peak_power_per_m2 = _validate_float(peak_power_per_m2, "peak_power_per_m2", 0)
-    # TODO remove unused
-    panel_width_m = _validate_float(panel_width_m, "panel_width_m", 0.01)
-    panel_height_m = _validate_float(panel_height_m, "panel_height_m", 0.01)
-    panel_spacing_m = _validate_float(panel_spacing_m, "panel_spacing_m", 0)
-    large_building_threshold = _validate_float(large_building_threshold, "large_building_threshold", 0)
     min_dist_to_edge_m = _validate_float(min_dist_to_edge_m, "min_dist_to_edge_m", 0)
-    min_dist_to_edge_large_m = _validate_float(min_dist_to_edge_large_m, "min_dist_to_edge_large_m", 0)
 
     _validate_env_var("PVGIS_DATA_TAR_FILE_DIR")
     _validate_env_var("PVGIS_GRASS_DBASE_DIR")

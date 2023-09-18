@@ -25,6 +25,7 @@ class Plane:
         return lr
 
 
+# TODO move somewhere else, gets used outside this file
 def _image(xy: np.ndarray, vals: np.ndarray, res: float, nodata: float):
     min_xy = [np.amin(xy[:, 0]), np.amin(xy[:, 1])]
 
@@ -185,6 +186,7 @@ def create_planes(xyz: np.ndarray, aspect: np.ndarray, slope: np.ndarray, res: f
             num_segments = np.amax(segments)
             for segment_id in range(1, num_segments + 1):
                 idx_subset = idxs[segments == segment_id]
+                # TODO could use a higher threshold than 3?
                 if len(idx_subset) > 3:
                     xy_subset = xy[idx_subset]
                     z_subset = z[idx_subset]

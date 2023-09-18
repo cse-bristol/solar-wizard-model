@@ -63,7 +63,6 @@ CREATE TABLE IF NOT EXISTS models.pv_building (
     PRIMARY KEY(job_id, toid)
 );
 
--- TODO migration, change in albion-webapp etc
 CREATE TABLE IF NOT EXISTS models.pv_roof_plane (
     toid text NOT NULL,
     roof_plane_id int NOT NULL,
