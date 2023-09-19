@@ -26,9 +26,9 @@ def split_evenly(p1: Polygon, p2: Polygon,
     finding the centre-lines of roads.
     """
     if fill_holes(p1).contains(p2):
-        return p1.difference(p2.buffer(min_dist_between_planes)), p2
+        return largest_polygon(p1.difference(p2.buffer(min_dist_between_planes))), p2
     if fill_holes(p2).contains(p1):
-        return p1, p2.difference(p1.buffer(min_dist_between_planes))
+        return p1, largest_polygon(p2.difference(p1.buffer(min_dist_between_planes)))
 
     overlap = p1.intersection(p2)
     if overlap is None or overlap.is_empty:
