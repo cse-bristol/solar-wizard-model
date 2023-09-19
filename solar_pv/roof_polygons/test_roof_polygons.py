@@ -109,6 +109,8 @@ class RoofPolygonTest(ParameterisedTestCase):
             ("osgb1000017860043", 0.4, None),
             ("osgb1000036899466", 0.1, None),
             ("osgb1000000054783152", 0.1, None),
+            ("osgb1000016875773", 0.1, None),
+            ("osgb1000015784505", 0.1, None),
         ], _do_test)
 
     def test_merge(self):

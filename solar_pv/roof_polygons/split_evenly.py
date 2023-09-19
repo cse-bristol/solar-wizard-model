@@ -25,6 +25,11 @@ def split_evenly(p1: Polygon, p2: Polygon,
     https://proceedings.esri.com/library/userconf/proc96/TO400/PAP370/P370.HTM for
     finding the centre-lines of roads.
     """
+    if fill_holes(p1).contains(p2):
+        return p1.difference(p2.buffer(min_dist_between_planes)), p2
+    if fill_holes(p2).contains(p1):
+        return p1, p2.difference(p1.buffer(min_dist_between_planes))
+
     overlap = p1.intersection(p2)
     if overlap is None or overlap.is_empty:
         if debug:
@@ -46,7 +51,8 @@ def split_evenly(p1: Polygon, p2: Polygon,
         # where the boundaries of p1 and p2 overlap is (nearly completely) contained
         # within the overlap
         straight_central_line = []
-        for g in p1.boundary.intersection(p2.boundary).geoms:
+        b_intersect = p1.boundary.intersection(p2.boundary)
+        for g in b_intersect.geoms:
             if not g.intersects(overlap_part):
                 continue
             if g.geom_type == 'Point':
