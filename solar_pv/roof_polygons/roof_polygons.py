@@ -74,7 +74,7 @@ def _create_roof_polygons(building_geom: Polygon,
             print(f"Merged touching, now have {len(plane_polys)} roof polygons")
 
         for p in plane_polys:
-            p['roof_geom_27700'] = set_precision(p['roof_geom_27700'], 0.01)
+            p['roof_geom_27700'] = largest_polygon(set_precision(p['roof_geom_27700'], 0.01))
 
         _remove_overlaps(plane_polys, debug=debug)
 
@@ -148,7 +148,7 @@ def _make_polygon(plane: RoofPlane,
 
     roof_poly = _constrain_to_building(building_geom, roof_poly, min_dist_to_edge_m)
 
-    return raw_roof_poly, roof_poly
+    return largest_polygon(raw_roof_poly), largest_polygon(roof_poly)
 
 
 def _grid_polygon(roof_poly: Polygon, aspect: float, grid_size: float):

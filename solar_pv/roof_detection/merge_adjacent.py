@@ -212,6 +212,12 @@ def _rag_score(xy, z, labels, planes: Dict[int, RoofPlane], res: float, nodata: 
     if graph.has_node(nodata):
         graph.remove_node(nodata)
 
+    # RAGs are constructed using edges, so if there are no edges it will make
+    # an empty graph
+    if graph.number_of_nodes() == 0 and len(planes) == 1:
+        for plane_idx in planes.keys():
+            graph.add_node(plane_idx)
+
     for n in graph:
         mask = label_image == n
         xy_subset = xy[idxs[mask]]

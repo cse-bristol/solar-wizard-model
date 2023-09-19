@@ -50,6 +50,12 @@ def _rag(planes: Dict[int, RoofPlane], obstacle_groups_img, connectivity: int) -
     if graph.has_node(_EDGE_OF_BUILDING):
         graph.remove_node(_EDGE_OF_BUILDING)
 
+    # RAGs are constructed using edges, so if there are no edges it will make
+    # an empty graph
+    if graph.number_of_nodes() == 0 and len(planes) == 1:
+        for plane_idx in planes.keys():
+            graph.add_node(plane_idx)
+
     for n in graph:
         mask = obstacle_groups_img == n
         graph.nodes[n].update({'labels': [n],
@@ -129,7 +135,7 @@ def detect_messy_roofs(planes: Dict[int, RoofPlane], labels, xy, res: float, deb
         else:
             planes.append(node)
 
-    total_mess_score = mess_inliers / total_inliers
+    total_mess_score = mess_inliers / total_inliers if total_inliers > 0 else 0
     if debug:
         print(f"total mess score: {total_mess_score}")
     if total_mess_score >= _TOTAL_MESS_THRESHOLD_PCT:
