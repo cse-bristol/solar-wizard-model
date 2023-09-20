@@ -245,6 +245,10 @@ def _simplify_ring_by_angle(coords, tolerance_degrees: float) -> Polygon:
     new_idx = list(thresh_vals_by_deg[0] + 1)
     new_vertices = [coords[idx] for idx in new_idx]
 
+    # Simplify failed, will happen on circles etc
+    if len(new_vertices) < 4:
+        return Polygon(coords)
+
     return Polygon(new_vertices)
 
 

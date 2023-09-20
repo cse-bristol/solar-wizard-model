@@ -497,6 +497,11 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
             a, b = base_estimator.coef_
             d = base_estimator.intercept_
             slope = slope_deg(a, b)
+            try:
+                msle = metrics.mean_squared_log_error(y_true, y_pred)
+            except ValueError:
+                msle = None
+
             self.plane_properties.update({
                 "x_coef": a,
                 "y_coef": b,
@@ -509,7 +514,7 @@ class DETSACRegressorForLIDAR(RANSACRegressor):
                 "mae": metrics.mean_absolute_error(y_true, y_pred),
                 "mse": metrics.mean_squared_error(y_true, y_pred),
                 "rmse": metrics.mean_squared_error(y_true, y_pred, squared=False),
-                "msle": metrics.mean_squared_log_error(y_true, y_pred),
+                "msle": msle,
                 "mape": metrics.mean_absolute_percentage_error(y_true, y_pred),
             })
 
