@@ -1,6 +1,7 @@
 # This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 import json
+import time
 import traceback
 from collections import defaultdict
 from typing import List, Optional, cast, Tuple
@@ -17,7 +18,8 @@ from solar_pv.datatypes import RoofPlane, RoofPolygon
 from solar_pv.roof_polygons.split_evenly import split_evenly
 
 
-def create_roof_polygons(building_geom: Polygon,
+def create_roof_polygons(toid: str,
+                         building_geom: Polygon,
                          planes: List[RoofPlane],
                          max_roof_slope_degrees: int,
                          min_roof_area_m: int,
@@ -26,7 +28,8 @@ def create_roof_polygons(building_geom: Polygon,
                          min_dist_to_edge_m: float,
                          resolution_metres: float) -> List[RoofPolygon]:
     """Add roof polygons and other related fields to the dicts in `planes`"""
-    return _create_roof_polygons(
+    t0 = time.time()
+    polygons = _create_roof_polygons(
         building_geom,
         planes,
         max_roof_slope_degrees=max_roof_slope_degrees,
@@ -35,6 +38,12 @@ def create_roof_polygons(building_geom: Polygon,
         flat_roof_degrees=flat_roof_degrees,
         min_dist_to_edge_m=min_dist_to_edge_m,
         resolution_metres=resolution_metres)
+    t1 = time.time()
+    if t1 - t0 > 1200:
+        print(f"very slow polygon creation: {toid} took {round(t1 - t0, 2)} s")
+        print(json.dumps(_to_test_data(toid, planes, building_geom),
+                         sort_keys=True, default=str))
+    return polygons
 
 
 def _create_roof_polygons(building_geom: Polygon,
