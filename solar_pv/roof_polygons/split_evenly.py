@@ -58,7 +58,8 @@ def split_evenly(p1: Polygon, p2: Polygon,
             if g.geom_type == 'Point':
                 straight_central_line.append(g)
             elif g.geom_type == 'LineString':
-                straight_central_line.append(g.intersection(overlap_part).centroid)
+                intersect = g.intersection(overlap_part)
+                straight_central_line.append(intersect.centroid if intersect else g.centroid)
             else:
                 raise ValueError(f"Intersection of boundary of 2 roof planes was not point or linestring: was {g.geom_type}")
 
