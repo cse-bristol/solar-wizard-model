@@ -102,18 +102,18 @@ class RoofPolygonTest(ParameterisedTestCase):
             _create_polygons_using_test_data(toid, min_dist_to_edge_m=min_dist_to_edge_m)
 
         self.parameterised_test([
-            # ("osgb1000034161241", None),
-            # ("osgb1000034178593", None),
-            # ("osgb5000005113406742", None),
-            # ("osgb1000014925723", None),
-            # ("osgb1000017860043", 0.4, None),
-            # ("osgb1000036899466", 0.1, None),
-            # ("osgb1000000054783152", 0.1, None),
-            # ("osgb1000016875773", 0.1, None),
-            # ("osgb1000015784505", 0.1, None),
-            # ("osgb1000016234177", 0.1, None),
-            # ("osgb1000015345772", 0.1, None),
-            # ("osgb1000015664242", 0.1, None),
+            ("osgb1000034161241", None),
+            ("osgb1000034178593", None),
+            ("osgb5000005113406742", None),
+            ("osgb1000014925723", None),
+            ("osgb1000017860043", 0.4, None),
+            ("osgb1000036899466", 0.1, None),
+            ("osgb1000000054783152", 0.1, None),
+            ("osgb1000016875773", 0.1, None),
+            ("osgb1000015784505", 0.1, None),
+            ("osgb1000016234177", 0.1, None),
+            ("osgb1000015345772", 0.1, None),
+            ("osgb1000015664242", 0.1, None),
             ("osgb1000015030927", 0.1, None),
         ], _do_test)
 
