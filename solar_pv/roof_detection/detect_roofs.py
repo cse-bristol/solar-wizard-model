@@ -3,6 +3,8 @@ import json
 # This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 import logging
+from contextlib import contextmanager
+
 import time
 import math
 import traceback
@@ -14,7 +16,7 @@ from psycopg2.sql import SQL, Identifier
 import numpy as np
 from shapely import wkt
 
-from solar_pv.db_funcs import count, connection, sql_command
+from solar_pv.db_funcs import count, sql_command, connect, connection
 from solar_pv.postgis import pixels_for_buildings
 from solar_pv import tables
 from solar_pv.constants import RANSAC_LARGE_BUILDING, \
@@ -28,6 +30,10 @@ from solar_pv.roof_detection.ransac import RANSACRegressorForLIDAR
 from solar_pv.roof_polygons.roof_polygons import create_roof_polygons
 from solar_pv.datatypes import RoofDetBuilding, RoofPlane, RoofPolygon
 from solar_pv.util import get_cpu_count
+
+_SEMAPHORE_TIMEOUT_S = 120
+_SEMAPHORE_MAX_CONN = 50
+_PG_CONN_SEMAPHORE = mp.Semaphore(_SEMAPHORE_MAX_CONN)
 
 
 def _roof_det_cpu_count():
@@ -65,6 +71,7 @@ def detect_roofs(pg_uri: str,
         "min_dist_to_edge_m": min_dist_to_edge_m,
         "resolution_metres": resolution_metres,
     }
+
     with mp.Pool(workers) as pool:
         wrapped_iterable = ((pg_uri, job_id, seg, building_page_size, params)
                             for seg in range(0, segments))
@@ -238,13 +245,18 @@ def _detect_building_roof_planes(building: RoofDetBuilding,
     return non_messy_planes
 
 
-def _load(pg_uri: str, job_id: int, page: int, page_size: int, toids: List[str] = None, force_load: bool = False) -> Dict[str, RoofDetBuilding]:
+def _load(pg_uri: str,
+          job_id: int,
+          page: int,
+          page_size: int,
+          toids: List[str] = None,
+          force_load: bool = False) -> Dict[str, RoofDetBuilding]:
     """
     Load LIDAR pixel data for roof plane detection. page_size is number of
     buildings rather than pixels to prevent splitting a building's pixels across
     pages.
     """
-    with connection(pg_uri, cursor_factory=DictCursor) as pg_conn:
+    with semaphore_connection(pg_uri, cursor_factory=DictCursor) as pg_conn:
         elevation_table = f"{tables.schema(job_id)}.{tables.ELEVATION}"
         aspect_table = f"{tables.schema(job_id)}.{tables.ASPECT}"
         slope_table = f"{tables.schema(job_id)}.{tables.SLOPE}"
@@ -312,7 +324,7 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[RoofPolygon]):
         plane['roof_geom_27700'] = plane['roof_geom_27700'].wkt
         plane['roof_geom_raw_27700'] = plane['roof_geom_raw_27700'].wkt
 
-    with connection(pg_uri) as pg_conn, pg_conn.cursor() as cursor:
+    with semaphore_connection(pg_uri) as pg_conn, pg_conn.cursor() as cursor:
         execute_values(cursor, SQL("""
             INSERT INTO {roof_polygons} (
                 toid, 
@@ -365,3 +377,16 @@ def _mark_buildings_with_no_planes(pg_uri: str, job_id: int):
 def _print_test_data(building: RoofDetBuilding):
     """Print data for building in the format that the RANSAC tests expect"""
     print(json.dumps(building, default=str))
+
+
+@contextmanager
+def semaphore_connection(pg_uri: str, **kwargs):
+    _PG_CONN_SEMAPHORE.acquire(timeout=_SEMAPHORE_TIMEOUT_S)
+    try:
+        pg_conn = connect(pg_uri, **kwargs)
+        try:
+            yield pg_conn
+        finally:
+            pg_conn.close()
+    finally:
+        _PG_CONN_SEMAPHORE.release()
