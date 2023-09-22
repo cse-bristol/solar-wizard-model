@@ -101,7 +101,7 @@ def _handle_building_page(pg_uri: str, job_id: int, page: int, page_size: int, p
             t1 = time.time()
             if t1 - t0 > 1200:
                 print(f"very slow plane detection: {toid} took {round(t1 - t0, 2)} s")
-                _print_test_data(building)
+                # _print_test_data(building)
         except Exception as e:
             print(f"Exception during roof plane detection for TOID {toid}:")
             traceback.print_exception(e)
