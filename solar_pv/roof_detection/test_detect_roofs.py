@@ -93,4 +93,7 @@ class RoofDetTestCase(ParameterisedTestCase):
             # Totally round:
             ("osgb5000005107933997", 1.0, []),
 
+            # see premade_planes.py, L49-50
+            ("osgb1000013167157", 1.0, []),
+
         ], _roofdet)

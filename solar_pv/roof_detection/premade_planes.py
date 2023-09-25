@@ -45,6 +45,10 @@ def _image(xy: np.ndarray, vals: np.ndarray, res: float, nodata: float):
 
 def _segment(image: np.ndarray, mask: np.ndarray, threshold: float):
     initial_segments = segmentation.slic(image, compactness=30, start_label=1, mask=mask)
+    # Not clear why this sometimes returns an array of 0s, looks to be a bug caused by this break though:
+    # https://github.com/scikit-image/scikit-image/blob/main/skimage/segmentation/_slic.pyx#L332
+    if np.count_nonzero(initial_segments) == 0:
+        initial_segments = segmentation.slic(image, compactness=30, start_label=1, mask=mask, enforce_connectivity=False)
 
     g = rag_mean_color(image, initial_segments, connectivity=2)
 
