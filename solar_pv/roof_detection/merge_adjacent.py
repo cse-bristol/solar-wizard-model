@@ -156,7 +156,10 @@ def _update_node_data(graph, src: int, dst: int):
     dst_node["mae"] = merged_score
     dst_node["mse"] = metrics.mean_squared_error(z_subset, z_pred)
     dst_node["rmse"] = metrics.mean_squared_error(z_subset, z_pred, squared=False)
-    dst_node["msle"] = metrics.mean_squared_log_error(z_subset, z_pred)
+    try:
+        dst_node["msle"] = metrics.mean_squared_log_error(z_subset, z_pred)
+    except ValueError:
+        dst_node["msle"] = None
     dst_node["mape"] = metrics.mean_absolute_percentage_error(z_subset, z_pred)
     dst_node["sd"] = np.std(np.abs(z_subset, z_pred))
 
