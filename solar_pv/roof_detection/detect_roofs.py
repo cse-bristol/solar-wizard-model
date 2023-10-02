@@ -118,7 +118,9 @@ def _handle_building_page(pg_uri: str, job_id: int, page: int, page_size: int, p
         traceback.print_exception(e)
         raise e
 
-    print(f"Page {page} of {page_size} buildings complete, took {round(time.time() - start_time, 2)} s.")
+    page_time = round(time.time() - start_time, 2)
+    if page_time > 120:
+        print(f"slow page: {page} of {page_size} took {page_time} s.")
 
 
 def _detect_building_roof_planes(building: RoofDetBuilding,
