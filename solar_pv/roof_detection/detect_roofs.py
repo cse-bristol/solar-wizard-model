@@ -10,6 +10,7 @@ import math
 import traceback
 from typing import List, Dict
 import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from psycopg2.extras import DictCursor, execute_values, Json
 from psycopg2.sql import SQL, Identifier
@@ -72,18 +73,21 @@ def detect_roofs(pg_uri: str,
         "resolution_metres": resolution_metres,
     }
 
-    with mp.Pool(workers) as pool:
-        wrapped_iterable = ((pg_uri, job_id, seg, building_page_size, params)
-                            for seg in range(0, segments))
-        res = pool.starmap_async(_handle_building_page, wrapped_iterable, chunksize=1)
-        # Hacky way to poll for failures in workers, doesn't seem to be a nicer way
-        # of doing this:
-        while not res.ready():
-            if not res._success:
-                pool.terminate()
-                pool.join()
-                raise ValueError('Cancelling roof plane detection due to failure in worker')
-            time.sleep(1)
+    executor = ProcessPoolExecutor(max_workers=workers)
+    try:
+        futures = []
+        for seg in range(0, segments):
+            futures.append(executor.submit(_handle_building_page,
+                                           pg_uri, job_id, seg, building_page_size, params))
+
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except Exception as e:
+                executor.shutdown(cancel_futures=True)
+                raise e
+    finally:
+        executor.shutdown()
 
     _mark_buildings_with_no_planes(pg_uri, job_id)
     logging.info(f"roof plane detection for {building_count} roofs took {round(time.time() - start_time, 2)} s.")
@@ -99,9 +103,9 @@ def _handle_building_page(pg_uri: str, job_id: int, page: int, page_size: int, p
             t0 = time.time()
             found = _detect_building_roof_planes(building, toid, params['resolution_metres'])
             t1 = time.time()
-            if t1 - t0 > 1200:
+            if t1 - t0 > 7200:
                 print(f"very slow plane detection: {toid} took {round(t1 - t0, 2)} s")
-                # _print_test_data(building)
+                _print_test_data(building)
         except Exception as e:
             print(f"Exception during roof plane detection for TOID {toid}:")
             traceback.print_exception(e)
@@ -119,8 +123,7 @@ def _handle_building_page(pg_uri: str, job_id: int, page: int, page_size: int, p
         raise e
 
     page_time = round(time.time() - start_time, 2)
-    if page_time > 120:
-        print(f"slow page: {page} of {page_size} took {page_time} s.")
+    print(f"page {page} of {page_size} took {page_time} s.")
 
 
 def _detect_building_roof_planes(building: RoofDetBuilding,
