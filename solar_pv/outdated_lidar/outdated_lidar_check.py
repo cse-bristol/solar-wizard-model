@@ -3,6 +3,9 @@
 import json
 import logging
 import multiprocessing as mp
+import os
+from os.path import join
+
 import time
 from typing import Tuple, List
 
@@ -68,7 +71,7 @@ def _check_lidar_page(pg_uri: str, job_id: int, resolution_metres: float, page: 
                 to_write.append((building['toid'], reason, height, min_gh, max_gh))
             except Exception as e:
                 print("outdated LiDAR check failed on building:")
-                print(json.dumps(building, sort_keys=True, default=str))
+                _write_test_data(job_id, building)
                 raise e
 
         _write_exclusions(pg_conn, job_id, to_write)
@@ -210,3 +213,15 @@ def _already_checked(pg_conn, job_id: int) -> bool:
         """,
         buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
         result_extractor=lambda rows: rows[0][0])
+
+
+def _write_test_data(job_id: int, building):
+    """Write test data for building in the format that the outdated LiDAR tests expect"""
+    debug_data_dir = os.environ.get("DEBUG_DATA_DIR")
+    if debug_data_dir:
+        fname = join(debug_data_dir, f"{job_id}_{building['toid']}.json", 'w')
+        with open(fname) as f:
+            json.dump(building, f, sort_keys=True, default=str)
+        print(f"Wrote debug data to {fname}")
+    else:
+        print(json.dumps(building, sort_keys=True, default=str))

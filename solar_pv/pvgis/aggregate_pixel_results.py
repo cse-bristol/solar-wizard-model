@@ -4,6 +4,8 @@
 import json
 import logging
 import multiprocessing as mp
+import os
+from os.path import join
 
 import numpy as np
 import time
@@ -107,7 +109,7 @@ def _aggregate_results_page(pg_uri: str,
             except Exception as e:
                 print(f"PVMAPS pixel data aggregation failed on building {toid}:")
                 traceback.print_exc()
-                print(json.dumps({'pixels': all_pixels[toid], 'roofs': toid_roof_planes}, sort_keys=True, default=str))
+                _write_test_data({'pixels': all_pixels[toid], 'roofs': toid_roof_planes})
                 raise e
 
         _write_results(pg_conn, job_id, roofs_to_write)
@@ -352,3 +354,15 @@ def _load_roof_planes(pg_conn, job_id: int, page: int, page_size: int, toids: Li
         by_toid[roof['toid']].append(dict(roof))
 
     return dict(by_toid)
+
+
+def _write_test_data(test_data):
+    """Write test data for building"""
+    debug_data_dir = os.environ.get("DEBUG_DATA_DIR")
+    if debug_data_dir:
+        fname = join(debug_data_dir, f"pixel_agg_{test_data['toid']}.json", 'w')
+        with open(fname) as f:
+            json.dump(test_data, f, sort_keys=True, default=str)
+        print(f"Wrote debug data to {fname}")
+    else:
+        print(json.dumps(test_data, sort_keys=True, default=str))

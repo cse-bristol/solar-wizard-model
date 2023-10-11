@@ -1,6 +1,9 @@
 # This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 import json
+import os
+from os.path import join
+
 import time
 import traceback
 from collections import defaultdict
@@ -41,8 +44,7 @@ def create_roof_polygons(toid: str,
     t1 = time.time()
     if t1 - t0 > 1200:
         print(f"very slow polygon creation: {toid} took {round(t1 - t0, 2)} s")
-        print(json.dumps(_to_test_data(toid, planes, building_geom),
-                         sort_keys=True, default=str))
+        _write_test_data(_to_test_data(toid, planes, building_geom))
     return polygons
 
 
@@ -119,8 +121,7 @@ def _create_roof_polygons(building_geom: Polygon,
         toid = planes[0]['toid']
         print(f"Exception during roof polygon creation for TOID {toid}:")
         traceback.print_exception(e)
-        print(json.dumps(_to_test_data(planes[0]['toid'], planes, building_geom),
-                         sort_keys=True, default=str))
+        _write_test_data(_to_test_data(planes[0]['toid'], planes, building_geom))
         raise e
 
 
@@ -276,3 +277,15 @@ def _to_test_data(toid: str, planes: List[dict], building_geom: Polygon) -> dict
         "building_geom": building_geom.wkt,
         "toid": toid,
     }
+
+
+def _write_test_data(test_data):
+    """Write test data for building in the format that the roof polygon tests expect"""
+    debug_data_dir = os.environ.get("DEBUG_DATA_DIR")
+    if debug_data_dir:
+        fname = join(debug_data_dir, f"roof_poly_{test_data['toid']}.json", 'w')
+        with open(fname) as f:
+            json.dump(test_data, f, sort_keys=True, default=str)
+        print(f"Wrote debug data to {fname}")
+    else:
+        print(json.dumps(test_data, sort_keys=True, default=str))

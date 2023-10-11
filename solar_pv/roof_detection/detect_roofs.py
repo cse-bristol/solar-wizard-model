@@ -3,7 +3,9 @@ import json
 # This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 import logging
+import os
 from contextlib import contextmanager
+from os.path import join
 
 import time
 import math
@@ -105,11 +107,11 @@ def _handle_building_page(pg_uri: str, job_id: int, page: int, page_size: int, p
             t1 = time.time()
             if t1 - t0 > 7200:
                 print(f"very slow plane detection: {toid} took {round(t1 - t0, 2)} s")
-                _print_test_data(building)
+                _write_test_data(job_id, building)
         except Exception as e:
             print(f"Exception during roof plane detection for TOID {toid}:")
             traceback.print_exception(e)
-            _print_test_data(building)
+            _write_test_data(job_id, building)
             raise e
 
         if len(found) > 0:
@@ -379,9 +381,16 @@ def _mark_buildings_with_no_planes(pg_uri: str, job_id: int):
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE))
 
 
-def _print_test_data(building: RoofDetBuilding):
-    """Print data for building in the format that the RANSAC tests expect"""
-    print(json.dumps(building, default=str))
+def _write_test_data(job_id: int, building: RoofDetBuilding):
+    """Write data for building in the format that the RANSAC tests expect"""
+    debug_data_dir = os.environ.get("DEBUG_DATA_DIR")
+    if debug_data_dir:
+        fname = join(debug_data_dir, f"{job_id}_{building['toid']}.json", 'w')
+        with open(fname) as f:
+            json.dump(building, f, default=str)
+        print(f"Wrote debug data to {fname}")
+    else:
+        print(json.dumps(building, default=str))
 
 
 @contextmanager
