@@ -225,7 +225,11 @@ def simplify_by_angle(poly: Polygon, tolerance_degrees: float = 1.0) -> Polygon:
     simple_shell = _simplify_ring_by_angle(poly.exterior.coords[:], tolerance_degrees)
     simple_holes = [_simplify_ring_by_angle(hole, tolerance_degrees) for hole in holes]
     simple_poly = simple_shell.difference(ops.unary_union(simple_holes))
-    return simple_poly
+    if simple_poly.geom_type == 'Polygon':
+        return simple_poly
+    else:
+        # simplify has failed:
+        return poly
 
 
 def _simplify_ring_by_angle(coords, tolerance_degrees: float) -> Polygon:

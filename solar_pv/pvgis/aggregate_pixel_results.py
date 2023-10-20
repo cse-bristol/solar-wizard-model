@@ -158,8 +158,13 @@ def _aggregate_pixel_data(roof_planes,
     rtree = STRtree(pixel_squares)
     roofs_to_write = []
     for roof_plane in roof_planes:
-        geom_max = wkt.loads(roof_plane['roof_geom_27700'])
-        geom_min = wkt.loads(roof_plane['roof_geom_raw_27700'])
+        geom_max: Polygon = wkt.loads(roof_plane['roof_geom_27700'])
+        geom_min: Polygon = wkt.loads(roof_plane['roof_geom_raw_27700'])
+
+        if geom_min.is_empty:
+            raise ValueError("Raw roof plane geometry was empty")
+        if geom_max.is_empty:
+            raise ValueError("Processed roof plane geometry was empty")
 
         roof_plane['horizon'] = [0 for _ in range(len(horizon_fields))]
 

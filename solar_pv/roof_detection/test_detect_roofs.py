@@ -95,5 +95,6 @@ class RoofDetTestCase(ParameterisedTestCase):
 
             # see premade_planes.py, L49-50
             ("osgb1000013167157", 1.0, []),
+            ("osgb1000013167157", 1.0, []),
 
         ], _roofdet)

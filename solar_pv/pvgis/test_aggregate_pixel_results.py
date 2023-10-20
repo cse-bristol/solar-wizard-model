@@ -41,11 +41,11 @@ def _aggregate(filename: str):
 class PixelAggregateTestCase(ParameterisedTestCase):
 
     def test_pixel_aggregation(self):
-        def _panel_field(filename, panel_id: int, field: str):
-            panels, roofs = _aggregate(filename)
-            panel = [p for p in panels if p['panel_id'] == panel_id]
-            assert len(panel) == 1, f"No panel with ID {panel_id} found. Possible values: {[p['panel_id'] for p in panels]}"
-            val = panel[0][field]
+        def _roof_field(filename, roof_plane_id: int, field: str):
+            roofs = _aggregate(filename)
+            roof = [r for r in roofs if r['roof_plane_id'] == roof_plane_id]
+            assert len(roof) == 1, f"No roof with ID {roof_plane_id} found. Possible values: {[r['roof_plane_id'] for r in roofs]}"
+            val = roof[0][field]
             if isinstance(val, float):
                 return round(val, 3)
             elif isinstance(val, list):
@@ -54,8 +54,8 @@ class PixelAggregateTestCase(ParameterisedTestCase):
                 return val
 
         self.parameterised_test([
-            ('osgb1000014995063.json', 8075, 'kwh_year_avg', 256.655),
-            ('osgb1000014995063.json', 8075, 'kwh_m01_avg', 5.327),
-            ('osgb1000014995063.json', 8075, 'kwh_m06_avg', 38.079),
-            ('osgb1000014995063.json', 8075, 'horizon', [0.432, 0.412, 0.437, 0.445, 0.479, 0.495, 0.463, 0.404, 0.356, 0.29, 0.285, 0.199, 0.198, 0.079, 0.14, 0.141, 0.225, 0.266, 0.298, 0.289, 0.314, 0.329, 0.34, 0.337, 0.33, 0.272, 0.252, 0.163, 0.151, 0.095, 0.087, 0.064, 0.211, 0.215, 0.369, 0.399]),
-        ], _panel_field)
+            ('osgb1000008955040.json2', 43989, 'kwh_year_avg', 3527.02),
+            ('osgb1000008955040.json2', 43989, 'kwh_m01_avg', 118.76),
+            ('osgb1000008955040.json2', 43989, 'kwh_m06_avg', 459.72),
+            ('osgb1000008955040.json2', 43989, 'horizon', [0.06, 0.16, 0.24, 0.36, 0.37, 0.39, 0.49, 0.5, 0.49, 0.49, 0.5, 0.5, 0.41, 0.41, 0.38, 0.26, 0.25, 0.16, 0.08, 0.07, 0.06, 0.03, 0.06, 0.03, 0.02, 0.01, 0.0, 0.01, 0.0, 0.0, 0.01, 0.0, 0.0, 0.04, 0.05, 0.03]),
+        ], _roof_field)

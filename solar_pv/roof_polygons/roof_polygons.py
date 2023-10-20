@@ -71,7 +71,7 @@ def _create_roof_polygons(building_geom: Polygon,
 
             raw_roof_poly, roof_poly = _make_polygon(plane, building_geom, min_dist_to_edge_m, resolution_metres)
 
-            if roof_poly and not roof_poly.is_empty:
+            if roof_poly and not roof_poly.is_empty and raw_roof_poly and not raw_roof_poly.is_empty:
                 plane['roof_geom_27700'] = roof_poly
                 plane['roof_geom_raw_27700'] = raw_roof_poly
                 plane_polys.append(plane)
@@ -115,7 +115,7 @@ def _create_roof_polygons(building_geom: Polygon,
             else:
                 plane['usable'] = True
 
-        return plane_polys
+        return [p for p in plane_polys if _is_valid(p)]
 
     except Exception as e:
         toid = planes[0]['toid']
@@ -123,6 +123,13 @@ def _create_roof_polygons(building_geom: Polygon,
         traceback.print_exception(e)
         _write_test_data(_to_test_data(planes[0]['toid'], planes, building_geom))
         raise e
+
+
+def _is_valid(plane: RoofPolygon) -> bool:
+    return plane['roof_geom_27700'] \
+           and not plane['roof_geom_27700'].is_empty \
+           and plane['roof_geom_raw_27700'] \
+           and not plane['roof_geom_raw_27700'].is_empty
 
 
 def _make_polygon(plane: RoofPlane,
@@ -247,7 +254,7 @@ def _merge_touching(planes: List[RoofPolygon],
                 plane['roof_geom_27700'] = roof_poly
                 plane['roof_geom_raw_27700'] = raw_roof_poly
 
-            if plane['roof_geom_27700']:
+            if _is_valid(plane):
                 merged.append(plane)
 
     return merged
