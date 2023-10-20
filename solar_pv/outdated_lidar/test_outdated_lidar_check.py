@@ -35,35 +35,35 @@ class OutdatedLidarTestCase(ParameterisedTestCase):
 
     def test_lidar_checker(self):
         self.parameterised_test([
-            ('osgb5000005219846721.json', 'NO_LIDAR_COVERAGE'),
-            ('osgb5000005134753276.json', 'OUTDATED_LIDAR_COVERAGE'),
-            ('osgb5000005152026792.json', 'OUTDATED_LIDAR_COVERAGE'),
-            ('osgb5000005152026801.json', 'OUTDATED_LIDAR_COVERAGE'),
-            ('osgb5000005235848378.json', 'OUTDATED_LIDAR_COVERAGE'),
-            ('osgb5000005134753282.json', 'OUTDATED_LIDAR_COVERAGE'),
-            ('osgb5000005135275129.json', 'OUTDATED_LIDAR_COVERAGE'),
-            ('osgb5000005134753286.json', 'OUTDATED_LIDAR_COVERAGE'),
-            ('osgb5000005134753270.json', 'OUTDATED_LIDAR_COVERAGE'),
-            ('osgb5000005134753280.json', 'OUTDATED_LIDAR_COVERAGE'),
-            ('osgb1000020005762.json', 'OUTDATED_LIDAR_COVERAGE'),
-            ('osgb1000019929148.json', None),
-            ('osgb1000043085584.json', None),
-            ('osgb1000019927618.json', None),
-            ('osgb1000020002707.json', None),
-            ('osgb1000020002198.json', None),
-            ('osgb1000043085181.json', None),
-            ('osgb1000020002780.json', None),
-            ("osgb5000005262593487.json", 'OUTDATED_LIDAR_COVERAGE'),
-            ("osgb5000005262593494.json", 'OUTDATED_LIDAR_COVERAGE'),
-            ("osgb5000005262592293.json", 'OUTDATED_LIDAR_COVERAGE'),
-            ("osgb1000002085437860.json", 'OUTDATED_LIDAR_COVERAGE'),
-            ("osgb1000021445343.json", None),
-            ("osgb5000005150981943.json", None),
-            ("osgb1000021445346.json", None),
+            ('0021.json', 'NO_LIDAR_COVERAGE'),
+            ('0005.json', 'OUTDATED_LIDAR_COVERAGE'),
+            ('0011.json', 'OUTDATED_LIDAR_COVERAGE'),
+            ('0006.json', 'OUTDATED_LIDAR_COVERAGE'),
+            ('0004.json', 'OUTDATED_LIDAR_COVERAGE'),
+            ('0020.json', 'OUTDATED_LIDAR_COVERAGE'),
+            ('0002.json', 'OUTDATED_LIDAR_COVERAGE'),
+            ('0003.json', 'OUTDATED_LIDAR_COVERAGE'),
+            ('0008.json', 'OUTDATED_LIDAR_COVERAGE'),
+            ('0017.json', 'OUTDATED_LIDAR_COVERAGE'),
+            ('0010.json', 'OUTDATED_LIDAR_COVERAGE'),
+            ('0019.json', None),
+            ('0001.json', None),
+            ('0018.json', None),
+            ('0015.json', None),
+            ('0013.json', None),
+            ('0007.json', None),
+            ('0014.json', None),
+            ("0009.json", 'OUTDATED_LIDAR_COVERAGE'),
+            ("0012.json", 'OUTDATED_LIDAR_COVERAGE'),
+            ("0016.json", 'OUTDATED_LIDAR_COVERAGE'),
+            ("0023.json", 'OUTDATED_LIDAR_COVERAGE'),
+            ("0022.json", None),
+            ("0025.json", None),
+            ("0024.json", None),
             # Was throwing an exception in perimeter_gradient.py:
-            ("osgb1000034157635.json", None),
+            ("0027.json", None),
             # Was throwing an exception in perimeter_gradient.py:
-            ("osgb1000034135706.json", None),
+            ("0026.json", None),
             # Has a pixel within, but none without. If there are no pixels in the moat
             # that aren't inside another building, we currently assume LiDAR is ok...
             ("no_without.json", None),
@@ -71,7 +71,7 @@ class OutdatedLidarTestCase(ParameterisedTestCase):
 
     def test_height(self):
         self.parameterised_test([
-            ("osgb1000034135706.json", 3.18),
+            ("0026.json", 3.18),
             # Has a pixel within, but none without. If there are no pixels in the moat
             # that aren't inside another building, we can't know the height...
             ("no_without.json", None),
@@ -79,11 +79,11 @@ class OutdatedLidarTestCase(ParameterisedTestCase):
 
     def test_ground_height(self):
         self.parameterised_test([
-            ('osgb5000005219846721.json', (None, None)),
-            ('osgb5000005134753276.json', (None, None)),
-            ('osgb1000019929148.json', (129.8, 130.5)),
-            ("osgb1000034157635.json", (134.7, 135.8)),
-            ("osgb1000034135706.json", (6.0, 6.0)),
+            ('0021.json', (None, None)),
+            ('0005.json', (None, None)),
+            ('0019.json', (129.8, 130.5)),
+            ("0027.json", (134.7, 135.8)),
+            ("0026.json", (6.0, 6.0)),
             # Has a pixel within, but none without:
             ("no_without.json", (None, None)),
         ], _check_gh)
