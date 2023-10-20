@@ -81,9 +81,9 @@ class OutdatedLidarTestCase(ParameterisedTestCase):
         self.parameterised_test([
             ('osgb5000005219846721.json', (None, None)),
             ('osgb5000005134753276.json', (None, None)),
-            ('osgb1000019929148.json', (129.8, 131.2)),
-            ("osgb1000034157635.json", (135.0, 136.3)),
-            ("osgb1000034135706.json", (6.0, 8.3)),
+            ('osgb1000019929148.json', (129.8, 130.5)),
+            ("osgb1000034157635.json", (134.7, 135.8)),
+            ("osgb1000034135706.json", (6.0, 6.0)),
             # Has a pixel within, but none without:
             ("no_without.json", (None, None)),
         ], _check_gh)

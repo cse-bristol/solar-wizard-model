@@ -39,6 +39,9 @@ def _load_test_data(toid: str):
         planes = data['planes']
         for plane in planes:
             plane['inliers_xy'] = np.array(plane['inliers_xy'])
+            # fix up old test data...
+            if 'is_flat' not in plane:
+                plane['is_flat'] = plane['slope'] <= 5
         building_geom = wkt.loads(data['building_geom'])
     return planes, building_geom
 
