@@ -364,7 +364,7 @@ def _load_roof_planes(pg_conn, job_id: int, page: int, page_size: int, toids: Li
 def _write_test_data(test_data):
     """Write test data for building"""
     debug_data_dir = os.environ.get("DEBUG_DATA_DIR")
-    os.makedirs(debug_data_dir, exists_ok=True)
+    os.makedirs(debug_data_dir, exist_ok=True)
     if debug_data_dir:
         fname = join(debug_data_dir, f"pixel_agg_{test_data['toid']}.json")
         with open(fname, 'w') as f:

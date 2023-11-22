@@ -218,7 +218,7 @@ def _already_checked(pg_conn, job_id: int) -> bool:
 def _write_test_data(job_id: int, building):
     """Write test data for building in the format that the outdated LiDAR tests expect"""
     debug_data_dir = os.environ.get("DEBUG_DATA_DIR")
-    os.makedirs(debug_data_dir, exists_ok=True)
+    os.makedirs(debug_data_dir, exist_ok=True)
     if debug_data_dir:
         fname = join(debug_data_dir, f"{job_id}_{building['toid']}.json")
         with open(fname, 'w') as f:

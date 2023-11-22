@@ -384,7 +384,7 @@ def _mark_buildings_with_no_planes(pg_uri: str, job_id: int):
 def _write_test_data(job_id: int, building: RoofDetBuilding):
     """Write data for building in the format that the RANSAC tests expect"""
     debug_data_dir = os.environ.get("DEBUG_DATA_DIR")
-    os.makedirs(debug_data_dir, exists_ok=True)
+    os.makedirs(debug_data_dir, exist_ok=True)
     if debug_data_dir:
         fname = join(debug_data_dir, f"{job_id}_{building['toid']}.json")
         with open(fname, 'w') as f:
