@@ -375,7 +375,15 @@ def _mark_buildings_with_no_planes(pg_uri: str, job_id: int):
             SET exclusion_reason = 'NO_ROOF_PLANES_DETECTED'
             WHERE
                 NOT EXISTS (SELECT FROM {roof_polygons} rp WHERE rp.toid = b.toid)
-                AND b.exclusion_reason IS NULL
+                AND b.exclusion_reason IS NULL;
+                
+            -- Update building.exclusion_reason for any buildings that have roof planes but no
+            -- usable ones:
+            UPDATE {buildings} b
+            SET exclusion_reason = 'ALL_ROOF_PLANES_UNUSABLE'
+            WHERE
+                NOT EXISTS (SELECT FROM {roof_polygons} rp WHERE rp.usable AND rp.toid = b.toid)
+                AND b.exclusion_reason IS NULL;
             """,
             roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE),
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE))
