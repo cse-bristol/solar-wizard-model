@@ -24,16 +24,54 @@ def model_solar_pv(pg_uri: str,
                    lidar_dir: str,
                    job_id: int,
                    job_bounds_27700: str,
-                   horizon_search_radius: int,
-                   horizon_slices: int,
-                   max_roof_slope_degrees: int,
-                   min_roof_area_m: int,
-                   min_roof_degrees_from_north: int,
-                   flat_roof_degrees: int,
-                   peak_power_per_m2: float,
-                   pv_tech: str,
-                   min_dist_to_edge_m: float,
-                   debug_mode: bool):
+                   horizon_search_radius: int = 1000,
+                   horizon_slices: int = 36,
+                   max_roof_slope_degrees: int = 70,
+                   min_roof_area_m: int = 8,
+                   min_roof_degrees_from_north: int = 45,
+                   flat_roof_degrees: int = 10,
+                   peak_power_per_m2: float = 0.2,
+                   pv_tech: str = "crystSi",
+                   min_dist_to_edge_m: float = 0.1,
+                   debug_mode: bool = False):
+    """
+    Main entrypoint to the PV model.
+
+    :param pg_uri: postgres connection URI
+    :param root_solar_dir: directory within which temporary directories will be created
+    per-job to store files needed for the model. This will be deleted at the end of the run
+    if debug_mode is False.
+    :param lidar_dir: directory within which temporary directories will be created per-job
+    to store LiDAR tiles needed for the model. This will be deleted at the end of the run
+    if debug_mode is False.
+    :param job_id: unique integer ID for the job. Rows in the output postgres tables will
+    be keyed on this ID.
+    :param job_bounds_27700: A WKT polygon string in CRS 27700 representing the bounds
+    of this job. Only buildings in mastermap.buildings that fall within these bounds
+    will be used.
+    :param horizon_search_radius: how far in each direction to look when determining
+    horizon height. Unit: metres
+    :param horizon_slices: the number of rays traced from each point to determine horizon height
+    :param max_roof_slope_degrees: the maximum roof slope allowed for panels, in degrees
+    :param min_roof_area_m: roofs smaller than this area (in m2) will be excluded
+    :param min_roof_degrees_from_north: Roofs whose aspect differs from 0° (North) by less
+    than this amount will be excluded
+    :param flat_roof_degrees: The angle at which panels are assumed to be mounted on
+    flat roofs. 10° is normally recommended as it allows fitting more panels,
+    despite the optimal angle for generation being closer to 30-40°, as 10° allows
+    the gaps between rows can be smaller. Ballast and frame costs will also be lower
+    (not modeled).
+    TODO this used to affect generation on flat roofs as gaps between panel rows were
+         modelled, this is not currently done though.
+    :param peak_power_per_m2: kW per m2 of panels
+    :param pv_tech: either "crystSi" (crystalline silicon - a conventional solar cell),
+    or "CdTe" (Cadmium telluride - a thin-film cell). PVMAPS uses different model parameters
+    based on the choice here - refer to the PVMAPS docs for more info.
+    :param min_dist_to_edge_m: Min distance to the edge of the building for the roof polygon area.
+    This only counts the edge of the building, not the edges of other areas of roof.
+    :param debug_mode: if True, don't delete temporary files or the postgres schema
+    for the job.
+    """
 
     pg_uri = _validate_str(pg_uri, "pg_uri")
     root_solar_dir = _validate_str(root_solar_dir, "root_solar_dir")

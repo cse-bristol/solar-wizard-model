@@ -6,7 +6,9 @@ The model is documented at [documents/pv_model.md](documents/pv_model.md).
 
 ## Dependencies and setup
 
-The main entrypoint of the model is the function `model_solar_pv` in module `solar_pv.model_solar_pv`. Results are inserted into 3 postgres tables:
+The main entrypoint of the model is the function `model_solar_pv` in module `solar_pv.model_solar_pv`. The docstring for that function has documentation for how to use it and the meaning of each parameter.
+
+Results are inserted into 2 postgres tables:
 * `models.pv_building` contains LiDAR-derived building height, and a reason (if any) why the building has been skipped in PV modelling, which can be one of 4 things: `NO_LIDAR_COVERAGE`, `OUTDATED_LIDAR_COVERAGE`, `NO_ROOF_PLANES_DETECTED`, or `ALL_ROOF_PLANES_UNUSABLE`.
 * `models.pv_roof_plane` contains the slope and aspect of the roof plane, per-modelled-panel monthly and yearly predicted kWh, and a horizon profile. A building can have 0 to many of these.
 
@@ -18,7 +20,7 @@ The model has the following software dependencies:
 The model has the following data dependencies:
 * building footprint geometries
 * LiDAR elevation rasters
-* irradiation raster data, which can be downloaded from the PVMAPS link above, or from https://re.jrc.ec.europa.eu/pvmaps/pvgis_data.tar
+* irradiation raster data, which can be downloaded from the PVMAPS link above, or from https://re.jrc.ec.europa.eu/pvmaps/pvgis_data.tar. The tar file should be placed in the directory referenced by the environment variable `PVGIS_DATA_TAR_FILE_DIR`.
 
 We have tried to make the model as independent as possible from our internal infrastructure where it runs, but this has not been our main priority when developing and you may find things that don't work, or design decisions that don't make sense when viewed without the context of knowing how we run the model.
 
