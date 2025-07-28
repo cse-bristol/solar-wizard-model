@@ -10,7 +10,7 @@ from os.path import join
 import time
 import math
 import traceback
-from typing import List, Dict
+from typing import List, Dict, Tuple
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
@@ -59,10 +59,10 @@ def detect_roofs(pg_uri: str,
         logging.info("Not detecting roof planes, already detected.")
         return
 
-    building_count = _building_count(pg_uri, job_id)
-    segments = math.ceil(building_count / building_page_size)
-    workers = min(segments, workers)
-    logging.info(f"{building_count} buildings, in {segments} batches to process")
+    buildings_with_areas = _buildings_with_areas(pg_uri, job_id)
+    building_count = len(buildings_with_areas)
+    
+    logging.info(f"{building_count} buildings to process")
     logging.info(f"Using {workers} processes for roof plane detection")
     start_time = time.time()
 
@@ -75,12 +75,14 @@ def detect_roofs(pg_uri: str,
         "resolution_metres": resolution_metres,
     }
 
+    work_queue = _create_adaptive_batches(buildings_with_areas, building_page_size)
+
     executor = ProcessPoolExecutor(max_workers=workers)
     try:
         futures = []
-        for seg in range(0, segments):
-            futures.append(executor.submit(_handle_building_page,
-                                           pg_uri, job_id, seg, building_page_size, params))
+        for batch_toids in work_queue:
+            futures.append(executor.submit(_handle_building_batch,
+                                           pg_uri, job_id, batch_toids, params))
 
         for future in as_completed(futures):
             try:
@@ -95,9 +97,9 @@ def detect_roofs(pg_uri: str,
     logging.info(f"roof plane detection for {building_count} roofs took {round(time.time() - start_time, 2)} s.")
 
 
-def _handle_building_page(pg_uri: str, job_id: int, page: int, page_size: int, params: dict):
+def _handle_building_batch(pg_uri: str, job_id: int, toids: List[str], params: dict):
     start_time = time.time()
-    buildings = _load(pg_uri, job_id, page, page_size)
+    buildings = _load(pg_uri, job_id, toids)
 
     polygons = []
     for toid, building in buildings.items():
@@ -124,8 +126,8 @@ def _handle_building_page(pg_uri: str, job_id: int, page: int, page_size: int, p
         traceback.print_exception(e)
         raise e
 
-    page_time = round(time.time() - start_time, 2)
-    print(f"page {page} of {page_size} took {page_time} s.")
+    batch_time = round(time.time() - start_time, 2)
+    print(f"batch of {len(toids)} buildings took {batch_time} s.")
 
 
 def _detect_building_roof_planes(building: RoofDetBuilding,
@@ -254,8 +256,6 @@ def _detect_building_roof_planes(building: RoofDetBuilding,
 
 def _load(pg_uri: str,
           job_id: int,
-          page: int,
-          page_size: int,
           toids: List[str] = None,
           force_load: bool = False) -> Dict[str, RoofDetBuilding]:
     """
@@ -267,8 +267,13 @@ def _load(pg_uri: str,
         elevation_table = f"{tables.schema(job_id)}.{tables.ELEVATION}"
         aspect_table = f"{tables.schema(job_id)}.{tables.ASPECT}"
         slope_table = f"{tables.schema(job_id)}.{tables.SLOPE}"
-        by_toid = pixels_for_buildings(pg_conn, job_id, page, page_size, [elevation_table, aspect_table, slope_table], toids, force_load=force_load)
-        buildings = _load_building_polygons(pg_conn, job_id, list(by_toid.keys()))
+        
+        by_toid = pixels_for_buildings(pg_conn, job_id, 0, len(toids), 
+                                      [elevation_table, aspect_table, slope_table], 
+                                      toids, force_load=force_load)
+        
+        buildings = _load_building_polygons(pg_conn, job_id, toids)
+        
         loaded = {}
         for building in buildings:
             toid = building["toid"]
@@ -296,13 +301,47 @@ def _load_building_polygons(pg_conn, job_id, toids: List[str]) -> List[dict]:
     return buildings
 
 
-def _building_count(pg_uri: str, job_id: int):
+def _buildings_with_areas(pg_uri: str, job_id: int) -> List[Tuple[str, float]]:
+    """Get all building TOIDs with their areas, sorted by area (largest first) for adaptive batching"""
     with connection(pg_uri, cursor_factory=DictCursor) as pg_conn:
         return sql_command(
             pg_conn,
-            "SELECT COUNT(*) FROM {buildings};",
+            """SELECT toid, ST_Area(geom_27700) as area
+               FROM {buildings} 
+               WHERE exclusion_reason IS NULL
+               ORDER BY ST_Area(geom_27700) DESC;""",
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
-            result_extractor=lambda rows: rows[0][0])
+            result_extractor=lambda rows: [(row['toid'], row['area']) for row in rows])
+
+
+def _create_adaptive_batches(buildings_with_areas: List[Tuple[str, float]], base_batch_size: int) -> List[List[str]]:
+    """
+    Create batches with sizes that adapt based on building area - larger buildings get smaller batches.
+
+    buildings_with_areas must be sorted in descending order of area for this to work.
+    """
+    batches = []
+    current_batch = []
+    
+    for toid, area in buildings_with_areas:
+        current_batch.append(toid)
+        if area > 10000:
+            batch_size = 1
+        if area > 2000:
+            batch_size = max(2, base_batch_size // 10)
+        elif area > 500:
+            batch_size = max(3, base_batch_size // 5)
+        else:
+            batch_size = base_batch_size
+        
+        if len(current_batch) >= batch_size:
+            batches.append(current_batch)
+            current_batch = []
+    
+    if current_batch:
+        batches.append(current_batch)
+    
+    return batches
 
 
 def _save_planes(pg_uri: str, job_id: int, planes: List[RoofPolygon]):

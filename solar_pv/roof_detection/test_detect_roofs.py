@@ -9,7 +9,7 @@ from typing import List
 from shapely import wkt
 
 from solar_pv.paths import TEST_DATA
-from solar_pv.roof_detection.detect_roofs import _detect_building_roof_planes
+from solar_pv.roof_detection.detect_roofs import _detect_building_roof_planes, _create_adaptive_batches
 from solar_pv.datatypes import RoofDetBuilding
 from solar_pv.test_utils.test_funcs import ParameterisedTestCase
 
@@ -98,3 +98,43 @@ class RoofDetTestCase(ParameterisedTestCase):
             ("0040", 1.0, []),
 
         ], _roofdet)
+
+    def test_create_adaptive_batches(self):
+        """Test that adaptive batching creates appropriate batch sizes based on building areas"""
+        
+        batches = _create_adaptive_batches([], 6)
+        self.assertEqual(batches, [])
+
+        single_building = [("test_building", 100)]
+        batches = _create_adaptive_batches(single_building, 6)
+        self.assertEqual(len(batches), 1)
+        self.assertEqual(batches[0], ["test_building"])
+
+        buildings_with_areas = [
+            ("very_large_1", 30000),
+            ("very_large_2", 25000),
+            ("large_1", 1000),     
+            ("large_2", 800),      
+            ("large_3", 600),      
+            ("medium_1", 300),     
+            ("medium_2", 200),     
+            ("medium_3", 150),     
+            ("small_1", 80),       
+            ("small_2", 70),       
+            ("very_small_1", 30),  
+            ("very_small_2", 20),  
+            ("very_small_3", 10),  
+        ]
+        
+        base_batch_size = 6
+        batches = _create_adaptive_batches(buildings_with_areas, base_batch_size)
+        
+        expected_batches = [
+            ["very_large_1"],
+            ["very_large_2"],
+            ["large_1", "large_2", "large_3"],
+            ["medium_1", "medium_2", "medium_3", "small_1", "small_2", "small_3", "very_small_1"],
+            ["very_small_2", "very_small_3"],
+        ]
+        
+        self.assertEqual(batches, expected_batches)
