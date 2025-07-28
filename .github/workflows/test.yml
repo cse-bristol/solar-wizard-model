@@ -1,0 +1,30 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Nix
+      uses: cachix/install-nix-action@v23
+      with:
+        nix_path: nixpkgs=channel:nixos-22.05
+    
+    - name: Setup Nix environment (without GRASS)
+      run: |
+        export NIX_BUILD_GRASS=false
+        nix-shell --run "echo 'Nix environment ready'"
+    
+    - name: Run tests (excluding PVMAPS and database tests)
+      env:
+        NIX_BUILD_GRASS: false
+      run: |
+        nix-shell --run "python3 -m unittest discover -s . -p 'test_*.py' -v"
+      # Note: This excludes test_rasters.py (already skipped) and PVMAPS tests
+      # which require GRASS GIS and PVGIS data that aren't available in CI
