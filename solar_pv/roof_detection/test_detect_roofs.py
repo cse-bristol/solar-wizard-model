@@ -113,9 +113,9 @@ class RoofDetTestCase(ParameterisedTestCase):
         buildings_with_areas = [
             ("very_large_1", 30000),
             ("very_large_2", 25000),
-            ("large_1", 1000),     
-            ("large_2", 800),      
-            ("large_3", 600),      
+            ("large_1", 3000),     
+            ("large_2", 2800),      
+            ("large_3", 2600),      
             ("medium_1", 300),     
             ("medium_2", 200),     
             ("medium_3", 150),     
@@ -132,8 +132,9 @@ class RoofDetTestCase(ParameterisedTestCase):
         expected_batches = [
             ["very_large_1"],
             ["very_large_2"],
-            ["large_1", "large_2", "large_3"],
-            ["medium_1", "medium_2", "medium_3", "small_1", "small_2", "small_3", "very_small_1"],
+            ["large_1", "large_2"],
+            ["large_3"],
+            ["medium_1", "medium_2", "medium_3", "small_1", "small_2", "very_small_1"],
             ["very_small_2", "very_small_3"],
         ]
         

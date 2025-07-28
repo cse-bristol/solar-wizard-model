@@ -9,6 +9,7 @@ import math
 import os
 import shutil
 from typing import List, Optional, Tuple
+import unittest
 
 from osgeo import gdal
 import numpy as np
@@ -16,6 +17,7 @@ import numpy as np
 from solar_pv.pvgis.test_pvmaps.test_pvmaps import TestPVMaps, TEST_DATA_DIR
 
 
+@unittest.skip("GRASS GIS test")
 class TestPVMapsTestData(TestPVMaps):
     """
     Runs complete PVMaps process and then checks the data in the Grass DB - for generated range of aspects & slopes

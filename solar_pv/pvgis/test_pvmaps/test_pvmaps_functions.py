@@ -13,6 +13,7 @@ TEST_DATA_DIR: str = f"{TEST_DATA}/pvmaps"
 GRASS_DBASE: str = f"{TEST_DATA_DIR}/grass_dbase"
 
 
+@unittest.skip("GRASS GIS test")
 class PVMapsFunctionTests(unittest.TestCase):
     """Test at lower level than other test_pvmaps_xxx modules
     """

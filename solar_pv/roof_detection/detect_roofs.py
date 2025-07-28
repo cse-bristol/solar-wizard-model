@@ -321,23 +321,26 @@ def _create_adaptive_batches(buildings_with_areas: List[Tuple[str, float]], base
     buildings_with_areas must be sorted in descending order of area for this to work.
     """
     batches = []
+    current_batch_size = None
     current_batch = []
     
     for toid, area in buildings_with_areas:
-        current_batch.append(toid)
         if area > 10000:
             batch_size = 1
-        if area > 2000:
+        elif area > 2000:
             batch_size = max(2, base_batch_size // 10)
         elif area > 500:
             batch_size = max(3, base_batch_size // 5)
         else:
             batch_size = base_batch_size
         
-        if len(current_batch) >= batch_size:
+        if (current_batch_size is not None and batch_size != current_batch_size) or len(current_batch) >= batch_size:
             batches.append(current_batch)
             current_batch = []
-    
+        
+        current_batch.append(toid)
+        current_batch_size = batch_size
+        
     if current_batch:
         batches.append(current_batch)
     

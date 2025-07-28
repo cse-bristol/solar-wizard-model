@@ -5,8 +5,7 @@ from os.path import join
 from typing import Tuple, List
 
 import numpy as np
-from geojson import Polygon
-from shapely import wkt
+from shapely import wkt, Polygon
 
 from solar_pv import paths
 from solar_pv.datatypes import RoofPolygon

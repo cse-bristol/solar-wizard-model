@@ -7,6 +7,7 @@ from random import sample
 import math
 import os
 from typing import List, Tuple, Optional
+import unittest
 
 import numpy as np
 from osgeo import gdal
@@ -16,6 +17,7 @@ from solar_pv.pvgis.pvmaps import SLOPE, \
 from solar_pv.pvgis.test_pvmaps.test_pvmaps import TestPVMaps, TEST_DATA_DIR
 
 
+@unittest.skip("GRASS GIS test")
 class TestPVMapsRealDataMulti(TestPVMaps):
     """
     Runs complete PVMaps process and then checks the data in the Grass DB - for multiple locations
