@@ -57,6 +57,7 @@ def from_geojson_file(geojson_file: str):
         return from_geojson(f.read())
 
 
+# TODO replace with some shapely code, remove dependency on models.job_queue
 def bounds_polygon(pg_conn, job_id: int) -> Polygon:
     """
     Returns a shapely polygon of the job bounds, which will be buffered

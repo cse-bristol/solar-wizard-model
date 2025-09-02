@@ -56,28 +56,10 @@ class ZippedTiles:
     resolution: Resolution
     url: Optional[str]
     filename: str
+    product: str
 
     @classmethod
-    def from_url(cls, url: str, year: int):
-        zip_name = url.split('/')[-1]
-        zip_id = _zipfile_id(zip_name)
-        filename = f"{year}-{zip_name}"
-        resolution = _file_res(filename)
-        if zip_id is None:
-            raise ValueError(f"Could not read zip ID from file: {filename}")
-        if resolution is None:
-            # A resolution we don't care about: ignore
-            return None
-
-        return ZippedTiles(
-            zip_id=zip_id,
-            year=year,
-            resolution=resolution,
-            url=url,
-            filename=filename)
-
-    @classmethod
-    def from_filename(cls, filename: str, year: int = None):
+    def from_filename(cls, filename: str, year: int = None, product: str = None):
         basename = os.path.basename(filename)
         zip_id = _zipfile_id(basename)
         resolution = _file_res(basename)
@@ -93,7 +75,8 @@ class ZippedTiles:
             year=year,
             resolution=resolution,
             url=None,
-            filename=filename)
+            filename=filename,
+            product=product)
 
 
 @dataclass
@@ -105,9 +88,10 @@ class LidarTile:
     year: int
     resolution: Resolution
     filename: str
+    product: str
 
     @classmethod
-    def from_filename(cls, filename: str, year: int):
+    def from_filename(cls, filename: str, year: int, product: str):
         basename = os.path.basename(filename)
         tile_id = _tile_id(basename)
         resolution = _file_res(basename)
@@ -119,7 +103,8 @@ class LidarTile:
             tile_id=tile_id,
             year=year,
             resolution=resolution,
-            filename=filename)
+            filename=filename,
+            product=product)
 
     def __str__(self) -> str:
         return self.filename
@@ -173,11 +158,11 @@ def zip_to_geotiffs(zt: ZippedTiles, lidar_dir: str) -> List[LidarTile]:
             tiff_path = join(lidar_dir, tiff_filename)
             if not os.path.exists(tiff_path):
                 z.extract(zipinfo, lidar_dir)
-                tile = LidarTile.from_filename(tiff_path, zt.year)
+                tile = LidarTile.from_filename(tiff_path, zt.year, zt.product)
                 _asc_to_geotiff(lidar_dir, asc_filename, tiff_filename)
                 tiff_paths.append(tile)
             else:
-                tiff_paths.append(LidarTile.from_filename(join(lidar_dir, tiff_filename), zt.year))
+                tiff_paths.append(LidarTile.from_filename(join(lidar_dir, tiff_filename), zt.year, zt.product))
 
     return tiff_paths
 

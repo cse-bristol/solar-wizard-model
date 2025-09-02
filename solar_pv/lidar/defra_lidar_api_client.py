@@ -3,196 +3,160 @@
 """
 DEFRA LiDAR API client
 """
-import json
 import logging
 import os
-import shutil
+import zipfile
+from collections import defaultdict
 
-import time
-from datetime import datetime
+import shapely
 from os.path import join
 from typing import List
 
 import requests
-from psycopg2.sql import SQL, Identifier
+from shapely import Polygon
 
+from solar_pv.gdal_helpers import set_nodata_value
+from solar_pv.geos import get_grid_cells, fill_holes, project_geom
+from solar_pv.lidar.lidar import LidarTile
 from solar_pv.postgis import load_lidar
-from solar_pv.lidar.lidar import ZippedTiles, LidarTile, zip_to_geotiffs
-from solar_pv.paths import SQL_DIR
-
-_DEFRA_API = "https://environment.data.gov.uk/arcgis/rest"
+from typing import TypedDict
 
 
-def get_all_lidar(pg_conn, job_id: int, lidar_dir: str) -> None:
+class APIField(TypedDict):
+    id: str
+    label: str
+
+
+class APITile(TypedDict):
+    """API JSON response"""
+    product: APIField
+    year: APIField
+    resolution: APIField
+    tile: APIField
+    label: str
+    uri: str
+
+
+def get_all_lidar(pg_conn, bounds: Polygon, lidar_dir: str) -> None:
     """
-    Download LIDAR tiles unless already present, or if newer/better resolution
-    than those already downloaded.
-    """
-    job_tmp_dir = join(lidar_dir, f"tmp_{job_id}")
-    os.makedirs(job_tmp_dir, exist_ok=True)
-
-    gridded_bounds = _get_gridded_bounds(pg_conn, job_id)
-    job_tiles = []
-    logging.info(f"{len(gridded_bounds)} LiDAR jobs to run")
-    for rings in gridded_bounds:
-        job_tiles.extend(_get_lidar(rings=rings, lidar_dir=lidar_dir))
-
-    load_lidar(pg_conn, job_tiles, job_tmp_dir)
-
-    logging.info("Downloaded LiDAR")
-
-    try:
-        shutil.rmtree(job_tmp_dir)
-    except FileNotFoundError:
-        pass
-
-
-def _get_gridded_bounds(pg_conn, job_id: int) -> List[List[List[float]]]:
-    """
-    Cut the job polygon into 20km by 20km squares - otherwise the defra API rejects
-    the request as covering too large an area.
-
-    Also takes the convex hull of the polygon to simplify the request.
-    """
-    with pg_conn.cursor() as cursor:
-        with open(join(SQL_DIR, 'grid-for-lidar.sql')) as schema_file:
-            cursor.execute(SQL(schema_file.read()).format(
-                grid_table=Identifier(f'lidar_grid_{job_id}')), {'job_id': job_id})
-            rows = cursor.fetchall()
-            pg_conn.commit()
-            return [_wkt_to_rings(row[0]) for row in rows]
-
-
-def _wkt_to_rings(wkt: str) -> List[List[float]]:
-    if wkt.startswith("POLYGON"):
-        pairs = wkt.replace("POLYGON", "").replace("(", "").replace(")", "").split(",")
-        rings = []
-        for pair in pairs:
-            split = pair.split()
-            rings.append([float(split[0].strip()), float(split[1].strip())])
-        return rings
-    else:
-        logging.warning(f"LiDAR area was not a polygon. Occasional points and "
-                        f"linestrings might be possible results of intersecting "
-                        f"the grid with the bounding polygon: {wkt}")
-        return []
-
-
-def _get_lidar(rings: List[List[float]], lidar_dir: str) -> List[LidarTile]:
-    """
-    Get Lidar data from the defra internal API.
-
-    Bounding box coordinates should be in SRS 27700.
+    Download LIDAR tiles unless already present.
     """
     os.makedirs(lidar_dir, exist_ok=True)
 
-    lidar_job_id = _start_job(rings)
-    logging.info(f"Submitted lidar job {lidar_job_id}")
+    gridded_bounds = _get_gridded_bounds(bounds)
+    job_tiles = []
+    logging.info(f"Chopped boundary into {len(gridded_bounds)} chunks ")
+    for poly in gridded_bounds:
 
-    status = _wait_for_job(lidar_job_id)
-    if status == 'esriJobFailed':
-        raise ValueError(f"Lidar job {lidar_job_id} failed: status {status}")
-    logging.info(f"LiDAR job {lidar_job_id} completed with status {status}, downloading...")
+        tiles = _get_tiles(poly)
+        for tile in tiles:
+            job_tiles.append(_download_tile(tile, lidar_dir))
 
-    job_tiles = _download_tiles(lidar_job_id, lidar_dir)
-    logging.info(f"LiDAR data for {lidar_job_id} downloaded")
-    return job_tiles
+    load_lidar(pg_conn, job_tiles)
 
 
-def _start_job(rings: List[List[float]]) -> str:
-    url = f'{_DEFRA_API}/services/gp/DataDownload/GPServer/DataDownload/submitJob'
-    res = requests.get(url, params={
-        "f": "json",
-        "OutputFormat": 0,
-        "RequestMode": "Survey",
-        "AOI": json.dumps({
-            "geometryType": "esriGeometryPolygon",
-            "features": [{
-                "geometry": {
-                    "rings": [rings],
-                    "spatialReference": {
-                        "wkid": 27700,
-                        "latestWkid": 27700
-                    }
-                }
-            }],
-            "sr": {
-                "wkid": 27700,
-                "latestWkid": 27700
-            }
-        }),
+def _get_gridded_bounds(bounds: Polygon) -> List[Polygon]:
+    """
+    Cut the job polygon into 20km by 20km squares - otherwise the defra API rejects
+    the request as covering too large an area.
+    """
+    grid = get_grid_cells(bounds, 20000, 20000)
+    gridded = []
+    for cell in grid:
+        p = cell.intersection(bounds)
+        if p.geom_type == 'Polygon':
+            p = fill_holes(p).simplify(500)
+            p = project_geom(p, 27700, 4326)
+            gridded.append(p)
+
+    return gridded
+
+# types of product and resolution we like, in order of preference:
+_preferred_tiles = [
+    ["lidar_composite_last_return_dsm", 1],
+    ["national_lidar_programme_dsm", 1],
+    ["lidar_composite_last_return_dsm", 1],
+    ["lidar_composite_last_return_dsm", 2],
+    ["national_lidar_programme_dsm", 2],
+    ["lidar_composite_last_return_dsm", 2],
+]
+
+
+def _matching_tile(tiles: List[APITile], product: str, res: int):
+    for tile in tiles:
+        if tile["product"]["id"] == product and tile["resolution"]["id"] == str(res):
+            return tile
+
+
+def _get_tiles(bounds: Polygon) -> list:
+    """
+    Get the list of available tiles and try and find one download per tile that we like.
+    _preferred_tiles above defines the products and resolutions we prefer. In case
+    there is more than one tile with a given product/resolution, the latest is preferred.
+    """
+    url = 'https://environment.data.gov.uk/backend/catalog/api/tiles/collections/survey/search'
+    res = requests.post(url, json={
+        "type": "Polygon",
+        "coordinates": [shapely.get_coordinates(bounds).tolist()],
+    }, headers={
+        "Content-Type": "application/geo+json",
+        # "Host": "environment.data.gov.uk",
+        # "Referer": "https://environment.data.gov.uk/survey",
+        # "Origin": "https://environment.data.gov.uk",
     })
     res.raise_for_status()
     body = res.json()
-    if 'jobId' in body:
-        return body['jobId']
-    else:
-        raise ValueError(f"Received unhandled response while submitting LiDAR job: {body}")
+    tiles: List[APITile] = body['results']
+
+    by_tile = defaultdict(list)
+    for tile in tiles:
+        tile_id = tile['tile']['id']
+        by_tile[tile_id].append(tile)
+
+    to_download = []
+    for tile_id, tiles in by_tile.items():
+        tiles = sorted(tiles, key=lambda t: int(t["year"]["id"]), reverse=True)
+        for preferred_product, preferred_res in _preferred_tiles:
+            match = _matching_tile(tiles, preferred_product, preferred_res)
+            if match:
+                to_download.append(match)
+                break
+
+    return to_download
 
 
-def _wait_for_job(lidar_job_id: str) -> str:
-    while True:
-        status = _check_job_status(lidar_job_id)
-        if status not in ('esriJobSubmitted', 'esriJobExecuting'):
-            break
-        time.sleep(5)
-    return status
-
-
-def _check_job_status(lidar_job_id: str) -> str:
-    url = f'{_DEFRA_API}/services/gp/DataDownload/GPServer/DataDownload/jobs/{lidar_job_id}'
-    res = requests.get(url, params={"f": "json"})
-    res.raise_for_status()
-    body = res.json()
-    if 'jobStatus' in body:
-        return body['jobStatus']
-    else:
-        raise ValueError(f"Received unhandled response while checking LiDAR job status: {body}")
-
-
-def _download_tiles(lidar_job_id: str, lidar_dir: str) -> List[LidarTile]:
-    url = f'{_DEFRA_API}/directories/arcgisjobs/gp/datadownload_gpserver/{lidar_job_id}/scratch/results.json'
-    res = requests.get(url)
-    res.raise_for_status()
-    body = res.json()
-
-    products = [p for p in body['data'] if p['productName'] == "LIDAR Composite DSM"]
-
-    def year_to_key(y):
-        year = y['year']
-        return 9999 if year == 'Latest' else int(year)
-    latest = [max(p['years'], key=lambda year: year_to_key(year)) for p in products]
-
-    job_tiles = []
-    for la in latest:
-        for resolution in la['resolutions']:
-            for tile in resolution['tiles']:
-                year = int(la['year']) if la['year'] != 'Latest' else datetime.now().year
-                url = tile['url']
-                zt = ZippedTiles.from_url(url, year)
-                if zt:
-                    job_tiles.extend(_download_zip(zt, lidar_dir))
-
-    return job_tiles
-
-
-def _download_zip(zt: ZippedTiles, lidar_dir: str) -> List[LidarTile]:
+def _download_tile(tile: APITile, lidar_dir: str) -> LidarTile:
     """
-    Check if the zip should be used instead of existing versions,
-    extract the .asc files, and convert them to geotiffs.
+    Download a tile, if it doesn't already exist.
     """
-    res = requests.get(zt.url)
-    res.raise_for_status()
-    zip_path = join(lidar_dir, zt.filename)
-    with open(zip_path, 'wb') as wz:
-        wz.write(res.content)
-    logging.info(f"Downloaded {zt.url}")
+    fname = tile["label"] + ".zip"
+    zip_path = join(lidar_dir, fname)
 
-    tiff_paths = zip_to_geotiffs(zt, lidar_dir)
+    if not os.path.exists(zip_path):
+        logging.info(f"Downloading {tile['uri']} ...")
+        res = requests.get(tile["uri"], params={"subscription-key": "public"})
+        res.raise_for_status()
+        with open(zip_path, 'wb') as wz:
+            wz.write(res.content)
+        logging.info(f"Got {tile['uri']}")
+    else:
+        logging.info(f"Skipped {tile['uri']} - {fname} already exists")
 
-    try:
-        os.remove(zip_path)
-    except OSError:
-        pass
+    return _extract_tile(tile, lidar_dir, fname)
 
-    return tiff_paths
+
+def _extract_tile(tile: APITile, lidar_dir: str, zip_fname: str) -> LidarTile:
+    zip_path = join(lidar_dir, zip_fname)
+    with zipfile.ZipFile(zip_path) as z:
+        for zipinfo in z.infolist():
+            if zipinfo.filename.split(".")[-1] in ("tif", "tiff"):
+                tiff_path = join(lidar_dir, zipinfo.filename)
+                tiff = LidarTile.from_filename(tiff_path, int(tile["year"]["id"]), tile["product"]["id"])
+                if not os.path.exists(tiff_path):
+                    z.extract(zipinfo, lidar_dir)
+                    set_nodata_value(tiff_path)
+                break
+
+    if not tiff:
+        raise ValueError(f"No tiff found in zip {zip_path}")
+    return tiff

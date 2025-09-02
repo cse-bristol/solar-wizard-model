@@ -1,5 +1,6 @@
 # This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
+# TODO update
 import json
 import logging
 import os
@@ -10,7 +11,6 @@ import unittest
 from typing import List
 from unittest import mock
 
-from solar_pv.lidar.defra_lidar_api_client import _get_lidar, _wkt_to_rings
 from solar_pv.lidar.lidar import LidarTile
 from solar_pv.paths import PROJECT_ROOT
 
@@ -55,41 +55,13 @@ def mocked_requests_get(*args, **kwargs):
 
 class LidarTestCase(unittest.TestCase):
 
-    @mock.patch('requests.get', side_effect=mocked_requests_get)
-    def test_create_tiffs(self, mock_get):
-        tiffs = _get_lidar([[]], _lidar_dir)
-        self._assert_tiffs([
-            "tl3555_DSM_1M.tiff",
-            "tl3555_DSM_2M.tiff",
-            "tl3556_DSM_1M.tiff",
-            "tl3556_DSM_2M.tiff",
-        ], tiffs)
-
-    @mock.patch('requests.get', side_effect=mocked_requests_get)
-    def test_prefer_1m(self, mock_get):
-        _get_lidar([[]], _lidar_dir)
-
-        self.assertIn(
-            mock.call('https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARCOMP/LIDAR-DSM-1M-TL35ne.zip'),
-            mock_get.call_args_list)
-
-    # Makes real API calls:
-    # def test_get_lidar(self):
-    #     get_lidar(538822.036345393, 251052.546217778, 539221.042792384, 265279.552500898, _lidar_dir)
-    #     tiffs = os.listdir(_lidar_dir)
-    #     assert len(tiffs) == 100, f"Wanted 100 tiffs, found {len(tiffs)}:\n {tiffs}"
-
-    def test_wkt_to_rings(self):
-        self._parameterised_test([
-            ('POLYGON((417649.533067673 206504.504705884,417649.533067673 226504.504705884,426447.445894151 226504.504705884,417649.533067673 206504.504705884))',
-             [
-                 [417649.533067673, 206504.504705884],
-                 [417649.533067673, 226504.504705884],
-                 [426447.445894151, 226504.504705884],
-                 [417649.533067673, 206504.504705884],
-             ]),
-            ('POINT(0 1)', [])
-        ], _wkt_to_rings)
+    # @mock.patch('requests.get', side_effect=mocked_requests_get)
+    # def test_prefer_1m(self, mock_get):
+    #     _get_lidar([[]], _lidar_dir)
+    #
+    #     self.assertIn(
+    #         mock.call('https://environment.data.gov.uk/UserDownloads/interactive/5fe820254ea24f048900ea8d94dfdaa345872/LIDARCOMP/LIDAR-DSM-1M-TL35ne.zip'),
+    #         mock_get.call_args_list)
 
     def _create_file(self, name: str):
         open(join(_lidar_dir, name), 'w').close()

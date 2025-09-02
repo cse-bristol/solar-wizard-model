@@ -1,5 +1,9 @@
 # This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
+"""
+This was a one-off validation exercise and has not been kept up to date with code changes;
+it will no longer run without modifications.
+"""
 import logging
 import os
 import re
@@ -39,7 +43,7 @@ def _mask_sql(pg_uri: str, wkt: str) -> str:
         return sql
 
 
-def _load_lidar(pg_uri: str, wkt: str, solar_dir: str, horizon_search_radius: int):
+def _load_lidar(pg_uri: str, wkt: str, horizon_search_radius: int):
     coords = [float(c) for c in re.split(r"[a-zA-Z(), ]+", wkt) if c != '']
     e, n = coords[0], coords[1]
     hsr = horizon_search_radius
@@ -84,7 +88,7 @@ def _load_lidar(pg_uri: str, wkt: str, solar_dir: str, horizon_search_radius: in
             lidar_dir=os.environ.get("LIDAR_DIR"))
 
         with connection(pg_uri) as pg_conn:
-            load_lidar(pg_conn, lidar_tiles, solar_dir)
+            load_lidar(pg_conn, lidar_tiles)
 
 
 def _get_1m_lidar(pg_conn, wkt: str, buffer: int, output_file: str):
@@ -172,7 +176,7 @@ def model(project_name: str, kwp: float, wkt: str):
     pvmaps_dir = join(solar_dir, "pvmaps")
     os.makedirs(pvmaps_dir, exist_ok=True)
 
-    _load_lidar(pg_uri, wkt, solar_dir, horizon_search_radius)
+    _load_lidar(pg_uri, wkt, horizon_search_radius)
 
     elevation_raster, mask_raster = _gen_rasters(
         pg_uri, solar_dir, wkt, horizon_search_radius

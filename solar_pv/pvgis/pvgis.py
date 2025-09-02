@@ -150,19 +150,19 @@ def _write_results_to_db(pg_uri: str,
         raster_table = f"{schema}.kwh_year"
 
         create_raster_table(pg_conn, raster_table, drop=True)
-        rasters_to_postgis(pg_conn, [yearly_kwh_raster], raster_table, solar_dir, POSTGIS_TILESIZE, nodata_val=LIDAR_NODATA, srid=27700)
+        rasters_to_postgis(pg_conn, [yearly_kwh_raster], raster_table, POSTGIS_TILESIZE, nodata_val=LIDAR_NODATA, srid=27700)
         raster_tables.append(raster_table)
 
         for i, raster in enumerate(monthly_wh_rasters):
             raster_table = f"{schema}.month_{str(i + 1).zfill(2)}_wh"
             create_raster_table(pg_conn, raster_table, drop=True)
-            rasters_to_postgis(pg_conn, [raster], raster_table, solar_dir, POSTGIS_TILESIZE, nodata_val=LIDAR_NODATA, srid=27700)
+            rasters_to_postgis(pg_conn, [raster], raster_table, POSTGIS_TILESIZE, nodata_val=LIDAR_NODATA, srid=27700)
             raster_tables.append(raster_table)
 
         for i, raster in enumerate(horizon_rasters):
             raster_table = f"{schema}.horizon_{str(i).zfill(2)}"
             create_raster_table(pg_conn, raster_table, drop=True)
-            rasters_to_postgis(pg_conn, [raster], raster_table, solar_dir, POSTGIS_TILESIZE, nodata_val=LIDAR_NODATA, srid=27700)
+            rasters_to_postgis(pg_conn, [raster], raster_table, POSTGIS_TILESIZE, nodata_val=LIDAR_NODATA, srid=27700)
             raster_tables.append(raster_table)
 
     return raster_tables

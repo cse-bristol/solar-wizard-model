@@ -96,7 +96,7 @@ def generate_rasters(pg_uri: str,
         solar_dir, srid, elevation_raster, mask_raster_buf1, mask_raster_buf0, slope_raster, aspect_raster)
 
     logging.info("Loading raster data...")
-    _load_rasters_to_db(pg_uri, job_id, job_lidar_dir, solar_dir, elevation_raster, aspect_raster, slope_raster, mask_raster_buf0)
+    _load_rasters_to_db(pg_uri, job_id, job_lidar_dir, elevation_raster, aspect_raster, slope_raster, mask_raster_buf0)
 
     return elevation_raster, mask_raster_buf1, slope_raster, aspect_raster, res
 
@@ -155,7 +155,6 @@ def _copy_to_dir(src: str, dst_dir: str):
 def _load_rasters_to_db(pg_uri: str,
                         job_id: int,
                         job_lidar_dir: str,
-                        solar_dir: str,
                         cropped_lidar: str,
                         aspect_raster: str,
                         slope_raster: str,
@@ -173,10 +172,10 @@ def _load_rasters_to_db(pg_uri: str,
         slope_raster = _copy_to_dir(slope_raster, job_lidar_dir)
         mask_raster = _copy_to_dir(mask_raster, job_lidar_dir)
 
-        rasters_to_postgis(pg_conn, [cropped_lidar], elevation_table, solar_dir, POSTGIS_TILESIZE, nodata_val=LIDAR_NODATA)
-        rasters_to_postgis(pg_conn, [aspect_raster], aspect_table, solar_dir, POSTGIS_TILESIZE, nodata_val=LIDAR_NODATA)
-        rasters_to_postgis(pg_conn, [slope_raster], slope_table, solar_dir, POSTGIS_TILESIZE, nodata_val=LIDAR_NODATA)
-        rasters_to_postgis(pg_conn, [mask_raster], mask_table, solar_dir, POSTGIS_TILESIZE, nodata_val=0)
+        rasters_to_postgis(pg_conn, [cropped_lidar], elevation_table, POSTGIS_TILESIZE, nodata_val=LIDAR_NODATA)
+        rasters_to_postgis(pg_conn, [aspect_raster], aspect_table, POSTGIS_TILESIZE, nodata_val=LIDAR_NODATA)
+        rasters_to_postgis(pg_conn, [slope_raster], slope_table, POSTGIS_TILESIZE, nodata_val=LIDAR_NODATA)
+        rasters_to_postgis(pg_conn, [mask_raster], mask_table, POSTGIS_TILESIZE, nodata_val=0)
 
         sql_command(
             pg_conn,

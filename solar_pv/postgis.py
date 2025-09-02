@@ -3,6 +3,7 @@
 import logging
 
 import os
+import tempfile
 from collections import defaultdict
 from os.path import join
 
@@ -15,61 +16,58 @@ from solar_pv.lidar.lidar import LidarTile, Resolution
 from solar_pv import tables
 
 
-def load_lidar(pg_conn, tiles: List[LidarTile], temp_dir: str):
+def load_lidar(pg_conn, tiles: List[LidarTile]):
     if len(tiles) == 0:
         return
 
-    tiles_by_res = _split_by_res(tiles)
-    os.makedirs(temp_dir, exist_ok=True)
+    tiles_by_res = defaultdict(list)
+    for tile in tiles:
+        tiles_by_res[tile.resolution].append(tile)
     errors = 0
+    loaded = 0
 
     # tile sizes of 1000/500/250 mean that all resolutions have the same tile sizes
     # and all the different lidar sources (Eng/Scot/Wales) tiles can be chopped
-    # up to fit exactly
-    # This is relied on by functionality in the lidar coverage model and the lidar
-    # tile preparation for the heat demand model
-    r = _tiles_to_insert(pg_conn, tiles_by_res[Resolution.R_50CM], Resolution.R_50CM)
-    errors += rasters_to_postgis(pg_conn, r, "models.lidar_50cm", temp_dir, tile_size=1000, allow_errs=True)
+    # up to fit exactly:
+    for res, tile_size, table in [[Resolution.R_50CM, 1000, "models.lidar_50cm"],
+                                  [Resolution.R_1M,    500, "models.lidar_1m"],
+                                  [Resolution.R_2M,    250, "models.lidar_2m"]]:
+        res_tiles = _tiles_to_insert(pg_conn, tiles_by_res[res], res)
+        paths = [t.filename for t in res_tiles]
+        errors += rasters_to_postgis(pg_conn, paths, table, tile_size=tile_size, allow_errs=True)
+        loaded += len(res_tiles)
+        for tile in res_tiles:
+            set_tile_metadata(pg_conn, tile, table)
 
-    r = _tiles_to_insert(pg_conn, tiles_by_res[Resolution.R_1M], Resolution.R_1M)
-    errors += rasters_to_postgis(pg_conn, r, "models.lidar_1m", temp_dir, tile_size=500, allow_errs=True)
-
-    r = _tiles_to_insert(pg_conn, tiles_by_res[Resolution.R_2M], Resolution.R_2M)
-    errors += rasters_to_postgis(pg_conn, r, "models.lidar_2m", temp_dir, tile_size=250, allow_errs=True)
-
-    error_pct = round(errors / len(tiles) * 100, 2)
-    logging.info(f"LiDAR loaded, {errors} / {len(tiles)} ({error_pct}%) errored")
+    error_pct = round(errors / loaded * 100, 2) if loaded != 0 else 0.0
+    logging.info(f"LiDAR loaded, {errors} / {loaded} ({error_pct}%) errored")
 
 
-def rasters_to_postgis(pg_conn, rasters: List[str], table: str, temp_dir: str, tile_size: int,
+def rasters_to_postgis(pg_conn, rasters: List[str], table: str, tile_size: int,
                        allow_errs: bool = False,
                        nodata_val: int = None,
                        srid: int = None) -> int:
     if len(rasters) == 0:
         return 0
 
-    sql_file = join(temp_dir, "raster.sql")
-    errors = 0
-    nodata = f'-N "{nodata_val}"' if nodata_val is not None else ''
-    srid = f'-s "{int(srid)}"' if srid is not None else ''
-    for raster in rasters:
-        try:
-            cmd = f'raster2pgsql -n filename {nodata} {srid} -x -a -R -t "{tile_size}x{tile_size}" "{raster}" "{table}" > {sql_file}'
-            run(cmd)
-            sql_script(pg_conn, sql_file)
-        except Exception as e:
-            pg_conn.rollback()
-            logging.warning("Failed to import raster", exc_info=e)
-            errors += 1
-            if not allow_errs:
-                raise e
+    with tempfile.TemporaryDirectory() as temp_dir:
+        sql_file = join(temp_dir, "raster.sql")
+        errors = 0
+        nodata = f'-N "{nodata_val}"' if nodata_val is not None else ''
+        srid = f'-s "{int(srid)}"' if srid is not None else ''
+        for raster in rasters:
+            try:
+                cmd = f'raster2pgsql -n filename {nodata} {srid} -x -a -R -t "{tile_size}x{tile_size}" "{raster}" "{table}" > {sql_file}'
+                run(cmd)
+                sql_script(pg_conn, sql_file)
+            except Exception as e:
+                pg_conn.rollback()
+                logging.warning("Failed to import raster", exc_info=e)
+                errors += 1
+                if not allow_errs:
+                    raise e
 
     add_raster_constraints(pg_conn, table)
-
-    try:
-        os.remove(sql_file)
-    except OSError:
-        pass
 
     return errors
 
@@ -94,12 +92,12 @@ def create_raster_table(pg_conn, raster_table: str, drop: bool = False) -> None:
     )
 
 
-def _tiles_to_insert(pg_conn, paths: List[str], res: Resolution) -> List[str]:
+def _tiles_to_insert(pg_conn, tiles: List[LidarTile], res: Resolution) -> List[LidarTile]:
     """
     Returns the tiles in the `tiles` list that are
     not already on the database.
     """
-    if len(paths) == 0:
+    if len(tiles) == 0:
         return []
 
     if res == Resolution.R_50CM:
@@ -111,7 +109,7 @@ def _tiles_to_insert(pg_conn, paths: List[str], res: Resolution) -> List[str]:
     else:
         raise ValueError(f"Unknown resolution {res}")
 
-    return sql_command(
+    wanted_paths = sql_command(
         pg_conn,
         """
         WITH ins as (
@@ -122,20 +120,12 @@ def _tiles_to_insert(pg_conn, paths: List[str], res: Resolution) -> List[str]:
         LEFT JOIN {table} ON ins.filepath LIKE '%%' || {table}.filename 
         WHERE {table}.filename is null;
         """,
-        bindings={"paths": paths},
+        bindings={"paths": [t.filename for t in tiles]},
         table=Identifier(*table),
         result_extractor=lambda rows: [row[0] for row in rows])
 
-
-def _split_by_res(tiles: List[LidarTile]) -> Dict[Resolution, List[str]]:
-    t_res = {
-        Resolution.R_50CM: [],
-        Resolution.R_1M: [],
-        Resolution.R_2M: [],
-    }
-    for tile in tiles:
-        t_res[tile.resolution].append(tile.filename)
-    return t_res
+    wanted_paths = set(wanted_paths)
+    return [t for t in tiles if t.filename in wanted_paths]
 
 
 def _has_raster_constraints(pg_conn, table: str) -> bool:
@@ -154,8 +144,14 @@ def _has_raster_constraints(pg_conn, table: str) -> bool:
 
 def add_raster_constraints(pg_conn, table: str):
     """
-    Raster table constraints need to be added after there is some data in the
-    table, as they're calculated from the existing files.
+    Raster table constraints need to be added after there is some data in the table,
+    as they're calculated from the existing files.
+
+    * Don't set the 'regular_blocking' restraint, as we allow each resolution to contain
+    multiple tiles with the same extent from different lidar sources.
+    * Don't set the 'extent' restraint, as we load tiles in multiple batches, after the
+    setting of the constraints, and the extent allowed would be calculated from the
+    first batch of tiles only.
     """
     if not _has_raster_constraints(pg_conn, table):
         schema, table = tuple(table.split('.')) if "." in table else (None, table)
@@ -169,6 +165,27 @@ def add_raster_constraints(pg_conn, table: str):
                       "schema": schema})
 
 
+def set_tile_metadata(pg_conn, tile: LidarTile, table: str):
+    """
+    Update the raster entries created from the tile with the year and product of the tile.
+    """
+    schema, table = tuple(table.split('.')) if "." in table else (None, table)
+    sql_command(
+        pg_conn,
+        """
+        UPDATE {table} SET year = %(year)s, product = %(product)s 
+        WHERE filename = %(file)s
+        """,
+        table=Identifier(schema, table),
+        bindings={
+            "year": tile.year,
+            "product": tile.product,
+            "file": os.path.basename(tile.filename),
+        }
+    )
+
+
+# TODO remove dependency on models.job_queue
 def _coverage(pg_conn, job_id: int, res: Resolution) -> float:
     """
     This won't be exact due to not snapping the bounds polygon
@@ -202,6 +219,7 @@ def _coverage(pg_conn, job_id: int, res: Resolution) -> float:
         result_extractor=lambda rows: rows[0][0] or 0.0)
 
 
+# TODO remove dependency on models.job_queue
 def _target_resolution(pg_conn, job_id) -> Resolution:
     _50cm_cov = _coverage(pg_conn, job_id, Resolution.R_50CM)
     _1m_cov = _coverage(pg_conn, job_id, Resolution.R_1M)
@@ -221,6 +239,7 @@ def _target_resolution(pg_conn, job_id) -> Resolution:
     return target_res
 
 
+# TODO remove dependency on models.job_queue
 def get_merged_lidar_tiles(pg_conn, job_id, output_dir: str) -> List[str]:
     target_res = _target_resolution(pg_conn, job_id)
 
@@ -237,6 +256,7 @@ def get_merged_lidar_tiles(pg_conn, job_id, output_dir: str) -> List[str]:
                 ST_Resample(l.rast, (SELECT rast FROM models.lidar_2m ORDER BY filename LIMIT 1)) AS rast, 
                 ST_UpperLeftX(l.rast) x, 
                 ST_UpperLeftY(l.rast) y,
+                year,
                 0.5 AS res
             FROM models.job_queue q 
             INNER JOIN models.lidar_50cm l ON st_intersects(l.rast, q.bounds)
@@ -246,6 +266,7 @@ def get_merged_lidar_tiles(pg_conn, job_id, output_dir: str) -> List[str]:
                 ST_Resample(l.rast, (SELECT rast FROM models.lidar_2m ORDER BY filename LIMIT 1)) AS rast, 
                 ST_UpperLeftX(l.rast) x, 
                 ST_UpperLeftY(l.rast) y,
+                year,
                 1.0 AS res
             FROM models.job_queue q 
             INNER JOIN models.lidar_1m l ON st_intersects(l.rast, q.bounds)
@@ -255,13 +276,14 @@ def get_merged_lidar_tiles(pg_conn, job_id, output_dir: str) -> List[str]:
                 l.rast, 
                 ST_UpperLeftX(l.rast) x, 
                 ST_UpperLeftY(l.rast) y, 
+                year,
                 2.0 AS res
             FROM models.job_queue q 
             INNER JOIN models.lidar_2m l ON st_intersects(l.rast, q.bounds)
             WHERE q.job_id = %(job_id)s
         )
         SELECT
-            x, y, ST_AsGDALRaster(ST_Union(rast ORDER BY res DESC), 'GTiff') AS rast 
+            x, y, ST_AsGDALRaster(ST_Union(rast ORDER BY year ASC, res DESC), 'GTiff') AS rast 
         FROM all_res
         GROUP BY x, y
         """
@@ -273,6 +295,7 @@ def get_merged_lidar_tiles(pg_conn, job_id, output_dir: str) -> List[str]:
                 ST_Resample(l.rast, (SELECT rast FROM models.lidar_1m ORDER BY filename LIMIT 1)) AS rast, 
                 ST_UpperLeftX(l.rast) x, 
                 ST_UpperLeftY(l.rast) y,
+                year,
                 0.5 AS res
             FROM models.job_queue q 
             INNER JOIN models.lidar_50cm l ON st_intersects(l.rast, q.bounds)
@@ -282,13 +305,14 @@ def get_merged_lidar_tiles(pg_conn, job_id, output_dir: str) -> List[str]:
                 l.rast, 
                 ST_UpperLeftX(l.rast) x, 
                 ST_UpperLeftY(l.rast) y, 
+                year,
                 1.0 AS res
             FROM models.job_queue q 
             INNER JOIN models.lidar_1m l ON st_intersects(l.rast, q.bounds)
             WHERE q.job_id = %(job_id)s
         )
         SELECT
-            x, y, ST_AsGDALRaster(ST_Union(rast ORDER BY res DESC), 'GTiff') AS rast 
+            x, y, ST_AsGDALRaster(ST_Union(rast ORDER BY year ASC, res DESC), 'GTiff') AS rast 
         FROM all_res
         GROUP BY x, y
         """
@@ -309,6 +333,7 @@ def get_merged_lidar_tiles(pg_conn, job_id, output_dir: str) -> List[str]:
     return paths
 
 
+# TODO remove dependency on models.job_queue
 def raster_tile_coverage_count(pg_conn, job_id: int) -> int:
     target_res = _target_resolution(pg_conn, job_id)
 

@@ -20,7 +20,9 @@ END $$;
 CREATE TABLE IF NOT EXISTS models.lidar_50cm (
     rid serial PRIMARY KEY,
     rast raster NOT NULL,
-    filename text NOT NULL
+    filename text NOT NULL,
+    year int NOT NULL,
+    product text NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS lidar_50cm_idx ON models.lidar_50cm USING gist (st_convexhull(rast));
@@ -28,7 +30,9 @@ CREATE INDEX IF NOT EXISTS lidar_50cm_idx ON models.lidar_50cm USING gist (st_co
 CREATE TABLE IF NOT EXISTS models.lidar_1m (
     rid serial PRIMARY KEY,
     rast raster NOT NULL,
-    filename text NOT NULL
+    filename text NOT NULL,
+    year int NOT NULL,
+    product text NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS lidar_1m_idx ON models.lidar_1m USING gist (st_convexhull(rast));
@@ -36,7 +40,9 @@ CREATE INDEX IF NOT EXISTS lidar_1m_idx ON models.lidar_1m USING gist (st_convex
 CREATE TABLE IF NOT EXISTS models.lidar_2m (
     rid serial PRIMARY KEY,
     rast raster NOT NULL,
-    filename text NOT NULL
+    filename text NOT NULL,
+    year int NOT NULL,
+    product text NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS lidar_2m_idx ON models.lidar_2m USING gist (st_convexhull(rast));

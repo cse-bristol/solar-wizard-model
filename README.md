@@ -86,7 +86,6 @@ Optional variables:
     * LIDAR-DSM-2M-ENGLAND-EA
   * scotland
   * wales
-* `USE_LIDAR_FROM_API` - This can be ignored unless using `solar_pv.lidar.bulk_lidar_client` to load LiDAR. If set to a value Python will coerce to True, allow falling back to the DEFRA LiDAR API if relevant LiDAR tiles are not found in the bulk LiDAR. This can be left unset, in which case the API will never be used.
 
 ## Tests
 

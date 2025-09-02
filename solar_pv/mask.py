@@ -28,12 +28,3 @@ def buildings_mask_sql(pg_uri: str, job_id: int, buffer: int) -> str:
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
             buffer=Literal(buffer),
         ).as_string(pg_conn)
-
-
-def bounds_mask_sql(pg_uri: str, job_id: int, srid: int) -> str:
-    with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
-        return SQL(
-            "SELECT ST_Transform(bounds, {srid}) "
-            "FROM models.job_queue q "
-            "WHERE q.job_id={job_id} "
-        ).format(job_id=Literal(job_id), srid=Literal(srid)).as_string(pg_conn)

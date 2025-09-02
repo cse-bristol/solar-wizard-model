@@ -4,7 +4,9 @@ import json
 import logging
 import os
 import shlex
+import shutil
 import subprocess
+import tempfile
 import textwrap
 from typing import List, Tuple, Union, Callable
 
@@ -300,6 +302,43 @@ def merge(files: List[str], output_file: str, res: float, nodata: int):
     logging.info(f"Merging tiles {files} into {output_file}...")
     run(f"gdal_merge.py -ps {res} {res} -n {nodata} -a_nodata {nodata} -o {output_file} {' '.join(files)}")
     return output_file
+
+
+def set_nodata_value(input_tiff: str, nodata: int = -9999, band: int = 1):
+    """
+    Set the nodata value of a tiff.
+
+    Creates a copy of the tiff, with 'TILED=YES' and 'COMPRESS=PACKBITS' set.
+    """
+    gdal.UseExceptions()
+
+    dataset = gdal.Open(input_tiff)
+    curr_nodata = dataset.GetRasterBand(band).GetNoDataValue()
+    dataset = None
+    output_tiff = input_tiff + ".fixed.tiff"
+
+    gdal.Translate(
+        output_tiff,
+        input_tiff,
+        noData=nodata,
+        creationOptions=['TILED=YES', 'COMPRESS=PACKBITS']
+    )
+
+    if curr_nodata != nodata:
+        dataset = gdal.Open(output_tiff, gdal.GA_Update)
+        band_obj = dataset.GetRasterBand(band)
+        array = band_obj.ReadAsArray()
+        array[array == curr_nodata] = nodata
+        band_obj.WriteArray(array)
+        dataset.FlushCache()
+        dataset = None
+
+    old_tiff = input_tiff + ".old"
+    shutil.move(input_tiff, old_tiff)
+    shutil.move(output_tiff, input_tiff)
+
+    if os.path.exists(old_tiff):
+        os.remove(old_tiff)
 
 
 def count_raster_pixels(tiff: str, value, band: int = 1) -> int:
