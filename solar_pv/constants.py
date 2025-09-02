@@ -46,3 +46,10 @@ POSTGIS_TILESIZE = 256
 # These tend to use a lot of memory. This will only slow down the horizon profiling,
 # which only takes a few minutes anyway.
 MAX_PVMAPS_PROCESSES = 6
+
+# Don't use more than this many CPUs for roof plane detection (otherwise it uses 3/4
+# of what's available)
+ROOFDET_MAX_CPUS = 100
+
+# Max area of buildings to run roof plane detection on
+ROOFDET_MAX_AREA = 50000

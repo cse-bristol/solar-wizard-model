@@ -24,7 +24,7 @@ from solar_pv.postgis import pixels_for_buildings
 from solar_pv import tables
 from solar_pv.constants import RANSAC_LARGE_BUILDING, \
     RANSAC_LARGE_MAX_TRIALS, RANSAC_SMALL_MAX_TRIALS, RANSAC_SMALL_BUILDING, \
-    RANSAC_MEDIUM_MAX_TRIALS, ROOFDET_MAX_MAE
+    RANSAC_MEDIUM_MAX_TRIALS, ROOFDET_MAX_MAE, ROOFDET_MAX_CPUS, ROOFDET_MAX_AREA
 from solar_pv.roof_detection.detect_messy_roofs import detect_messy_roofs
 from solar_pv.roof_detection.detsac import DETSACRegressorForLIDAR
 from solar_pv.roof_detection.merge_adjacent import merge_adjacent
@@ -41,7 +41,7 @@ _PG_CONN_SEMAPHORE = mp.Semaphore(_SEMAPHORE_MAX_CONN)
 
 def _roof_det_cpu_count():
     """Use 3/4s of available CPUs for roof plane detection"""
-    return int(get_cpu_count() * 0.75)
+    return min(int(get_cpu_count() * 0.75), ROOFDET_MAX_CPUS)
 
 
 def detect_roofs(pg_uri: str,
@@ -309,7 +309,9 @@ def _buildings_with_areas(pg_uri: str, job_id: int) -> List[Tuple[str, float]]:
             """SELECT toid, ST_Area(geom_27700) as area
                FROM {buildings} 
                WHERE exclusion_reason IS NULL
+               AND ST_Area(geom_27700) <= %(max_area)s
                ORDER BY ST_Area(geom_27700) DESC;""",
+            bindings={"max_area": ROOFDET_MAX_AREA},
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
             result_extractor=lambda rows: [(row['toid'], row['area']) for row in rows])
 
