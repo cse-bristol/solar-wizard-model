@@ -169,6 +169,8 @@ def _aggregate_pixel_data(roof_planes,
         roof_plane['horizon'] = [0 for _ in range(len(horizon_fields))]
 
         variations = [{'geom': geom_min, 'suffix': 'min'},
+                      # The max is very unrealistic: just use the min for now:
+                      {'geom': geom_min, 'suffix': 'avg'},
                       {'geom': geom_max, 'suffix': 'max'}]
 
         for variation in variations:
@@ -217,15 +219,16 @@ def _aggregate_pixel_data(roof_planes,
             roof_plane['job_id'] = job_id
             roof_plane['peak_power_per_m2'] = peak_power_per_m2
 
-            roof_plane['area_avg'] = (roof_plane['area_min'] + roof_plane['area_max']) / 2
-            roof_plane['kwh_year_avg'] = (roof_plane['kwh_year_min'] + roof_plane['kwh_year_max']) / 2
-            roof_plane['kwp_avg'] = (roof_plane['kwp_min'] + roof_plane['kwp_max']) / 2
-            roof_plane['kwh_per_kwp'] = roof_plane['kwh_year_avg'] / roof_plane['kwp_avg']
-
-            for i, wh_monthday in enumerate(wh_month_fields):
-                _min = roof_plane[f'{_month_field(i)}_min']
-                _max = roof_plane[f'{_month_field(i)}_max']
-                roof_plane[f'{_month_field(i)}_avg'] = round((_min + _max) / 2, 2)
+            # The max is very unrealistic: just use the min for now (avg added as a variation above):
+            # roof_plane['area_avg'] = (roof_plane['area_min'] + roof_plane['area_max']) / 2
+            # roof_plane['kwh_year_avg'] = (roof_plane['kwh_year_min'] + roof_plane['kwh_year_max']) / 2
+            # roof_plane['kwp_avg'] = (roof_plane['kwp_min'] + roof_plane['kwp_max']) / 2
+            # roof_plane['kwh_per_kwp'] = roof_plane['kwh_year_avg'] / roof_plane['kwp_avg']
+            #
+            # for i, wh_monthday in enumerate(wh_month_fields):
+            #     _min = roof_plane[f'{_month_field(i)}_min']
+            #     _max = roof_plane[f'{_month_field(i)}_max']
+            #     roof_plane[f'{_month_field(i)}_avg'] = round((_min + _max) / 2, 2)
 
             roofs_to_write.append(roof_plane)
 
