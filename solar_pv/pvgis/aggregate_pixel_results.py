@@ -218,12 +218,12 @@ def _aggregate_pixel_data(roof_planes,
             roof_plane['horizon'] = [round(h / contributing_pixels, 2) for h in roof_plane['horizon']]
             roof_plane['job_id'] = job_id
             roof_plane['peak_power_per_m2'] = peak_power_per_m2
+            roof_plane['kwh_per_kwp'] = roof_plane['kwh_year_avg'] / roof_plane['kwp_avg']
 
             # The max is very unrealistic: just use the min for now (avg added as a variation above):
             # roof_plane['area_avg'] = (roof_plane['area_min'] + roof_plane['area_max']) / 2
             # roof_plane['kwh_year_avg'] = (roof_plane['kwh_year_min'] + roof_plane['kwh_year_max']) / 2
             # roof_plane['kwp_avg'] = (roof_plane['kwp_min'] + roof_plane['kwp_max']) / 2
-            # roof_plane['kwh_per_kwp'] = roof_plane['kwh_year_avg'] / roof_plane['kwp_avg']
             #
             # for i, wh_monthday in enumerate(wh_month_fields):
             #     _min = roof_plane[f'{_month_field(i)}_min']

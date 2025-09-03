@@ -98,6 +98,8 @@ def _tiles_to_insert(pg_conn, tiles: List[LidarTile], res: Resolution) -> List[L
     """
     Returns the tiles in the `tiles` list that are
     not already on the database.
+    TODO ideally this would still say we should insert a file if the name matches but the
+         year or product doesn't...
     """
     if len(tiles) == 0:
         return []
