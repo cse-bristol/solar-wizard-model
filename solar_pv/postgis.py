@@ -41,6 +41,8 @@ def load_lidar(pg_conn, tiles: List[LidarTile]):
 
     error_pct = round(errors / loaded * 100, 2) if loaded != 0 else 0.0
     logging.info(f"LiDAR loaded, {errors} / {loaded} ({error_pct}%) errored")
+    if errors > 0:
+        raise ValueError("Failed to import some rasters")
 
 
 def rasters_to_postgis(pg_conn, rasters: List[str], table: str, tile_size: int,
