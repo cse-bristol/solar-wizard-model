@@ -40,6 +40,9 @@ class APITile(TypedDict):
 def get_all_lidar(pg_conn, bounds: Polygon, lidar_dir: str) -> None:
     """
     Download LIDAR tiles unless already present.
+
+    TODO ideally this would track year of existing tile rather than going purely
+         by filename.
     """
     os.makedirs(lidar_dir, exist_ok=True)
 
@@ -146,7 +149,12 @@ def _download_tile(tile: APITile, lidar_dir: str) -> LidarTile:
 
 
 def _extract_tile(tile: APITile, lidar_dir: str, zip_fname: str) -> LidarTile:
+    """
+    Doesn't extract the tile if a file already exists with the same name.
+    Assumes each zipfile only has one tile in it.
+    """
     zip_path = join(lidar_dir, zip_fname)
+    tiff = None
     with zipfile.ZipFile(zip_path) as z:
         for zipinfo in z.infolist():
             if zipinfo.filename.split(".")[-1] in ("tif", "tiff"):

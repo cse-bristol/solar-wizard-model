@@ -7,7 +7,7 @@ from typing import List, Optional
 import os
 
 
-from solar_pv import tables, paths
+from solar_pv import tables, paths, stage
 from solar_pv.db_funcs import connection
 from solar_pv.lidar.lidar import LIDAR_NODATA
 from solar_pv.postgis import rasters_to_postgis, create_raster_table
@@ -132,6 +132,8 @@ def pvgis(pg_uri: str,
                             resolution=resolution_metres,
                             peak_power_per_m2=peak_power_per_m2,
                             system_loss=SYSTEM_LOSS)
+
+    stage.set_stage(pg_uri, job_id, stage.Stage.PVGIS)
 
 
 def _write_results_to_db(pg_uri: str,

@@ -9,7 +9,7 @@ from psycopg2.sql import Identifier, SQL
 from typing import Tuple, Optional
 
 import psycopg2.extras
-from solar_pv import tables
+from solar_pv import tables, stage
 from solar_pv import gdal_helpers
 from solar_pv.db_funcs import count, connection, sql_command
 from solar_pv.lidar.lidar import LIDAR_NODATA
@@ -44,7 +44,7 @@ def generate_rasters(pg_uri: str,
     mask_raster_buf1 = join(solar_dir, 'mask_buf1.tif')
     mask_raster_buf0 = join(solar_dir, 'mask_buf0.tif')
 
-    if count(pg_uri, tables.schema(job_id), tables.MASK) > 0:
+    if stage.get_stage(pg_uri, job_id) >= stage.Stage.GENERATE_RASTERS:
         logging.info("Not creating rasters, raster data already loaded.")
         res = gdal_helpers.get_res(elevation_vrt)
         return (join(solar_dir, ELEVATION_27700_TIF),
@@ -98,6 +98,7 @@ def generate_rasters(pg_uri: str,
     logging.info("Loading raster data...")
     _load_rasters_to_db(pg_uri, job_id, job_lidar_dir, elevation_raster, aspect_raster, slope_raster, mask_raster_buf0)
 
+    stage.set_stage(pg_uri, job_id, stage.Stage.GENERATE_RASTERS)
     return elevation_raster, mask_raster_buf1, slope_raster, aspect_raster, res
 
 

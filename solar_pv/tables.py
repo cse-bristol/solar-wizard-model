@@ -23,6 +23,9 @@ BUILDINGS_TABLE = 'buildings'
 SIMPLIFIED_BUILDING_GEOM_TABLE = 'simple_building_geoms'
 """Building geometries simplified for export for solar wizard frontend"""
 
+STAGE_TABLE = 'stage'
+"""Tracker for which model stage has been reached"""
+
 ELEVATION = 'elevation'
 """Elevation raster for job"""
 

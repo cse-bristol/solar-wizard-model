@@ -55,7 +55,8 @@ DO $$ BEGIN
         'NO_LIDAR_COVERAGE',
         'OUTDATED_LIDAR_COVERAGE',
         'NO_ROOF_PLANES_DETECTED',
-        'ALL_ROOF_PLANES_UNUSABLE'
+        'ALL_ROOF_PLANES_UNUSABLE',
+        'TOO_SMALL'
     );
 EXCEPTION
     WHEN duplicate_object THEN null;

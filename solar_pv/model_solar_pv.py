@@ -113,6 +113,8 @@ def model_solar_pv(pg_uri: str,
         horizon_search_radius=horizon_search_radius,
         debug_mode=debug_mode)
 
+    _mark_buildings_too_small(pg_uri, job_id, min_roof_area_m)
+
     logging.info("Checking for outdated LiDAR and missing LiDAR coverage...")
     check_lidar(pg_uri, job_id, resolution_metres=res)
 
@@ -218,6 +220,22 @@ def _skip(pg_uri: str, job_id: int) -> bool:
             return True
 
         return False
+
+
+def _mark_buildings_too_small(pg_uri: str, job_id: int, min_building_size: int):
+    with connection(pg_uri) as pg_conn:
+        sql_command(
+            pg_conn,
+            """
+            UPDATE {buildings} b
+            SET exclusion_reason = 'TOO_SMALL'
+            WHERE
+                ST_Area(b.geom_27700) <= %(min_building_size)s
+                AND b.exclusion_reason IS NULL;
+            """,
+            bindings={"min_building_size": min_building_size},
+            roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE),
+            buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE))
 
 
 def _validate_str(val: str, name: str, allowed: List[str] = None) -> str:

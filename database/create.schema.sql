@@ -14,6 +14,11 @@ EXCEPTION
 END $$;
 
 --
+-- Tracker for which model stage has been reached:
+--
+CREATE TABLE IF NOT EXISTS {model_stage} AS SELECT 'NOT_STARTED' as stage;
+
+--
 -- Create the bounds table in 27700 for quick intersection with mastermap buildings:
 --
 CREATE TABLE IF NOT EXISTS {bounds_27700} AS

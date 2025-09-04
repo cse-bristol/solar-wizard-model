@@ -21,7 +21,7 @@ from shapely import wkt
 
 from solar_pv.db_funcs import count, sql_command, connect, connection
 from solar_pv.postgis import pixels_for_buildings
-from solar_pv import tables
+from solar_pv import tables, stage
 from solar_pv.constants import RANSAC_LARGE_BUILDING, \
     RANSAC_LARGE_MAX_TRIALS, RANSAC_SMALL_MAX_TRIALS, RANSAC_SMALL_BUILDING, \
     RANSAC_MEDIUM_MAX_TRIALS, ROOFDET_MAX_MAE, ROOFDET_MAX_CPUS, ROOFDET_MAX_AREA
@@ -55,9 +55,10 @@ def detect_roofs(pg_uri: str,
                  workers: int = _roof_det_cpu_count(),
                  building_page_size: int = 50) -> None:
 
-    if count(pg_uri, tables.schema(job_id), tables.ROOF_POLYGON_TABLE) > 0:
+    if stage.get_stage(pg_uri, job_id) >= stage.Stage.DETECT_ROOFS:
         logging.info("Not detecting roof planes, already detected.")
         return
+    _clear(pg_uri, job_id)
 
     buildings_with_areas = _buildings_with_areas(pg_uri, job_id)
     building_count = len(buildings_with_areas)
@@ -95,6 +96,7 @@ def detect_roofs(pg_uri: str,
 
     _mark_buildings_with_no_planes(pg_uri, job_id)
     logging.info(f"roof plane detection for {building_count} roofs took {round(time.time() - start_time, 2)} s.")
+    stage.set_stage(pg_uri, job_id, stage.Stage.DETECT_ROOFS)
 
 
 def _handle_building_batch(pg_uri: str, job_id: int, toids: List[str], params: dict):
@@ -256,7 +258,7 @@ def _detect_building_roof_planes(building: RoofDetBuilding,
 
 def _load(pg_uri: str,
           job_id: int,
-          toids: List[str] = None,
+          toids: List[str],
           force_load: bool = False) -> Dict[str, RoofDetBuilding]:
     """
     Load LIDAR pixel data for roof plane detection. page_size is number of
@@ -431,6 +433,17 @@ def _mark_buildings_with_no_planes(pg_uri: str, job_id: int):
             """,
             roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE),
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE))
+
+
+def _clear(pg_uri: str, job_id: int):
+    with connection(pg_uri) as pg_conn:
+        sql_command(
+            pg_conn,
+            """
+            TRUNCATE TABLE {roof_polygons};
+            """,
+            roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE))
+
 
 
 def _write_test_data(job_id: int, building: RoofDetBuilding):

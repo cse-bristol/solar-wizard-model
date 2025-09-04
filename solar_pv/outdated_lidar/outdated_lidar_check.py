@@ -14,7 +14,7 @@ import psycopg2.extras
 from psycopg2.sql import SQL, Identifier, Literal
 
 from solar_pv.db_funcs import count, sql_command, connection
-from solar_pv import tables
+from solar_pv import tables, stage
 from solar_pv.outdated_lidar.perimeter_gradient import \
     check_perimeter_gradient, HeightAggregator
 from solar_pv.util import get_cpu_count
@@ -34,15 +34,13 @@ def check_lidar(pg_uri: str,
     Check for discrepancies between OS MasterMap building polygon data and
     LiDAR data.
 
-    Currently English LiDAR data is mostly from 2017 so is starting to be
-    out-of-date for newly built things. In these cases, if unhandled, the LiDAR
-    detects all buildings as flat (or like the ground that they were built on was) -
-    or occasionally with a now-nonexistent building intersecting the polygon weirdly.
+    If unhandled, the LiDAR detects all buildings as flat (or like the ground
+    that they were built on was) - or occasionally with a now-nonexistent
+    building intersecting the polygon weirdly.
     """
-    with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
-        if _already_checked(pg_conn, job_id):
-            logging.info("Already checked LiDAR coverage, skipping...")
-            return
+    if stage.get_stage(pg_uri, job_id) >= stage.Stage.CHECK_LIDAR:
+        logging.info("Already checked LiDAR coverage, skipping...")
+        return
 
     pages = math.ceil(count(pg_uri, tables.schema(job_id), tables.BUILDINGS_TABLE) / page_size)
     logging.info(f"{pages} pages of size {page_size} buildings to check LiDAR coverage for")
@@ -56,6 +54,7 @@ def check_lidar(pg_uri: str,
             pass
 
     logging.info(f"LiDAR coverage check complete")
+    stage.set_stage(pg_uri, job_id, stage.Stage.CHECK_LIDAR)
 
 
 def _check_lidar_page(pg_uri: str, job_id: int, resolution_metres: float, page: int, page_size: int):
@@ -113,10 +112,10 @@ def _write_exclusions(pg_conn, job_id: int, to_exclude: List[Tuple[str, str, flo
             ), argslist=to_exclude)
         pg_conn.commit()
 
-
+            
 def _load_pixels(pg_conn, job_id: int, interior: bool, page: int, page_size: int, toids: List[str] = None):
     if toids:
-        toid_filter = SQL("WHERE b.toid = ANY( {toids} )").format(toids=Literal(toids))
+        toid_filter = SQL("AND b.toid = ANY( {toids} )").format(toids=Literal(toids))
     else:
         toid_filter = SQL("")
 
@@ -131,6 +130,7 @@ def _load_pixels(pg_conn, job_id: int, interior: bool, page: int, page_size: int
         WITH building_page AS (
             SELECT b.toid, b.geom_27700, b.geom_27700_buffered_5
             FROM {buildings} b
+            WHERE exclusion_reason IS NULL
             {toid_filter}
             ORDER BY b.toid
             OFFSET %(offset)s LIMIT %(limit)s
@@ -167,7 +167,7 @@ def _load_pixels(pg_conn, job_id: int, interior: bool, page: int, page_size: int
 
 def _load_buildings(pg_conn, job_id: int, page: int, page_size: int, toids: List[str] = None) -> List[dict]:
     if toids:
-        toid_filter = SQL("WHERE b.toid = ANY({toids})").format(toids=Literal(toids))
+        toid_filter = SQL("AND b.toid = ANY({toids})").format(toids=Literal(toids))
     else:
         toid_filter = SQL("")
 
@@ -176,6 +176,7 @@ def _load_buildings(pg_conn, job_id: int, page: int, page_size: int, toids: List
         """
         SELECT b.toid, ST_AsText(b.geom_27700) AS geom
         FROM {buildings} b
+        WHERE exclusion_reason IS NULL
         {toid_filter}
         ORDER BY b.toid
         OFFSET %(offset)s LIMIT %(limit)s
@@ -203,16 +204,6 @@ def _load_buildings(pg_conn, job_id: int, page: int, page_size: int, toids: List
         building = buildings_by_toid[pixel['toid']]
         building['pixels'].append(pixel)
     return buildings
-
-
-def _already_checked(pg_conn, job_id: int) -> bool:
-    return sql_command(
-        pg_conn,
-        """
-        SELECT COUNT(*) != 0 FROM {buildings} WHERE exclusion_reason IS NOT NULL
-        """,
-        buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
-        result_extractor=lambda rows: rows[0][0])
 
 
 def _write_test_data(job_id: int, building):
