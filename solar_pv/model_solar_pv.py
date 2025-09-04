@@ -176,6 +176,7 @@ def _init_schema(pg_uri: str, job_id: int, job_bounds_27700: str):
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
             roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE),
             panel_polygons=Identifier(tables.schema(job_id), tables.PANEL_POLYGON_TABLE),
+            model_stage=Identifier(tables.schema(job_id), tables.STAGE_TABLE),
             elevation=Identifier(tables.schema(job_id), tables.ELEVATION),
             aspect=Identifier(tables.schema(job_id), tables.ASPECT),
             slope=Identifier(tables.schema(job_id), tables.SLOPE),

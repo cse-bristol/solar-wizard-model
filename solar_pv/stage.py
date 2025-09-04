@@ -12,7 +12,6 @@ class Stage(Enum):
     """
     The model stages.
     """
-    NOT_STARTED = 'NOT_STARTED'
     INIT = 'INIT'
     GENERATE_RASTERS = 'GENERATE_RASTERS'
     CHECK_LIDAR = 'CHECK_LIDAR'
@@ -48,10 +47,11 @@ def get_stage(pg_uri: str, job_id: int) -> Stage:
     Get the most recently completed model stage.
     """
     with connection(pg_uri) as pg_conn:
-        return sql_command(
+        stage_str = sql_command(
             pg_conn,
             """
             SELECT * FROM {stage};
             """,
             stage=Identifier(tables.schema(job_id), tables.STAGE_TABLE),
             result_extractor=lambda rows: rows[0][0])
+        return Stage[stage_str]
