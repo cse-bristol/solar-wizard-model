@@ -15,6 +15,7 @@ from typing import List
 import requests
 from shapely import Polygon
 
+from solar_pv import paths
 from solar_pv.gdal_helpers import set_nodata_value
 from solar_pv.geos import get_grid_cells, fill_holes, project_geom
 from solar_pv.lidar.lidar import LidarTile
@@ -37,6 +38,10 @@ class APITile(TypedDict):
     uri: str
 
 
+class EmptyZipError(Exception):
+    pass
+
+
 def get_all_lidar(pg_conn, bounds: Polygon, lidar_dir: str) -> None:
     """
     Download LIDAR tiles unless already present.
@@ -44,16 +49,20 @@ def get_all_lidar(pg_conn, bounds: Polygon, lidar_dir: str) -> None:
     TODO ideally this would track year of existing tile rather than going purely
          by filename.
     """
+    with open(join(paths.RESOURCES_DIR, "england.wkt")) as wkt:
+        england = shapely.from_wkt(wkt.read())
+
+    if not bounds.intersects(england):
+        logging.info("Skipping DEFRA API client, bounds do not intersect England")
+        return
+
     os.makedirs(lidar_dir, exist_ok=True)
 
     gridded_bounds = _get_gridded_bounds(bounds)
     job_tiles = []
     logging.info(f"Chopped boundary into {len(gridded_bounds)} chunks ")
     for poly in gridded_bounds:
-
-        tiles = _get_tiles(poly)
-        for tile in tiles:
-            job_tiles.append(_download_tile(tile, lidar_dir))
+        job_tiles.extend(_download_tiles(poly, lidar_dir))
 
     load_lidar(pg_conn, job_tiles)
 
@@ -74,14 +83,12 @@ def _get_gridded_bounds(bounds: Polygon) -> List[Polygon]:
 
     return gridded
 
+
 # types of product and resolution we like, in order of preference:
 _preferred_tiles = [
     ["lidar_composite_last_return_dsm", 1],
     ["national_lidar_programme_dsm", 1],
     ["lidar_composite_last_return_dsm", 1],
-    ["lidar_composite_last_return_dsm", 2],
-    ["national_lidar_programme_dsm", 2],
-    ["lidar_composite_last_return_dsm", 2],
 ]
 
 
@@ -91,7 +98,7 @@ def _matching_tile(tiles: List[APITile], product: str, res: int):
             return tile
 
 
-def _get_tiles(bounds: Polygon) -> list:
+def _download_tiles(bounds: Polygon, lidar_dir: str) -> List[LidarTile]:
     """
     Get the list of available tiles and try and find one download per tile that we like.
     _preferred_tiles above defines the products and resolutions we prefer. In case
@@ -116,16 +123,21 @@ def _get_tiles(bounds: Polygon) -> list:
         tile_id = tile['tile']['id']
         by_tile[tile_id].append(tile)
 
-    to_download = []
+    downloaded = []
     for tile_id, tiles in by_tile.items():
         tiles = sorted(tiles, key=lambda t: int(t["year"]["id"]), reverse=True)
         for preferred_product, preferred_res in _preferred_tiles:
             match = _matching_tile(tiles, preferred_product, preferred_res)
             if match:
-                to_download.append(match)
-                break
+                try:
+                    tile = _download_tile(match, lidar_dir)
+                    downloaded.append(tile)
+                    break
+                # If zip has no LiDAR, try another product:
+                except EmptyZipError:
+                    pass
 
-    return to_download
+    return downloaded
 
 
 def _download_tile(tile: APITile, lidar_dir: str) -> LidarTile:
@@ -138,6 +150,7 @@ def _download_tile(tile: APITile, lidar_dir: str) -> LidarTile:
     if not os.path.exists(zip_path):
         logging.info(f"Downloading {tile['uri']} ...")
         res = requests.get(tile["uri"], params={"subscription-key": "public"})
+        # TODO if 404, wait a bit and try again
         res.raise_for_status()
         with open(zip_path, 'wb') as wz:
             wz.write(res.content)
@@ -166,5 +179,11 @@ def _extract_tile(tile: APITile, lidar_dir: str, zip_fname: str) -> LidarTile:
                 break
 
     if not tiff:
-        raise ValueError(f"No tiff found in zip {zip_path}")
+        raise EmptyZipError(f"No tiff found in zip {zip_path}")
     return tiff
+
+
+if __name__ == "__main__":
+    p = shapely.Point(293400, 91300).buffer(1000)
+    get_all_lidar(None, p, "/home/neil/data/solar-wizard/lidar")
+    print(p)
