@@ -274,7 +274,9 @@ def _load(pg_uri: str,
                                       [elevation_table, aspect_table, slope_table], 
                                       toids, force_load=force_load)
         
-        buildings = _load_building_polygons(pg_conn, job_id, toids)
+        # TODO The things in toids that aren't in list(by_toid.keys()) need marking as no coverage.
+        #      Currently the outdated lidar checker misses them because there are pixels nearby.
+        buildings = _load_building_polygons(pg_conn, job_id, list(by_toid.keys()))
         
         loaded = {}
         for building in buildings:
