@@ -116,7 +116,7 @@ def model_solar_pv(pg_uri: str,
     _mark_buildings_too_small(pg_uri, job_id, min_roof_area_m)
 
     logging.info("Checking for outdated LiDAR and missing LiDAR coverage...")
-    check_lidar(pg_uri, job_id, resolution_metres=res)
+    check_lidar(pg_uri, job_id, resolution_metres=res, min_internal_pixels=min_roof_area_m)
 
     logging.info("Detecting roof planes...")
     detect_roofs(pg_uri, job_id,

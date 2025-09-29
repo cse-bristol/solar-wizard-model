@@ -21,7 +21,7 @@ def check_toid_lidar(pg_uri: str, job_id: int, toid: str, write_test_data: bool)
     with connection(pg_uri, cursor_factory=DictCursor) as pg_conn:
         buildings = _load_buildings(pg_conn, job_id, page=0, page_size=1000, toids=[toid])
     building = buildings[0]
-    reason = _check_building(building, resolution_metres=1.0, debug=True)
+    reason = _check_building(building, resolution_metres=1.0, min_internal_pixels=8, debug=True)
     if reason:
         print(f"toid {toid} excluded. Reason {reason}\n")
     else:

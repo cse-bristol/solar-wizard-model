@@ -102,17 +102,22 @@ def get_grid_cells(poly, cell_w, cell_h, spacing_w=0, spacing_h=0, grid_start: s
     return [cast(Polygon, cells[idx]) for idx in rtree.query(poly, predicate='intersects')]
 
 
-def get_grid_refs(poly, cell_size: int) -> List[str]:
+def get_grid_refs(poly, cell_size: int, grid_size: int = None) -> List[str]:
     """
     Get grid regs (in the same format that the LiDAR filenames use:
     e.g. SV54ne, or SM66) of the bottom left (SW) corner of each grid ref tile
-    that intersects the polygon (which should be in srid 27700)
+    that intersects the polygon (which should be in srid 27700).
+
+    Can optionally allow for using grid refs at once scale and cell sizes at another -
+    e.g. 5km squares indexed with 1km grid-refs.
     """
     grid_refs = []
+    if grid_size is None:
+        grid_size = cell_size
     for cell in get_grid_cells(poly, cell_size, cell_size):
         x, y, _, _ = cell.bounds
         if is_in_range(x, y):
-            grid_refs.append(en_to_grid_ref(x, y, cell_size))
+            grid_refs.append(en_to_grid_ref(x, y, grid_size))
         else:
             print(f"Cannot get grid ref for EN ({x},{y}) - out of bounds")
     return grid_refs

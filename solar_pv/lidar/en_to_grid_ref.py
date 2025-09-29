@@ -80,5 +80,13 @@ def en_to_grid_ref(easting: Easting, northing: Northing, square_size: int) -> st
             return letter_1 + letter_2 + numbers + corner
         return letter_1 + letter_2 + numbers
 
+    elif square_size == 1000:
+        letter_1 = _get_1st_letter(easting, northing)
+        letter_2 = _get_2nd_letter(easting, northing)
+        numbers = str(round_down_to(easting % _100KM, 1000) // 1000).zfill(2) + \
+                  str(round_down_to(northing % _100KM, 1000) // 1000).zfill(2)
+
+        return letter_1 + letter_2 + numbers
+
     else:
         raise ValueError(f"Unhandled square size: {square_size}")

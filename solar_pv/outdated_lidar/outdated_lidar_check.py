@@ -28,6 +28,7 @@ def _lidar_check_cpu_count():
 def check_lidar(pg_uri: str,
                 job_id: int,
                 resolution_metres: float,
+                min_internal_pixels: int,
                 workers: int = _lidar_check_cpu_count(),
                 page_size: int = 3000):
     """
@@ -48,7 +49,7 @@ def check_lidar(pg_uri: str,
     logging.info(f"Using {workers} processes for LiDAR coverage check")
 
     with mp.get_context("spawn").Pool(workers) as pool:
-        wrapped_iterable = ((pg_uri, job_id, resolution_metres, page, page_size)
+        wrapped_iterable = ((pg_uri, job_id, resolution_metres, min_internal_pixels, page, page_size)
                             for page in range(0, pages))
         for res in pool.starmap(_check_lidar_page, wrapped_iterable):
             pass
@@ -57,7 +58,7 @@ def check_lidar(pg_uri: str,
     stage.set_stage(pg_uri, job_id, stage.Stage.CHECK_LIDAR)
 
 
-def _check_lidar_page(pg_uri: str, job_id: int, resolution_metres: float, page: int, page_size: int):
+def _check_lidar_page(pg_uri: str, job_id: int, resolution_metres: float, min_internal_pixels: int, page: int, page_size: int):
     start_time = time.time()
     with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
         buildings = _load_buildings(pg_conn, job_id, page, page_size)
@@ -65,7 +66,7 @@ def _check_lidar_page(pg_uri: str, job_id: int, resolution_metres: float, page: 
 
         for building in buildings:
             try:
-                reason, min_gh, max_gh = _check_building(building, resolution_metres)
+                reason, min_gh, max_gh = _check_building(building, resolution_metres, min_internal_pixels)
                 height = HeightAggregator(building['pixels']).height() if reason is None else None
                 to_write.append((building['toid'], reason, height, min_gh, max_gh))
             except Exception as e:
@@ -77,8 +78,8 @@ def _check_lidar_page(pg_uri: str, job_id: int, resolution_metres: float, page: 
         print(f"Checked page {page} of LiDAR, took {round(time.time() - start_time, 2)} s.")
 
 
-def _check_building(building: dict, resolution_metres: float, debug: bool = False):
-    reason = _check_coverage(building)
+def _check_building(building: dict, resolution_metres: float, min_internal_pixels: int, debug: bool = False):
+    reason = _check_coverage(building, min_internal_pixels)
     if not reason:
         reason, min_gh, max_gh = check_perimeter_gradient(building, resolution_metres, debug=debug)
     else:
@@ -87,11 +88,13 @@ def _check_building(building: dict, resolution_metres: float, debug: bool = Fals
     return reason, min_gh, max_gh
 
 
-def _check_coverage(building: dict):
+def _check_coverage(building: dict, min_internal_pixels: int):
+    count = 0
     for pixel in building['pixels']:
         if pixel['within_building']:
-            return None
-    return 'NO_LIDAR_COVERAGE'
+            count += 1
+    if count <= min_internal_pixels:
+        return 'NO_LIDAR_COVERAGE'
 
 
 def _write_exclusions(pg_conn, job_id: int, to_exclude: List[Tuple[str, str, float, float, float]]):

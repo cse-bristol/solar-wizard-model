@@ -18,11 +18,11 @@ def _load_data(filename: str) -> dict:
 
 def _check(filename: str):
     building = _load_data(join(_PIXEL_DATA, filename))
-    return _check_building(building, resolution_metres=1.0)[0]
+    return _check_building(building, resolution_metres=1.0, min_internal_pixels=8)[0]
 
 def _check_gh(filename: str):
     building = _load_data(join(_PIXEL_DATA, filename))
-    return _check_building(building, resolution_metres=1.0)[1:]
+    return _check_building(building, resolution_metres=1.0, min_internal_pixels=8)[1:]
 
 
 def _height(filename: str):
