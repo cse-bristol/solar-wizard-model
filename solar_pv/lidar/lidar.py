@@ -11,6 +11,8 @@ import zipfile
 from osgeo import gdal, osr
 from typing import Optional, List
 
+from solar_pv.gdal_helpers import set_nodata_value
+
 LIDAR_NODATA = -9999
 """
 NODATA value used in LiDAR tiffs
@@ -149,22 +151,37 @@ def _tile_id(filename: str):
 
 
 def zip_to_geotiffs(zt: ZippedTiles, lidar_dir: str) -> List[LidarTile]:
+    """
+    Unzip all tifs and asc files from a zip (unless that file already exists),
+    converting asc files to tifs and setting the nodata value to -9999.
+    """
     tiff_paths = []
     with zipfile.ZipFile(join(lidar_dir, zt.filename)) as z:
         for zipinfo in z.infolist():
-            # Convert to geotiff and add SRS metadata:
-            asc_filename = zipinfo.filename
-            tiff_filename = _get_tiff_filename(asc_filename)
-            tiff_path = join(lidar_dir, tiff_filename)
+            file_ext = zipinfo.filename.split(".")[-1]
+            if file_ext in ["asc", "txt"]:
+                asc_filename = zipinfo.filename
+                tiff_filename = _get_tiff_filename(asc_filename)
+                tiff_path = join(lidar_dir, tiff_filename)
+            elif file_ext in ["tif", "tiff"]:
+                tiff_filename = zipinfo.filename
+                tiff_path = join(lidar_dir, tiff_filename)
+
             if not os.path.exists(tiff_path):
                 z.extract(zipinfo, lidar_dir)
                 tile = LidarTile.from_filename(tiff_path, zt.year, zt.product)
-                _asc_to_geotiff(lidar_dir, asc_filename, tiff_filename)
+                if file_ext in ["asc", "txt"]:
+                    _asc_to_geotiff(lidar_dir, asc_filename, tiff_filename)
+                set_nodata_value(tiff_path)
                 tiff_paths.append(tile)
             else:
-                tiff_paths.append(LidarTile.from_filename(join(lidar_dir, tiff_filename), zt.year, zt.product))
+                tiff_paths.append(LidarTile.from_filename(tiff_path, zt.year, zt.product))
 
     return tiff_paths
+
+
+def _ext(filename: str) -> str:
+    return filename.split(".")[-1]
 
 
 def _get_tiff_filename(asc_filename: str) -> str:

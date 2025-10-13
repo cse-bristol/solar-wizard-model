@@ -11,7 +11,7 @@ from osgeo import gdal
 from shapely import Polygon
 
 from solar_pv import gdal_helpers
-from solar_pv.geos import bounds_polygon, get_grid_refs
+from solar_pv.geos import get_grid_refs
 from solar_pv.lidar.lidar import Resolution, zip_to_geotiffs, ZippedTiles, \
     LidarTile, _file_res
 from solar_pv.postgis import load_lidar
@@ -19,7 +19,7 @@ from solar_pv.postgis import load_lidar
 
 class LidarSource(enum.Enum):
 
-    # ENGLAND = ("ENGLAND", 5000, 2017, "206817_LIDAR_Comp_DSM")
+    ENGLAND = ("ENGLAND", 5000, 2022, "lidar_composite_last_return_dsm")
     WALES = ("WALES", 10000, 2015, 'Wales LidarCompositeDataset (2015)')
     # Scottish LiDAR is in 5 separate phases, sometimes overlapping in tiles
     # covered (but with different portions of the tile containing data, so we
@@ -45,8 +45,8 @@ class LidarSource(enum.Enum):
 
     def filepath(self, bulk_lidar_dir: str, grid_ref: str, res: Resolution):
         res_str = res.name[2:]
-        # if self == LidarSource.ENGLAND:
-        #     return join(bulk_lidar_dir, "206817_LIDAR_Comp_DSM", f"LIDAR-DSM-{res_str}-ENGLAND-EA", f"LIDAR-DSM-{res_str}-{grid_ref}.zip")
+        if self == LidarSource.ENGLAND:
+            return join(bulk_lidar_dir, "england", f"LIDAR-LZ_DSM-{res_str}-2022-{grid_ref}.zip")
         if self == LidarSource.WALES:
             return join(bulk_lidar_dir, "wales", f"{res_str.lower()}_res_{grid_ref}_dsm.zip")
         elif self == LidarSource.SCOTLAND_1:
@@ -65,7 +65,7 @@ class LidarSource(enum.Enum):
 
 def load_from_bulk(pg_conn, bounds_poly: Polygon, lidar_dir: str, bulk_lidar_dir: str) -> None:
     """
-    Load LiDAR from the bulk LiDAR we have from DEFRA on bolt at `/srv/lidar`.
+    Load LiDAR from bulk.
     """
 
     job_tiles = []

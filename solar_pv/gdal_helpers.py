@@ -317,14 +317,14 @@ def set_nodata_value(input_tiff: str, nodata: int = -9999, band: int = 1):
     dataset = None
     output_tiff = input_tiff + ".fixed.tiff"
 
-    gdal.Translate(
-        output_tiff,
-        input_tiff,
-        noData=nodata,
-        creationOptions=['TILED=YES', 'COMPRESS=PACKBITS']
-    )
-
     if curr_nodata != nodata:
+        gdal.Translate(
+            output_tiff,
+            input_tiff,
+            noData=nodata,
+            creationOptions=['TILED=YES', 'COMPRESS=PACKBITS']
+        )
+
         dataset = gdal.Open(output_tiff, gdal.GA_Update)
         band_obj = dataset.GetRasterBand(band)
         array = band_obj.ReadAsArray()
@@ -333,12 +333,12 @@ def set_nodata_value(input_tiff: str, nodata: int = -9999, band: int = 1):
         dataset.FlushCache()
         dataset = None
 
-    old_tiff = input_tiff + ".old"
-    shutil.move(input_tiff, old_tiff)
-    shutil.move(output_tiff, input_tiff)
+        old_tiff = input_tiff + ".old"
+        shutil.move(input_tiff, old_tiff)
+        shutil.move(output_tiff, input_tiff)
 
-    if os.path.exists(old_tiff):
-        os.remove(old_tiff)
+        if os.path.exists(old_tiff):
+            os.remove(old_tiff)
 
 
 def count_raster_pixels(tiff: str, value, band: int = 1) -> int:
