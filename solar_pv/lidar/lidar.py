@@ -166,6 +166,8 @@ def zip_to_geotiffs(zt: ZippedTiles, lidar_dir: str) -> List[LidarTile]:
             elif file_ext in ["tif", "tiff"]:
                 tiff_filename = zipinfo.filename
                 tiff_path = join(lidar_dir, tiff_filename)
+            else:
+                continue
 
             if not os.path.exists(tiff_path):
                 z.extract(zipinfo, lidar_dir)
