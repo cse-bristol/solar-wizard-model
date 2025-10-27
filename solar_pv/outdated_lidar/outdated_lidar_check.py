@@ -116,11 +116,9 @@ def _write_exclusions(pg_conn, job_id: int, to_exclude: List[Tuple[str, str, flo
         pg_conn.commit()
 
             
-def _load_pixels(pg_conn, job_id: int, interior: bool, page: int, page_size: int, toids: List[str] = None):
-    if toids:
-        toid_filter = SQL("AND b.toid = ANY( {toids} )").format(toids=Literal(toids))
-    else:
-        toid_filter = SQL("")
+def _load_pixels(pg_conn, job_id: int, interior: bool, toids: List[str]):
+    if not toids:
+        return []
 
     if interior:
         raster_table = Identifier(tables.schema(job_id), tables.MASKED_ELEVATION)
@@ -133,10 +131,8 @@ def _load_pixels(pg_conn, job_id: int, interior: bool, page: int, page_size: int
         WITH building_page AS (
             SELECT b.toid, b.geom_27700, b.geom_27700_buffered_5
             FROM {buildings} b
-            WHERE exclusion_reason IS NULL
-            {toid_filter}
+            WHERE b.toid = ANY( {toids} )
             ORDER BY b.toid
-            OFFSET %(offset)s LIMIT %(limit)s
         ),
         raster_pixels AS (
             SELECT
@@ -157,14 +153,12 @@ def _load_pixels(pg_conn, job_id: int, interior: bool, page: int, page_size: int
         ORDER BY toid;
         """,
         {
-            "offset": page * page_size,
-            "limit": page_size,
             "interior": interior,
             "exterior": not interior,
         },
+        toids=Literal(toids),
         raster_table=raster_table,
         buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
-        toid_filter=toid_filter,
         result_extractor=lambda rows: [dict(row) for row in rows])
 
 
@@ -193,8 +187,10 @@ def _load_buildings(pg_conn, job_id: int, page: int, page_size: int, toids: List
         result_extractor=lambda rows: [dict(row) for row in rows]
     )
 
-    interior_pixels = _load_pixels(pg_conn, job_id, True, page, page_size, toids)
-    exterior_pixels = _load_pixels(pg_conn, job_id, False, page, page_size, toids)
+    found_toids = [building['toid'] for building in buildings]
+
+    interior_pixels = _load_pixels(pg_conn, job_id, True, found_toids)
+    exterior_pixels = _load_pixels(pg_conn, job_id, False, found_toids)
 
     buildings_by_toid = {}
     for building in buildings:
