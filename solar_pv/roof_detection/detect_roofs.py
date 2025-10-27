@@ -52,8 +52,7 @@ def detect_roofs(pg_uri: str,
                  flat_roof_degrees: int,
                  min_dist_to_edge_m: float,
                  resolution_metres: float,
-                 workers: int = _roof_det_cpu_count(),
-                 building_page_size: int = 50) -> None:
+                 workers: int = _roof_det_cpu_count()) -> None:
 
     if stage.get_stage(pg_uri, job_id) >= stage.Stage.DETECT_ROOFS:
         logging.info("Not detecting roof planes, already detected.")
@@ -76,7 +75,7 @@ def detect_roofs(pg_uri: str,
         "resolution_metres": resolution_metres,
     }
 
-    work_queue = _create_adaptive_batches(buildings_with_areas, building_page_size)
+    work_queue = _create_adaptive_batches(buildings_with_areas)
 
     executor = ProcessPoolExecutor(max_workers=workers)
     try:
@@ -320,7 +319,7 @@ def _buildings_with_areas(pg_uri: str, job_id: int) -> List[Tuple[str, float]]:
             result_extractor=lambda rows: [(row['toid'], row['area']) for row in rows])
 
 
-def _create_adaptive_batches(buildings_with_areas: List[Tuple[str, float]], base_batch_size: int) -> List[List[str]]:
+def _create_adaptive_batches(buildings_with_areas: List[Tuple[str, float]]) -> List[List[str]]:
     """
     Create batches with sizes that adapt based on building area - larger buildings get smaller batches.
 
@@ -334,11 +333,11 @@ def _create_adaptive_batches(buildings_with_areas: List[Tuple[str, float]], base
         if area > 10000:
             batch_size = 1
         elif area > 2000:
-            batch_size = max(2, base_batch_size // 10)
+            batch_size = 5
         elif area > 500:
-            batch_size = max(3, base_batch_size // 5)
+            batch_size = 10
         else:
-            batch_size = base_batch_size
+            batch_size = 500
         
         if (current_batch_size is not None and batch_size != current_batch_size) or len(current_batch) >= batch_size:
             batches.append(current_batch)

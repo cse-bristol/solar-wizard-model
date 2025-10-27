@@ -102,11 +102,11 @@ class RoofDetTestCase(ParameterisedTestCase):
     def test_create_adaptive_batches(self):
         """Test that adaptive batching creates appropriate batch sizes based on building areas"""
         
-        batches = _create_adaptive_batches([], 6)
+        batches = _create_adaptive_batches([])
         self.assertEqual(batches, [])
 
         single_building = [("test_building", 100)]
-        batches = _create_adaptive_batches(single_building, 6)
+        batches = _create_adaptive_batches(single_building)
         self.assertEqual(len(batches), 1)
         self.assertEqual(batches[0], ["test_building"])
 
@@ -125,17 +125,14 @@ class RoofDetTestCase(ParameterisedTestCase):
             ("very_small_2", 20),  
             ("very_small_3", 10),  
         ]
-        
-        base_batch_size = 6
-        batches = _create_adaptive_batches(buildings_with_areas, base_batch_size)
+
+        batches = _create_adaptive_batches(buildings_with_areas)
         
         expected_batches = [
             ["very_large_1"],
             ["very_large_2"],
-            ["large_1", "large_2"],
-            ["large_3"],
-            ["medium_1", "medium_2", "medium_3", "small_1", "small_2", "very_small_1"],
-            ["very_small_2", "very_small_3"],
+            ["large_1", "large_2", "large_3"],
+            ["medium_1", "medium_2", "medium_3", "small_1", "small_2", "very_small_1", "very_small_2", "very_small_3"],
         ]
         
         self.assertEqual(batches, expected_batches)
