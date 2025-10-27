@@ -64,7 +64,7 @@ class OutdatedLidarTestCase(ParameterisedTestCase):
             ("0027.json", None),
             # Was throwing an exception in perimeter_gradient.py:
             ("0026.json", None),
-            # Has a pixel within, but none without. If there are no pixels in the moat
+            # Has 8 pixels within, but none without. If there are no pixels in the moat
             # that aren't inside another building, we currently assume LiDAR is ok...
             ("no_without.json", None),
         ], _check)
