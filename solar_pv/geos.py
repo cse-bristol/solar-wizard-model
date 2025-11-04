@@ -1,5 +1,7 @@
 # This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
+import logging
+
 import itertools
 import json
 from typing import List, Tuple, Union, cast
@@ -12,7 +14,8 @@ from shapely.prepared import prep
 from shapely.strtree import STRtree
 from shapely.geometry import Polygon, shape, MultiPolygon, mapping, LineString, \
     MultiPoint, MultiLineString
-from shapely import wkt, ops
+from shapely import wkt, ops, make_valid
+from shapely.errors import GEOSException
 
 from solar_pv.db_funcs import sql_command
 from solar_pv.lidar.en_to_grid_ref import en_to_grid_ref, is_in_range
@@ -230,7 +233,11 @@ def simplify_by_angle(poly: Polygon, tolerance_degrees: float = 1.0) -> Polygon:
     holes = [ip.coords[:] for ip in poly.interiors]
     simple_shell = _simplify_ring_by_angle(poly.exterior.coords[:], tolerance_degrees)
     simple_holes = [_simplify_ring_by_angle(hole, tolerance_degrees) for hole in holes]
-    simple_poly = simple_shell.difference(ops.unary_union(simple_holes))
+    try:
+        simple_poly = simple_shell.difference(ops.unary_union(simple_holes))
+    except GEOSException:
+        simple_poly = simple_shell.difference(ops.unary_union(poly.interiors))
+
     if simple_poly.geom_type == 'Polygon':
         return simple_poly
     else:
@@ -257,7 +264,8 @@ def _simplify_ring_by_angle(coords, tolerance_degrees: float) -> Polygon:
 
     # Simplify failed, will happen on circles etc
     if len(new_vertices) < 4:
-        return Polygon(coords)
+        poly = Polygon(coords)
+        return poly
 
     return Polygon(new_vertices)
 

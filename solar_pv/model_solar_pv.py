@@ -98,11 +98,16 @@ def model_solar_pv(pg_uri: str,
     logging.info("Initialising postGIS schema...")
     _init_schema(pg_uri, job_id, job_bounds_27700)
 
-    if _skip(pg_uri, job_id):
+    if _should_skip(pg_uri, job_id):
         return
 
     job_lidar_dir = join(lidar_dir, f"job_{job_id}")
     os.makedirs(job_lidar_dir, exist_ok=True)
+
+    _mark_buildings_too_small(pg_uri, job_id, min_roof_area_m)
+
+    if _should_skip(pg_uri, job_id, check_rasters=False):
+        return
 
     logging.info("Generating and loading rasters...")
     elevation_raster_27700, mask_raster_27700, slope_raster_27700, aspect_raster_27700, res = generate_rasters(
@@ -112,8 +117,6 @@ def model_solar_pv(pg_uri: str,
         solar_dir=solar_dir,
         horizon_search_radius=horizon_search_radius,
         debug_mode=debug_mode)
-
-    _mark_buildings_too_small(pg_uri, job_id, min_roof_area_m)
 
     logging.info("Checking for outdated LiDAR and missing LiDAR coverage...")
     check_lidar(pg_uri, job_id, resolution_metres=res, min_internal_pixels=min_roof_area_m)
@@ -126,6 +129,9 @@ def model_solar_pv(pg_uri: str,
                  flat_roof_degrees=flat_roof_degrees,
                  min_dist_to_edge_m=min_dist_to_edge_m,
                  resolution_metres=res)
+
+    if _should_skip(pg_uri, job_id, check_rasters=False):
+        return
 
     # logging.info("Adding individual PV panels...")
     # place_panels(
@@ -193,24 +199,15 @@ def _drop_schema(pg_uri: str, job_id: int):
         )
 
 
-def _skip(pg_uri: str, job_id: int) -> bool:
+def _should_skip(pg_uri: str, job_id: int, check_rasters: bool = True) -> bool:
     with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
-        building_count = sql_command(
-            pg_conn,
-            "SELECT COUNT(*) FROM {buildings}",
-            buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE))
-        if building_count == 0:
-            logging.info("skipping PV job, no buildings found")
-            return True
-
-        tile_cov_count = raster_tile_coverage_count(pg_conn, job_id)
-        if tile_cov_count == 0:
-            logging.info("skipping PV job, no LiDAR tiles intersect the job bounds")
+        def _skip():
             sql_command(
                 pg_conn,
                 """
-                UPDATE {buildings} SET exclusion_reason = 'NO_LIDAR_COVERAGE';
-                
+                UPDATE {buildings} SET exclusion_reason = 'NO_LIDAR_COVERAGE'
+                WHERE exclusion_reason IS NULL;
+
                 INSERT INTO models.pv_building
                 SELECT %(job_id)s, toid, exclusion_reason, height
                 FROM {buildings};
@@ -218,7 +215,33 @@ def _skip(pg_uri: str, job_id: int) -> bool:
                 {"job_id": job_id},
                 buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
             )
+
+        building_count = sql_command(
+            pg_conn,
+            "SELECT COUNT(*) FROM {buildings}",
+            buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
+            result_extractor=lambda res: res[0][0])
+        if building_count == 0:
+            logging.info("skipping PV job, no buildings found")
+            _skip()
             return True
+
+        building_count = sql_command(
+            pg_conn,
+            "SELECT COUNT(*) FROM {buildings} WHERE exclusion_reason IS NULL",
+            buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
+            result_extractor=lambda res: res[0][0])
+        if building_count == 0:
+            logging.info("skipping PV job, no non-excluded buildings")
+            _skip()
+            return True
+
+        if check_rasters:
+            tile_cov_count = raster_tile_coverage_count(pg_conn, job_id)
+            if tile_cov_count == 0:
+                logging.info("skipping PV job, no LiDAR tiles intersect the job bounds")
+                _skip()
+                return True
 
         return False
 

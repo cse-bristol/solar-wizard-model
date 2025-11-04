@@ -268,10 +268,10 @@ def _load(pg_uri: str,
         elevation_table = f"{tables.schema(job_id)}.{tables.ELEVATION}"
         aspect_table = f"{tables.schema(job_id)}.{tables.ASPECT}"
         slope_table = f"{tables.schema(job_id)}.{tables.SLOPE}"
-        
-        by_toid = pixels_for_buildings(pg_conn, job_id, 0, len(toids), 
-                                      [elevation_table, aspect_table, slope_table], 
-                                      toids, force_load=force_load)
+
+        by_toid = pixels_for_buildings(pg_conn, job_id, 0, len(toids),
+                                       [elevation_table, aspect_table, slope_table],
+                                       toids, force_load=force_load)
         
         # TODO The things in toids that aren't in list(by_toid.keys()) need marking as no coverage.
         #      Currently the outdated lidar checker misses them because there are pixels nearby.

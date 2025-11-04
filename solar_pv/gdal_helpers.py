@@ -17,6 +17,10 @@ from osgeo import gdal
 from solar_pv.util import esc_double_quotes
 
 
+class RasterizeError(ValueError):
+    pass
+
+
 def create_vrt(tiles: List[str], vrt_file: str):
     logging.info("Creating vrt...")
     if tiles and len(tiles) > 0:
@@ -127,7 +131,7 @@ def rasterize(pg_uri: str, mask_sql: str, mask_file: str, res: float, srid: int)
     print(res.stdout)
     print(res.stderr)
     if res.returncode != 0:
-        raise ValueError(res.stderr)
+        raise RasterizeError(res.stderr)
 
 
 def rasterize_3d(pg_uri: str,
@@ -158,7 +162,7 @@ def rasterize_3d(pg_uri: str,
     print(res.stdout)
     print(res.stderr)
     if res.returncode != 0:
-        raise ValueError(res.stderr)
+        raise RasterizeError(res.stderr)
 
 
 def rasterize_3d_update(pg_uri: str, mask_sql: str, raster_to_update_filename: str):
