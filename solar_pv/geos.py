@@ -230,18 +230,18 @@ def simplify_by_angle(poly: Polygon, tolerance_degrees: float = 1.0) -> Polygon:
 
     Adapted from code in https://github.com/shapely/shapely/issues/1046
     """
-    holes = [ip.coords[:] for ip in poly.interiors]
-    simple_shell = _simplify_ring_by_angle(poly.exterior.coords[:], tolerance_degrees)
-    simple_holes = [_simplify_ring_by_angle(hole, tolerance_degrees) for hole in holes]
     try:
+        holes = [ip.coords[:] for ip in poly.interiors]
+        simple_shell = _simplify_ring_by_angle(poly.exterior.coords[:], tolerance_degrees)
+        simple_holes = [_simplify_ring_by_angle(hole, tolerance_degrees) for hole in holes]
         simple_poly = simple_shell.difference(ops.unary_union(simple_holes))
-    except GEOSException:
-        simple_poly = simple_shell.difference(ops.unary_union(poly.interiors))
 
-    if simple_poly.geom_type == 'Polygon':
-        return simple_poly
-    else:
-        # simplify has failed:
+        if simple_poly.geom_type == 'Polygon':
+            return simple_poly
+        else:
+            # simplify has failed:
+            return poly
+    except GEOSException:
         return poly
 
 
