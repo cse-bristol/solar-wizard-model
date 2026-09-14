@@ -57,6 +57,16 @@ class ExcludeUnconnectedTest(unittest.TestCase):
 
         self.assertFalse(result.any())
 
+    def test_points_sharing_a_pixel_resolve_to_the_highest_index(self):
+        # two points land on the same pixel; the original per-point loop lets the
+        # highest-indexed one represent that pixel, so only it is kept:
+        X = np.array([[0, 0], [0, 0]], dtype=float)
+        inlier_mask = np.ones(len(X), dtype=bool)
+
+        result = _exclude_unconnected(X, [0, 0], inlier_mask, res=1)
+
+        self.assertEqual(result.tolist(), [False, True])
+
 
 class MinThinnessRatioTest(unittest.TestCase):
 

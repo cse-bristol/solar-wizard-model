@@ -220,13 +220,34 @@ class RANSACRegressorForLIDAR:
 
             # extract inlier data set
             inlier_idxs_subset = sample_idxs[inlier_mask_subset]
+
+            # RANSAC for LIDAR addition: prep for following plane morphology checks.
+            # This (and the connectivity re-extraction below) runs before scoring so that
+            # the score/SD/aspect stats are computed on the connected inliers only - the
+            # points we actually care about (as DETSAC does). See Tarsha-Kurdi, 2007.
+            groups, num_groups = _pixel_groups(X[inlier_idxs_subset], min_X, self.resolution_metres)
+            group_areas = _group_areas(groups)
+
+            # RANSAC for LIDAR addition: check that size of the largest continuous
+            # group of pixels is also over the minimum number of points per plane:
+            largest = max(group_areas, key=group_areas.get)
+            roof_plane_area = group_areas[largest]
+            if roof_plane_area < self.min_points_per_plane or roof_plane_area < (
+                    total_points_in_building * self.min_points_per_plane_perc):
+                if debug:
+                    bad_sample_reasons["MIN_POINTS_PER_LARGEST_GROUP"] += 1
+                skip_planes.add(tuple(subset_idxs))
+                continue
+
+            # re-extract (connected) inlier data set
+            inlier_mask_subset = _exclude_unconnected(X, min_X, inlier_mask_subset, res=self.resolution_metres)
+            inlier_idxs_subset = sample_idxs[inlier_mask_subset]
             X_inlier_subset = X[inlier_idxs_subset]
             y_inlier_subset = y[inlier_idxs_subset]
             y_inlier_pred = y_pred[inlier_idxs_subset]
 
             # score of inlier data set
             score_subset = metrics.mean_absolute_error(y_inlier_subset, y_inlier_pred)
-            # score_subset = base_estimator.score(X_inlier_subset, y_inlier_subset)
 
             sd = np.std(residuals_subset[inlier_mask_subset])
 
@@ -248,18 +269,6 @@ class RANSACRegressorForLIDAR:
                     bad_sample_reasons["WORSE_SCORE"] += 1
                 continue
 
-            # RANSAC for LIDAR addition: use stddev of inlier distance to plane
-            # as score instead
-            # See Tarsha-Kurdi, 2007
-            # if sd > sd_best or (sd == sd_best and n_inliers_subset <= n_inliers_best):
-            #     # We don't add the sample to `skip_planes` here as it might still be
-            #     # the best sample in a subsequent run of RANSAC, but we still want to
-            #     # skip them within this run...
-            #     bad_samples.add(tuple(subset_idxs))
-            #     if debug:
-            #         bad_sample_reasons["WORSE_SD"] += 1
-            #     continue
-
             # RANSAC for LIDAR addition:
             # if difference between circular mean of pixel aspects and slope aspect is too high:
             # if circular deviation of pixel aspects too high:
@@ -277,28 +286,6 @@ class RANSACRegressorForLIDAR:
                     if debug:
                         bad_sample_reasons["CIRCULAR_SD"] += 1
                     continue
-
-            # TODO in DETSAC I moved all this to before the score/SD/inliers check, as
-            #      we only care about those things (as well as the circ mean etc) for
-            #      the connected inliers. That might be too expensive in standard RANSAC but it needs considering
-            # RANSAC for LIDAR addition: prep for following plane morphology checks
-            groups, num_groups = _pixel_groups(X_inlier_subset, min_X, self.resolution_metres)
-            group_areas = _group_areas(groups)
-
-            # RANSAC for LIDAR addition: check that size of the largest continuous
-            # group of pixels is also over the minimum number of points per plane:
-            largest = max(group_areas, key=group_areas.get)
-            roof_plane_area = group_areas[largest]
-            if roof_plane_area < self.min_points_per_plane or roof_plane_area < (
-                    total_points_in_building * self.min_points_per_plane_perc):
-                if debug:
-                    bad_sample_reasons["MIN_POINTS_PER_LARGEST_GROUP"] += 1
-                skip_planes.add(tuple(subset_idxs))
-                continue
-
-            # re-extract (connected) inlier data set
-            inlier_mask_subset = _exclude_unconnected(X, min_X, inlier_mask_subset, res=self.resolution_metres)
-            inlier_idxs_subset = sample_idxs[inlier_mask_subset]
 
             # RANSAC for LiDAR addition: check ratio of points area to ratio of convex
             # hull of points area.
@@ -435,16 +422,18 @@ def _exclude_unconnected(X, min_X, inlier_mask_best, res: float):
     Create a new inlier mask which only sets as True those LIDAR pixels that
     form part of the largest contiguous group of pixels fitted to the plane.
     """
-
+    inlier_mask_best = np.asarray(inlier_mask_best, dtype=bool)
     normed = ((X - min_X) / res).astype(int)
-    image = np.zeros((int(np.amax(normed[:, 0])) + 1,
-                      int(np.amax(normed[:, 1])) + 1))
-    idxs = np.zeros((int(np.amax(normed[:, 0])) + 1,
-                     int(np.amax(normed[:, 1])) + 1), dtype=int)
-    for i, pair in enumerate(normed):
-        if inlier_mask_best[i]:
-            image[pair[0]][pair[1]] = 1
-        idxs[pair[0]][pair[1]] = i
+    rows, cols = normed[:, 0], normed[:, 1]
+    shape = (int(np.amax(rows)) + 1, int(np.amax(cols)) + 1)
+
+    image = np.zeros(shape)
+    image[rows[inlier_mask_best], cols[inlier_mask_best]] = 1
+
+    # Map each pixel back to a point index. Where several points share a pixel the
+    # highest-indexed one wins (sequential assignment, matching the original loop).
+    idxs = np.zeros(shape, dtype=int)
+    idxs[rows, cols] = np.arange(len(normed))
 
     groups, num_groups = measure.label(image, connectivity=1, return_num=True)
     if num_groups == 0:

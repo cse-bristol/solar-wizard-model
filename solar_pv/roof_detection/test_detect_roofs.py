@@ -6,6 +6,7 @@ import unittest
 from os.path import join
 from typing import List
 
+import numpy as np
 from shapely import wkt
 
 from solar_pv.paths import TEST_DATA
@@ -14,6 +15,8 @@ from solar_pv.datatypes import RoofDetBuilding
 from solar_pv.test_utils.test_funcs import ParameterisedTestCase
 
 _ROOFDET_DATA = join(TEST_DATA, "roof_detection")
+
+_SEED = 42
 
 
 def _load_data(filename: str) -> RoofDetBuilding:
@@ -24,6 +27,7 @@ def _load_data(filename: str) -> RoofDetBuilding:
 
 
 def _roofdet(toid: str, res: float):
+    np.random.seed(_SEED)
     filename = f"{toid}.json" if not toid.endswith(".json") else toid
     planes = _detect_building_roof_planes(_load_data(join(_ROOFDET_DATA, filename)), filename, res, debug=True)
     return sorted([plane['aspect'] for plane in planes])
