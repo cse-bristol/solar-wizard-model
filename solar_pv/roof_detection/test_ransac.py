@@ -11,7 +11,7 @@ from solar_pv.geos import square, slope_deg, aspect_deg
 from solar_pv.roof_detection.ransac import _group_areas, _pixel_groups, \
     _exclude_unconnected, _min_thinness_ratio, closest_azimuth, \
     get_potential_aspects, _sample, _convex_hull_ratio, _thinness_ratio, _aspect_stats, \
-    _plane_metrics
+    _plane_metrics, _evaluate_candidate, _FitContext, _Thresholds
 
 
 class GroupAreasTest(unittest.TestCase):
@@ -207,6 +207,118 @@ class PlaneMetricsTest(unittest.TestCase):
         metrics = _plane_metrics(estimator, X, z, mask, np.arange(len(X)))
 
         self.assertEqual(len(metrics["inliers_xy"]), 3)
+
+
+class EvaluateCandidateTest(unittest.TestCase):
+
+    def _thresholds(self, **overrides):
+        fields = dict(
+            min_points_per_plane=8, min_points_per_plane_perc=0.001,
+            min_convex_hull_ratio=0.65, max_aspect_circular_mean_degrees=90,
+            max_aspect_circular_sd=1.5, resolution_metres=1.0)
+        fields.update(overrides)
+        return _Thresholds(**fields)
+
+    def _ctx(self, thresholds, **overrides):
+        fields = dict(
+            thresholds=thresholds, X=None, y=None, aspect=None, polygon=None,
+            min_X=None, sample_idxs=None, total_points_in_building=100,
+            aspect_fallback_to_circ_mean=False)
+        fields.update(overrides)
+        return _FitContext(**fields)
+
+    def _solid_block(self, n=8):
+        # an n x n grid of pixels at 1m resolution: a compact, fully-connected region
+        # that clears the min-points, largest-group, connectivity, convex-hull and
+        # thinness checks, letting a test exercise the pipeline past them.
+        xs, ys = np.meshgrid(np.arange(n), np.arange(n))
+        return np.column_stack([xs.ravel(), ys.ravel()]).astype(float)
+
+    def test_rejects_when_too_few_inliers(self):
+        # the min-points check is the first thing _evaluate_candidate does, so the
+        # rest of the context is never touched:
+        ctx = self._ctx(self._thresholds())
+        inlier_mask = np.zeros(20, dtype=bool)
+        inlier_mask[:3] = True  # 3 < 8
+
+        reason, cand = _evaluate_candidate(
+            ctx, y_pred=None, residuals_subset=None, inlier_mask_subset=inlier_mask,
+            coef=None, slope=0.0, score_best=float("inf"), n_inliers_best=1)
+
+        self.assertEqual(reason, "MIN_POINTS_PER_PLANE")
+        self.assertIsNone(cand)
+
+    def test_rejects_when_largest_group_too_small(self):
+        # enough raw inliers, but they're scattered so no connected group is big enough:
+        X = np.array([[i * 5, 0] for i in range(10)], dtype=float)  # 10 isolated pixels
+        ctx = self._ctx(self._thresholds(), X=X, min_X=[0.0, 0.0],
+                        sample_idxs=np.arange(len(X)))
+        inlier_mask = np.ones(len(X), dtype=bool)
+
+        reason, cand = _evaluate_candidate(
+            ctx, y_pred=None, residuals_subset=None, inlier_mask_subset=inlier_mask,
+            coef=None, slope=0.0, score_best=float("inf"), n_inliers_best=1)
+
+        self.assertEqual(reason, "MIN_POINTS_PER_LARGEST_GROUP")
+        self.assertIsNone(cand)
+
+    def test_rejects_a_worse_score(self):
+        # a solid block that clears the morphology checks, but predicts badly (high MAE)
+        # against an already-good best score -> rejected at the score gate:
+        X = self._solid_block()
+        n = len(X)
+        ctx = self._ctx(self._thresholds(), X=X, y=np.zeros(n), min_X=[0.0, 0.0],
+                        sample_idxs=np.arange(n), polygon=square(0, 0, 10),
+                        aspect=np.full(n, 180.0))
+        mask = np.ones(n, dtype=bool)
+
+        reason, cand = _evaluate_candidate(
+            ctx, y_pred=np.full(n, 100.0), residuals_subset=np.zeros(n),
+            inlier_mask_subset=mask, coef=[0.001, 0.0], slope=0.0,
+            score_best=0.0, n_inliers_best=1)
+
+        self.assertEqual(reason, "WORSE_SCORE")
+        self.assertIsNone(cand)
+
+    def test_rejects_a_good_score_with_no_more_inliers(self):
+        # a good score, but no more inliers than the current best -> we don't optimise
+        # for point count (Tarsha-Kurdi), so it's rejected:
+        X = self._solid_block()
+        n = len(X)
+        ctx = self._ctx(self._thresholds(), X=X, y=np.zeros(n), min_X=[0.0, 0.0],
+                        sample_idxs=np.arange(n), polygon=square(0, 0, 10),
+                        aspect=np.full(n, 180.0))
+        mask = np.ones(n, dtype=bool)
+
+        reason, cand = _evaluate_candidate(
+            ctx, y_pred=np.zeros(n), residuals_subset=np.zeros(n),
+            inlier_mask_subset=mask, coef=[0.001, 0.0], slope=0.0,
+            score_best=0.0, n_inliers_best=1000)
+
+        self.assertEqual(reason, "LESS_INLIERS")
+        self.assertIsNone(cand)
+
+    def test_accepts_a_viable_candidate(self):
+        # a compact, well-fitting flat block hugging the polygon edges: passes every
+        # check and comes back as a _Candidate aligned to the 180-degree face:
+        X = self._solid_block()
+        n = len(X)
+        ctx = self._ctx(self._thresholds(), X=X, y=np.zeros(n), min_X=[0.0, 0.0],
+                        sample_idxs=np.arange(n), polygon=square(0, 0, 10),
+                        aspect=np.full(n, 180.0))
+        mask = np.ones(n, dtype=bool)
+
+        reason, cand = _evaluate_candidate(
+            ctx, y_pred=np.zeros(n), residuals_subset=np.zeros(n),
+            inlier_mask_subset=mask, coef=[0.001, 0.0], slope=0.0,
+            score_best=float("inf"), n_inliers_best=1)
+
+        self.assertIsNone(reason)
+        self.assertEqual(cand.n_inliers, n)
+        self.assertEqual(cand.aspect, 180)
+        self.assertEqual(cand.score, 0.0)
+        self.assertEqual(int(cand.inlier_mask.sum()), n)
+        self.assertEqual(cand.plane_properties("RANSAC", "id-1")["plane_id"], "id-1")
 
 
 class SampleTest(unittest.TestCase):

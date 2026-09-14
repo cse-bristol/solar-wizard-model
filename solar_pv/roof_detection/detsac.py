@@ -4,18 +4,14 @@ from collections import defaultdict
 from typing import List, Set
 
 import numpy as np
-import math
 from shapely.geometry import Polygon
 from sklearn.linear_model import LinearRegression
-from sklearn import metrics
 
-from solar_pv.constants import ROOFDET_GOOD_SCORE, AZIMUTH_ALIGNMENT_THRESHOLD, \
-    FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD, FLAT_ROOF_DEGREES_THRESHOLD
+from solar_pv.constants import FLAT_ROOF_DEGREES_THRESHOLD
 from solar_pv.geos import slope_deg, aspect_deg
 from solar_pv.roof_detection.premade_planes import Plane
-from solar_pv.roof_detection.ransac import _exclude_unconnected, \
-    _pixel_groups, _group_areas, _min_thinness_ratio, get_potential_aspects, \
-    closest_azimuth, _convex_hull_ratio, _thinness_ratio, _aspect_stats, _plane_metrics
+from solar_pv.roof_detection.ransac import _exclude_unconnected, _plane_metrics, \
+    _evaluate_candidate, _FitContext, _Thresholds, _SCORE_GATE_REASONS
 
 
 _NEVER_INLIER = 9999
@@ -92,6 +88,12 @@ class DETSACRegressorForLIDAR:
         n_samples = X.shape[0]
         sample_idxs = np.arange(n_samples)
 
+        ctx = _FitContext(
+            thresholds=_Thresholds.from_regressor(self), X=X, y=y, aspect=aspect,
+            polygon=polygon, min_X=min_X, sample_idxs=sample_idxs,
+            total_points_in_building=total_points_in_building,
+            aspect_fallback_to_circ_mean=True)
+
         if len(premade_planes) == len(skip_planes):
             self.finished = True
             return self
@@ -125,164 +127,32 @@ class DETSACRegressorForLIDAR:
 
             # classify data into inliers and outliers
             inlier_mask_subset = residuals_subset_copy < residual_threshold
-            n_inliers_subset = np.sum(inlier_mask_subset)
 
-            # less inliers -> skip current random sample
-            # if n_inliers_subset < n_inliers_best:
-            #     bad_sample_reasons["LESS_INLIERS"] += 1
-            #     self.n_skips_no_inliers_ += 1
-            #     continue
-            # RANSAC for LIDAR addition: don't optimise for number of points
-            # fit to plane.
-            # See Tarsha-Kurdi, 2007
-            if n_inliers_subset < self.min_points_per_plane:
+            reason, cand = _evaluate_candidate(
+                ctx, y_pred, residuals_subset, inlier_mask_subset,
+                base_estimator.coef_, slope, score_best, n_inliers_best)
+            if reason is not None:
                 if debug:
-                    bad_sample_reasons["MIN_POINTS_PER_PLANE"] += 1
-                skip_planes.add(plane.plane_id)
-                continue
-
-            # extract inlier data set
-            inlier_idxs_subset = sample_idxs[inlier_mask_subset]
-
-            # RANSAC for LIDAR addition: prep for following plane morphology checks
-            groups, num_groups = _pixel_groups(X[inlier_idxs_subset], min_X, self.resolution_metres)
-            group_areas = _group_areas(groups)
-
-            # RANSAC for LIDAR addition: check that size of the largest continuous
-            # group of pixels is also over the minimum number of points per plane:
-            largest = max(group_areas, key=group_areas.get)
-            roof_plane_area = group_areas[largest]
-            if roof_plane_area < self.min_points_per_plane or roof_plane_area < (
-                    total_points_in_building * self.min_points_per_plane_perc):
-                if debug:
-                    bad_sample_reasons["MIN_POINTS_PER_LARGEST_GROUP"] += 1
-                skip_planes.add(plane.plane_id)
-                continue
-
-            # re-extract (connected) inlier data set
-            inlier_mask_subset = _exclude_unconnected(X, min_X, inlier_mask_subset, res=self.resolution_metres)
-            inlier_idxs_subset = sample_idxs[inlier_mask_subset]
-            X_inlier_subset = X[inlier_idxs_subset]
-            y_inlier_subset = y[inlier_idxs_subset]
-            y_inlier_pred = y_pred[inlier_idxs_subset]
-
-            # score of inlier data set
-            score_subset = metrics.mean_absolute_error(y_inlier_subset, y_inlier_pred)
-            # score_subset = base_estimator.score(X_inlier_subset, y_inlier_subset)
-
-            sd = np.std(residuals_subset[inlier_mask_subset])
-
-            if score_subset < ROOFDET_GOOD_SCORE and score_best < ROOFDET_GOOD_SCORE:
-                if n_inliers_subset <= n_inliers_best or (n_inliers_subset == n_inliers_best and score_subset > score_best):
-                    if debug:
-                        bad_sample_reasons["LESS_INLIERS"] += 1
-                    continue
-            elif score_subset > score_best or (score_subset == score_best and n_inliers_subset <= n_inliers_best):
-                if debug:
-                    bad_sample_reasons["WORSE_SCORE"] += 1
-                continue
-
-            # same number of inliers but worse score -> skip current random
-            # sample
-            # if (n_inliers_subset == n_inliers_best
-            #         and sd > sd_best):
-            #     bad_sample_reasons["WORSE_SD"] += 1
-            #     continue
-            # RANSAC for LIDAR addition: use stddev of inlier distance to plane
-            # as score instead
-            # See Tarsha-Kurdi, 2007
-            # if sd > sd_best or (sd == sd_best and n_inliers_subset <= n_inliers_best):
-            #     if debug:
-            #         bad_sample_reasons["WORSE_SD"] += 1
-            #     continue
-
-            # RANSAC for LIDAR addition:
-            # if difference between circular mean of pixel aspects and slope aspect is too high:
-            # if circular deviation of pixel aspects too high:
-            aspect_circ_mean, aspect_circ_sd, aspect_diff = _aspect_stats(
-                aspect, inlier_mask_subset, base_estimator.coef_[0], base_estimator.coef_[1])
-
-            if slope > FLAT_ROOF_DEGREES_THRESHOLD:
-                if aspect_diff > math.radians(self.max_aspect_circular_mean_degrees):
-                    if debug:
-                        bad_sample_reasons["CIRCULAR_MEAN"] += 1
+                    bad_sample_reasons[reason] += 1
+                # A sample rejected on score is just skipped this iteration; every other
+                # rejection bans the premade plane for the rest of the fit.
+                if reason not in _SCORE_GATE_REASONS:
                     skip_planes.add(plane.plane_id)
-                    continue
-
-                if aspect_circ_sd > self.max_aspect_circular_sd:
-                    if debug:
-                        bad_sample_reasons["CIRCULAR_SD"] += 1
-                    skip_planes.add(plane.plane_id)
-                    continue
-
-            # RANSAC for LiDAR addition: check ratio of points area to ratio of convex
-            # hull of points area.
-            # If the convex hull's area is significantly larger, it's likely to be a
-            # bad plane that cuts through the roof at an angle
-            cv_hull_ratio, only_largest = _convex_hull_ratio(groups, largest, roof_plane_area)
-            if cv_hull_ratio < self.min_convex_hull_ratio:
-                if debug:
-                    bad_sample_reasons["CONVEX_HULL_RATIO"] += 1
-                skip_planes.add(plane.plane_id)
-                continue
-
-            # RANSAC for LiDAR addition: thinness ratio check
-            thinness_ratio = _thinness_ratio(only_largest, roof_plane_area)
-            if thinness_ratio < _min_thinness_ratio(roof_plane_area):
-                if debug:
-                    bad_sample_reasons["THINNESS_RATIO"] += 1
-                skip_planes.add(plane.plane_id)
-                continue
-
-            azimuths = get_potential_aspects(X_inlier_subset, polygon)
-            if len(azimuths) == 0:
-                if debug:
-                    bad_sample_reasons["NO_NEARBY_FACE"] += 1
-                skip_planes.add(plane.plane_id)
-                continue
-
-            if slope > FLAT_ROOF_DEGREES_THRESHOLD:
-                target_az = aspect_deg(base_estimator.coef_[0], base_estimator.coef_[1])
-                az_diff_thresh = AZIMUTH_ALIGNMENT_THRESHOLD
-                aspect_deg_ = closest_azimuth(azimuths, target_az, az_diff_thresh)
-                if aspect_deg_ is None:
-                    aspect_deg_ = closest_azimuth(azimuths, math.degrees(aspect_circ_mean), az_diff_thresh)
-            else:
-                target_az = 180
-                az_diff_thresh = FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD
-                aspect_deg_ = closest_azimuth(azimuths, target_az, az_diff_thresh)
-
-            if aspect_deg_ is None:
-                if debug:
-                    bad_sample_reasons["NO_CLOSE_ASPECT"] += 1
-                skip_planes.add(plane.plane_id)
                 continue
 
             if debug:
-                # print(f"new best SD plane found. SD {sd}. Old SD {sd_best}. Current trial: {self.n_trials_}")
-                print(f"new best score plane found. MAE {score_best} -> {score_subset} . inliers {n_inliers_best} -> {n_inliers_subset} .  Current trial: {self.n_trials_}")
+                print(f"new best score plane found. MAE {score_best} -> {cand.score} . inliers {n_inliers_best} -> {cand.n_inliers} .  Current trial: {self.n_trials_}")
 
-            # save current random sample as best sample
-            n_inliers_best = n_inliers_subset
+            # save current best sample
+            n_inliers_best = cand.n_inliers
             best_sample_idxs = plane.idxs
-            score_best = score_subset
-            sd_best = sd
-
-            plane_properties_best = {
-                "sd": sd_best,
-                "score": score_best,
-                "aspect_circ_mean": math.degrees(aspect_circ_mean) if aspect_circ_mean else None,
-                "aspect_circ_sd": aspect_circ_sd,
-                "thinness_ratio": thinness_ratio,
-                "cv_hull_ratio": cv_hull_ratio,
-                "plane_type": plane.plane_type,
-                "plane_id": plane.plane_id,
-                "aspect": aspect_deg_,
-            }
-            inlier_mask_best = inlier_mask_subset
-            X_inlier_best = X_inlier_subset
-            y_inlier_best = y_inlier_subset
-            inlier_best_idxs_subset = inlier_idxs_subset
+            score_best = cand.score
+            sd_best = cand.sd
+            plane_properties_best = cand.plane_properties(plane.plane_type, plane.plane_id)
+            inlier_mask_best = cand.inlier_mask
+            X_inlier_best = cand.X_inlier
+            y_inlier_best = cand.y_inlier
+            inlier_best_idxs_subset = cand.inlier_idxs
             sample_residual_threshold_best = plane.sample_residual_threshold
 
             # RANSAC for LiDAR addition:
