@@ -263,11 +263,8 @@ class RANSACRegressorForLIDAR:
             # RANSAC for LIDAR addition:
             # if difference between circular mean of pixel aspects and slope aspect is too high:
             # if circular deviation of pixel aspects too high:
-            aspect_inliers = np.radians(aspect[inlier_mask_subset])
-            plane_aspect = aspect_rad(base_estimator.coef_[0], base_estimator.coef_[1])
-            aspect_circ_mean = circular_mean_rad(aspect_inliers)
-            aspect_diff = rad_diff(plane_aspect, aspect_circ_mean)
-            aspect_circ_sd = circular_sd_rad(aspect_inliers)
+            aspect_circ_mean, aspect_circ_sd, aspect_diff = _aspect_stats(
+                aspect, inlier_mask_subset, base_estimator.coef_[0], base_estimator.coef_[1])
             if slope > FLAT_ROOF_DEGREES_THRESHOLD:
                 if aspect_diff > math.radians(self.max_aspect_circular_mean_degrees):
                     skip_planes.add(tuple(subset_idxs))
@@ -307,10 +304,7 @@ class RANSACRegressorForLIDAR:
             # hull of points area.
             # If the convex hull's area is significantly larger, it's likely to be a
             # bad plane that cuts through the roof at an angle
-            only_largest = groups == largest
-            convex_hull = morphology.convex_hull_image(only_largest)
-            convex_hull_area = np.count_nonzero(convex_hull)
-            cv_hull_ratio = roof_plane_area / convex_hull_area
+            cv_hull_ratio, only_largest = _convex_hull_ratio(groups, largest, roof_plane_area)
             if cv_hull_ratio < self.min_convex_hull_ratio:
                 skip_planes.add(tuple(subset_idxs))
                 if debug:
@@ -318,8 +312,7 @@ class RANSACRegressorForLIDAR:
                 continue
 
             # RANSAC for LiDAR addition: thinness ratio check
-            perimeter = perimeter_crofton(only_largest, directions=4)
-            thinness_ratio = (4 * np.pi * roof_plane_area) / (perimeter * perimeter)
+            thinness_ratio = _thinness_ratio(only_largest, roof_plane_area)
             if thinness_ratio < _min_thinness_ratio(roof_plane_area):
                 skip_planes.add(tuple(subset_idxs))
                 if debug:
@@ -424,32 +417,8 @@ class RANSACRegressorForLIDAR:
             self.sd = sd_best
             self.plane_properties = plane_properties_best
 
-            inlier_idxs_subset = sample_idxs[mask_without_excluded]
-            y_true = y[inlier_idxs_subset]
-            y_pred = self.estimator_.predict(X[inlier_idxs_subset])
-
-            a, b = base_estimator.coef_
-            d = base_estimator.intercept_
-            slope = slope_deg(a, b)
-            try:
-                msle = metrics.mean_squared_log_error(y_true, y_pred)
-            except ValueError:
-                msle = None
-            self.plane_properties.update({
-                "x_coef": a,
-                "y_coef": b,
-                "intercept": d,
-                "slope": slope,
-                "is_flat": slope <= FLAT_ROOF_DEGREES_THRESHOLD,
-                "aspect_raw": aspect_deg(a, b),
-                "inliers_xy": X[mask_without_excluded],
-                "r2": metrics.r2_score(y_true, y_pred),
-                "mae": metrics.mean_absolute_error(y_true, y_pred),
-                "mse": metrics.mean_squared_error(y_true, y_pred),
-                "rmse": metrics.mean_squared_error(y_true, y_pred, squared=False),
-                "msle": msle,
-                "mape": metrics.mean_absolute_percentage_error(y_true, y_pred),
-            })
+            self.plane_properties.update(_plane_metrics(
+                base_estimator, X, y, mask_without_excluded, sample_idxs))
 
         if debug:
             if self.success:
@@ -518,6 +487,81 @@ def _group_areas(groups) -> dict:
     if 0 in group_areas:
         del group_areas[0]
     return group_areas
+
+
+def _convex_hull_ratio(groups, largest, roof_plane_area: int):
+    """
+    Ratio of the largest contiguous group's pixel area to the area of that group's
+    convex hull. A low ratio indicates a plane that has cut across a roof at an angle,
+    leaving a concave (e.g. u-shaped) intersection with the actual points.
+
+    Returns the ratio and the boolean image of the largest group (which the
+    thinness-ratio check reuses).
+    """
+    only_largest = groups == largest
+    convex_hull = morphology.convex_hull_image(only_largest)
+    convex_hull_area = np.count_nonzero(convex_hull)
+    return roof_plane_area / convex_hull_area, only_largest
+
+
+def _thinness_ratio(only_largest, roof_plane_area: int) -> float:
+    """
+    `thinness ratio` (4 * pi * area / perimeter^2) of the largest contiguous group -
+    a standard GIS measure for detecting sliver polygons. A low value means a long,
+    thin shape, which is no good for PV panels even if accurately detected.
+    """
+    perimeter = perimeter_crofton(only_largest, directions=4)
+    return (4 * np.pi * roof_plane_area) / (perimeter * perimeter)
+
+
+def _aspect_stats(aspect: np.ndarray, inlier_mask, x_coef: float, y_coef: float):
+    """
+    Circular statistics comparing the aspects of the inlier LIDAR pixels with the
+    aspect of the fitted plane.
+
+    Returns (circular mean of the pixel aspects, circular sd of the pixel aspects,
+    difference between the plane's aspect and that circular mean) - all in radians.
+    """
+    aspect_inliers = np.radians(aspect[inlier_mask])
+    plane_aspect = aspect_rad(x_coef, y_coef)
+    aspect_circ_mean = circular_mean_rad(aspect_inliers)
+    aspect_diff = rad_diff(plane_aspect, aspect_circ_mean)
+    aspect_circ_sd = circular_sd_rad(aspect_inliers)
+    return aspect_circ_mean, aspect_circ_sd, aspect_diff
+
+
+def _plane_metrics(estimator, X, y, mask_without_excluded, sample_idxs) -> dict:
+    """
+    Coefficients, derived slope/aspect, and goodness-of-fit metrics for the final
+    fitted plane, computed over its connected inliers. Returned as a dict to merge
+    into the plane's properties.
+    """
+    inlier_idxs = sample_idxs[mask_without_excluded]
+    y_true = y[inlier_idxs]
+    y_pred = estimator.predict(X[inlier_idxs])
+
+    a, b = estimator.coef_
+    d = estimator.intercept_
+    slope = slope_deg(a, b)
+    try:
+        msle = metrics.mean_squared_log_error(y_true, y_pred)
+    except ValueError:
+        msle = None
+    return {
+        "x_coef": a,
+        "y_coef": b,
+        "intercept": d,
+        "slope": slope,
+        "is_flat": slope <= FLAT_ROOF_DEGREES_THRESHOLD,
+        "aspect_raw": aspect_deg(a, b),
+        "inliers_xy": X[mask_without_excluded],
+        "r2": metrics.r2_score(y_true, y_pred),
+        "mae": metrics.mean_absolute_error(y_true, y_pred),
+        "mse": metrics.mean_squared_error(y_true, y_pred),
+        "rmse": metrics.mean_squared_error(y_true, y_pred, squared=False),
+        "msle": msle,
+        "mape": metrics.mean_absolute_percentage_error(y_true, y_pred),
+    }
 
 
 def _min_thinness_ratio(area) -> float:

@@ -1,31 +1,21 @@
 # This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
-import itertools
 from collections import defaultdict
-from dataclasses import dataclass
-from typing import Tuple, List, Set
+from typing import List, Set
 
 import numpy as np
 import math
-from scipy import ndimage
-from shapely.geometry import LineString, MultiPoint, Polygon
-from skimage.morphology import local_minima
-from skimage.segmentation import watershed
-
-from skimage import measure, morphology, segmentation, color, graph
+from shapely.geometry import Polygon
 from sklearn.linear_model import LinearRegression
 from sklearn import metrics
-from skimage.measure import perimeter_crofton
 
 from solar_pv.constants import ROOFDET_GOOD_SCORE, AZIMUTH_ALIGNMENT_THRESHOLD, \
     FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD, FLAT_ROOF_DEGREES_THRESHOLD
-from solar_pv.geos import polygon_line_segments, simplify_by_angle, azimuth_deg, slope_deg, \
-    aspect_deg, aspect_rad, circular_mean_rad, circular_sd_rad, circular_variance_rad, rad_diff, \
-    deg_diff, to_positive_angle
+from solar_pv.geos import slope_deg, aspect_deg
 from solar_pv.roof_detection.premade_planes import Plane
 from solar_pv.roof_detection.ransac import _exclude_unconnected, \
-    _sample, _pixel_groups, _group_areas, _min_thinness_ratio, get_potential_aspects, \
-    closest_azimuth
+    _pixel_groups, _group_areas, _min_thinness_ratio, get_potential_aspects, \
+    closest_azimuth, _convex_hull_ratio, _thinness_ratio, _aspect_stats, _plane_metrics
 
 
 _NEVER_INLIER = 9999
@@ -209,11 +199,8 @@ class DETSACRegressorForLIDAR:
             # RANSAC for LIDAR addition:
             # if difference between circular mean of pixel aspects and slope aspect is too high:
             # if circular deviation of pixel aspects too high:
-            aspect_inliers = np.radians(aspect[inlier_mask_subset])
-            plane_aspect = aspect_rad(base_estimator.coef_[0], base_estimator.coef_[1])
-            aspect_circ_mean = circular_mean_rad(aspect_inliers)
-            aspect_diff = rad_diff(plane_aspect, aspect_circ_mean)
-            aspect_circ_sd = circular_sd_rad(aspect_inliers)
+            aspect_circ_mean, aspect_circ_sd, aspect_diff = _aspect_stats(
+                aspect, inlier_mask_subset, base_estimator.coef_[0], base_estimator.coef_[1])
 
             if slope > FLAT_ROOF_DEGREES_THRESHOLD:
                 if aspect_diff > math.radians(self.max_aspect_circular_mean_degrees):
@@ -232,10 +219,7 @@ class DETSACRegressorForLIDAR:
             # hull of points area.
             # If the convex hull's area is significantly larger, it's likely to be a
             # bad plane that cuts through the roof at an angle
-            only_largest = groups == largest
-            convex_hull = morphology.convex_hull_image(only_largest)
-            convex_hull_area = np.count_nonzero(convex_hull)
-            cv_hull_ratio = roof_plane_area / convex_hull_area
+            cv_hull_ratio, only_largest = _convex_hull_ratio(groups, largest, roof_plane_area)
             if cv_hull_ratio < self.min_convex_hull_ratio:
                 if debug:
                     bad_sample_reasons["CONVEX_HULL_RATIO"] += 1
@@ -243,8 +227,7 @@ class DETSACRegressorForLIDAR:
                 continue
 
             # RANSAC for LiDAR addition: thinness ratio check
-            perimeter = perimeter_crofton(only_largest, directions=4)
-            thinness_ratio = (4 * np.pi * roof_plane_area) / (perimeter * perimeter)
+            thinness_ratio = _thinness_ratio(only_largest, roof_plane_area)
             if thinness_ratio < _min_thinness_ratio(roof_plane_area):
                 if debug:
                     bad_sample_reasons["THINNESS_RATIO"] += 1
@@ -358,33 +341,8 @@ class DETSACRegressorForLIDAR:
             self.sd = sd_best
             self.plane_properties = plane_properties_best
 
-            inlier_idxs_subset = sample_idxs[mask_without_excluded]
-            y_true = y[inlier_idxs_subset]
-            y_pred = self.estimator_.predict(X[inlier_idxs_subset])
-
-            a, b = base_estimator.coef_
-            d = base_estimator.intercept_
-            slope = slope_deg(a, b)
-            try:
-                msle = metrics.mean_squared_log_error(y_true, y_pred)
-            except ValueError:
-                msle = None
-
-            self.plane_properties.update({
-                "x_coef": a,
-                "y_coef": b,
-                "intercept": d,
-                "slope": slope,
-                "is_flat": slope <= FLAT_ROOF_DEGREES_THRESHOLD,
-                "aspect_raw": aspect_deg(a, b),
-                "inliers_xy": X[mask_without_excluded],
-                "r2": metrics.r2_score(y_true, y_pred),
-                "mae": metrics.mean_absolute_error(y_true, y_pred),
-                "mse": metrics.mean_squared_error(y_true, y_pred),
-                "rmse": metrics.mean_squared_error(y_true, y_pred, squared=False),
-                "msle": msle,
-                "mape": metrics.mean_absolute_percentage_error(y_true, y_pred),
-            })
+            self.plane_properties.update(_plane_metrics(
+                base_estimator, X, y, mask_without_excluded, sample_idxs))
 
         skip_planes.add(plane_properties_best["plane_id"])
 
