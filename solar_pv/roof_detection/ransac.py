@@ -4,21 +4,15 @@ from collections import defaultdict
 from typing import Set, Tuple, List, Optional
 
 import numpy as np
-import warnings
 import math
 from shapely.geometry import Polygon, MultiPoint
 from shapely.strtree import STRtree
 from sklearn import metrics
 
-from sklearn.linear_model import RANSACRegressor
 from skimage import measure, morphology
-from sklearn.base import clone
 from sklearn.linear_model import LinearRegression
-from sklearn.utils import check_random_state, check_consistent_length
+from sklearn.utils import check_array, check_random_state, check_consistent_length
 from sklearn.utils.random import sample_without_replacement
-from sklearn.utils.validation import _check_sample_weight
-from sklearn.utils.validation import has_fit_parameter
-from sklearn.exceptions import ConvergenceWarning
 from skimage.measure import perimeter_crofton
 
 from solar_pv.constants import AZIMUTH_ALIGNMENT_THRESHOLD, \
@@ -31,81 +25,55 @@ from solar_pv.geos import simplify_by_angle, polygon_line_segments, azimuth_deg,
 _NEVER_INLIER = 9999
 
 
-class RANSACRegressorForLIDAR(RANSACRegressor):
+class RANSACRegressorForLIDAR:
 
-    def __init__(self, base_estimator=None, *,
-                 min_samples=None,
-                 residual_threshold=None,
-                 flat_roof_residual_threshold=None,
-                 is_data_valid=None,
-                 is_model_valid=None,
+    def __init__(self, *,
+                 residual_threshold,
+                 flat_roof_residual_threshold,
                  max_trials=100,
-                 max_skips=np.inf,
-                 stop_n_inliers=np.inf,
-                 stop_score=np.inf,
-                 stop_probability=0.99,
-                 loss='absolute_loss',
-                 random_state=None,
-                 # RANSAC for LIDAR additions:
-                 resolution_metres=1,
-                 min_points_per_plane=8,
-                 min_points_per_plane_perc=0.008,
                  max_slope=None,
                  min_slope=None,
+                 min_points_per_plane=8,
+                 min_points_per_plane_perc=0.008,
                  min_convex_hull_ratio=0.65,
-                 max_num_groups=20,
-                 max_group_area_ratio_to_largest=0.02,
                  max_aspect_circular_mean_degrees=90,
-                 max_aspect_circular_sd=1.5):
+                 max_aspect_circular_sd=1.5,
+                 resolution_metres=1,
+                 random_state=None):
         """
+        RANSAC adapted for fitting roof planes to LIDAR (see fit() for the changes
+        made to the standard algorithm). Only extracts one plane per fit() call, so
+        should be re-run until it can't find any more, with the points in the found
+        plane removed from the next round's input.
+
         :param min_points_per_plane_perc: min points per plane as a percentage of total
         points that fall within the building bounds. Default 0.8% (0.008). This will
         only affect larger buildings and stops it finding lots of tiny little sections.
-
-        :param max_num_groups: Maximum number of contiguous groups the inliers are
-        allowed to fall in to.
-
-        :param max_group_area_ratio_to_largest: Maximum ratio of the area of each other
-        group to the area of the largest.
         """
-        super().__init__(base_estimator,
-                         min_samples=min_samples,
-                         residual_threshold=residual_threshold,
-                         is_data_valid=is_data_valid,
-                         is_model_valid=is_model_valid,
-                         max_trials=max_trials,
-                         max_skips=max_skips,
-                         stop_n_inliers=stop_n_inliers,
-                         stop_score=stop_score,
-                         stop_probability=stop_probability,
-                         loss=loss,
-                         random_state=random_state)
-        self.min_points_per_plane = min_points_per_plane
-        self.min_points_per_plane_perc = min_points_per_plane_perc
+        self.residual_threshold = residual_threshold
+        self.flat_roof_residual_threshold = flat_roof_residual_threshold
+        self.max_trials = max_trials
         self.max_slope = max_slope
         self.min_slope = min_slope
+        self.min_points_per_plane = min_points_per_plane
+        self.min_points_per_plane_perc = min_points_per_plane_perc
         self.min_convex_hull_ratio = min_convex_hull_ratio
-        self.max_num_groups = max_num_groups
-        self.max_group_area_ratio_to_largest = max_group_area_ratio_to_largest
         self.max_aspect_circular_mean_degrees = max_aspect_circular_mean_degrees
         self.max_aspect_circular_sd = max_aspect_circular_sd
-        self.flat_roof_residual_threshold = flat_roof_residual_threshold
+        self.resolution_metres = resolution_metres
+        self.random_state = random_state
 
         self.sd = None
         self.plane_properties = {}
-        self.resolution_metres = resolution_metres
         self.success = False
         self.finished = False
 
     def fit(self, X, y,
-            sample_weight=None,
-            # These are all optional parameters just so that the method matches
-            # the base class signature... They are actually required!
-            polygon: Polygon = None,
-            skip_planes: Set[Tuple[int]] = None,
-            aspect: np.ndarray = None,
-            mask: np.ndarray = None,
-            total_points_in_building: int = None,
+            polygon: Polygon,
+            skip_planes: Set[Tuple[int]],
+            aspect: np.ndarray,
+            mask: np.ndarray,
+            total_points_in_building: int,
             debug: bool = False):
         """
         Extended implementation of RANSAC with additions for usage with LIDAR
@@ -146,84 +114,23 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
         This only extracts one plane at a time so should be re-run until it can't find
         any more, with the points in the found plane removed from the next round's input.
         """
-        # Need to validate separately here.
-        # We can't pass multi_ouput=True because that would allow y to be csr.
-        check_X_params = dict(accept_sparse='csr')
-        check_y_params = dict(ensure_2d=False)
-        X, y = self._validate_data(X, y, validate_separately=(check_X_params,
-                                                              check_y_params))
+        X = check_array(X, accept_sparse='csr')
+        y = check_array(y, ensure_2d=False)
         check_consistent_length(X, y)
 
-        if self.base_estimator is not None:
-            base_estimator = clone(self.base_estimator)
-        else:
-            base_estimator = LinearRegression()
+        base_estimator = LinearRegression()
 
-        if self.min_samples is None:
-            # assume linear model by default
-            min_samples = X.shape[1] + 1
-        elif 0 < self.min_samples < 1:
-            min_samples = np.ceil(self.min_samples * X.shape[0])
-        elif self.min_samples >= 1:
-            if self.min_samples % 1 != 0:
-                raise ValueError("Absolute number of samples must be an "
-                                 "integer value.")
-            min_samples = self.min_samples
-        else:
-            raise ValueError("Value for `min_samples` must be scalar and "
-                             "positive.")
+        # assume linear model by default:
+        min_samples = X.shape[1] + 1
         if min_samples > X.shape[0]:
             raise ValueError("`min_samples` may not be larger than number "
                              "of samples: n_samples = %d." % (X.shape[0]))
 
-        if self.stop_probability < 0 or self.stop_probability > 1:
-            raise ValueError("`stop_probability` must be in range [0, 1].")
+        residual_threshold = self.residual_threshold
 
-        if self.residual_threshold is None:
-            # MAD (median absolute deviation)
-            residual_threshold = np.median(np.abs(y - np.median(y)))
-        else:
-            residual_threshold = self.residual_threshold
-
-        if self.loss == "absolute_loss":
-            if y.ndim == 1:
-                loss_function = lambda y_true, y_pred: np.abs(y_true - y_pred)
-            else:
-                loss_function = lambda \
-                    y_true, y_pred: np.sum(np.abs(y_true - y_pred), axis=1)
-
-        elif self.loss == "squared_loss":
-            if y.ndim == 1:
-                loss_function = lambda y_true, y_pred: (y_true - y_pred) ** 2
-            else:
-                loss_function = lambda \
-                    y_true, y_pred: np.sum((y_true - y_pred) ** 2, axis=1)
-
-        elif callable(self.loss):
-            loss_function = self.loss
-
-        else:
-            raise ValueError(
-                "loss should be 'absolute_loss', 'squared_loss' or a callable."
-                "Got %s. " % self.loss)
+        loss_function = lambda y_true, y_pred: np.abs(y_true - y_pred)
 
         random_state = check_random_state(self.random_state)
-
-        try:  # Not all estimator accept a random_state
-            base_estimator.set_params(random_state=random_state)
-        except ValueError:
-            pass
-
-        estimator_fit_has_sample_weight = has_fit_parameter(base_estimator,
-                                                            "sample_weight")
-        estimator_name = type(base_estimator).__name__
-        if (sample_weight is not None and not
-                estimator_fit_has_sample_weight):
-            raise ValueError("%s does not support sample_weight. Samples"
-                             " weights are only used for the calibration"
-                             " itself." % estimator_name)
-        if sample_weight is not None:
-            sample_weight = _check_sample_weight(sample_weight, X)
 
         # RANSAC for LIDAR additions:
         min_X = [np.amin(X[:, 0]), np.amin(X[:, 1])]
@@ -240,9 +147,6 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
         y_inlier_best = None
         inlier_best_idxs_subset = None
         best_subset_idxs = None
-        self.n_skips_no_inliers_ = 0
-        self.n_skips_invalid_data_ = 0
-        self.n_skips_invalid_model_ = 0
 
         # number of data samples
         n_samples = X.shape[0]
@@ -252,10 +156,6 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
         max_trials = self.max_trials
         while self.n_trials_ < max_trials:
             self.n_trials_ += 1
-
-            if (self.n_skips_no_inliers_ + self.n_skips_invalid_data_ +
-                    self.n_skips_invalid_model_) > self.max_skips:
-                break
 
             # choose random sample set
             subset_idxs = _sample(n_samples, min_samples, random_state=random_state, mask=mask)
@@ -314,7 +214,6 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
             # See Tarsha-Kurdi, 2007
             if n_inliers_subset < self.min_points_per_plane:
                 skip_planes.add(tuple(subset_idxs))
-                self.n_skips_no_inliers_ += 1
                 if debug:
                     bad_sample_reasons["MIN_POINTS_PER_PLANE"] += 1
                 continue
@@ -486,10 +385,6 @@ class RANSACRegressorForLIDAR(RANSACRegressor):
             #     max_trials,
             #     _dynamic_max_trials(n_inliers_best, n_samples,
             #                         min_samples, self.stop_probability))
-
-            # break if sufficient number of inliers
-            if n_inliers_best >= self.stop_n_inliers:
-                break
 
         if debug:
             print("RANSAC finished.")

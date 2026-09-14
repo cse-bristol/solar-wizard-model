@@ -160,8 +160,6 @@ def _detect_building_roof_planes(building: RoofDetBuilding,
     while np.count_nonzero(mask) > min_points_per_plane:
         detsac = DETSACRegressorForLIDAR(residual_threshold=0.25,
                                          flat_roof_residual_threshold=0.1,
-                                         max_slope=75,
-                                         min_slope=0,
                                          min_points_per_plane=min_points_per_plane,
                                          resolution_metres=resolution_metres)
         detsac.fit(xy, z,
