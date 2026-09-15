@@ -1,0 +1,205 @@
+# Plan: replace GRASS GIS / PVMAPS with a native-Python solar model
+
+Status: **proposed** · Owner: Neil · Last updated: 2026-09-15
+
+## Goal
+
+Remove the runtime dependency on GRASS GIS and the PVMAPS addon modules
+(`r.horizonmask`, `r.pv`) by porting the parts we actually use to Python (numpy).
+
+Why:
+
+- **Maintenance**: the model is pinned to nixpkgs 22.05 solely to build GRASS 8.2 +
+  PVMAPS (`nix/grass-8.2.0-pvmaps.nix`, `default.nix` `pkgs2205`). Updating is painful.
+- **Impedance mismatch**: the real numerical work is two algorithms, wrapped in ~4 files
+  of subprocess/mapset/raster-import-export plumbing
+  (`grass_gis_user.py`, `pvmaps.py`, `pvmaps_setup.py`) plus a Postgis raster round-trip
+  in `aggregate_pixel_results.py`. A numpy port collapses most of this.
+- **Structure**: whole-job raster processing forces the current DB-centric shape. Working
+  in-process on arrays is a prerequisite for the longer-term goals of running a single
+  building end-to-end and eventually dropping the DB dependency.
+
+## Agreed decisions (2026-09-15)
+
+- **Accuracy target: tight, ~1–2% on yearly kWh vs the current GRASS/PVMAPS output.**
+- **Scope: through Phase 3** — port the two algorithms *and* collapse the
+  raster→Postgis→pixels round-trip. Per-building restructure is a follow-up, not in scope.
+- **Validation oracle: the frozen GRASS/PVMAPS output**, not the PVGIS web API.
+  PVMAPS/`r.pv` is frozen; the PVGIS API is still actively developed and has **diverged**
+  from it, so the API is only a secondary *shape* check (seasonality, orientation
+  response) at a loose tolerance — never the pass/fail gate for the 1–2% target.
+
+## What GRASS actually does for us
+
+Two numerical jobs, plus data-staging plumbing that exists only because GRASS keeps data
+in its own raster database:
+
+| Job | GRASS module | Computes | Current code |
+|---|---|---|---|
+| **A. Horizon** | `r.horizonmask` | Per masked pixel, per azimuth direction (CCW from East), max terrain elevation angle within `horizon_search_radius`. Radians, clamped 0–π/2. | `pvmaps._calc_horizon` (`pvmaps.py:412`) |
+| **B. Irradiation → PV** | `r.pv` (JRC PVMAPS fork of `r.sun`) | Per pixel, integrate a representative day per month (`step=0.25h`): beam/diffuse/reflected irradiance with horizon shadowing, then PVMAPS module-temperature + 8-coeff polynomial efficiency (`resources/{csi,cdte}.coeffs`) → PV power as if each pixel were a **1 kWp** system. Wind + spectral corrections, summed to monthly Wh + yearly kWh. | `pvmaps._pv_calc`, `_apply_wind/spectral_corrections`, `_get_annual_rasters` (`pvmaps.py:486–557`) |
+
+Everything else is plumbing that disappears with GRASS:
+
+- `grass_gis_user.py` — env, subprocess, gisrc, mapsets, threaded command runner.
+- `pvmaps_setup.py` — stages `pvgis_data.tar` (worldwide met rasters) into a 4326 GRASS DB,
+  reprojects the UK subset into a 27700 GRASS DB, caches as `pvgis_data_uk.tar`. Exists
+  **only** because the met data has to live inside GRASS.
+- `pvmaps.py` — ~30 `r.mapcalc`/`r.*` shell calls: mask null-fix, slope/aspect calc,
+  compass↔GRASS aspect conversion, flat-roof overrides, horizon clamp, PV calc, wind/
+  spectral corrections, annual sum, raster import/export.
+- `aggregate_pixel_results.py` — reads exported rasters back **out of Postgis**
+  (GeoTIFF → `rasters_to_postgis` → `pixels_for_buildings`) to aggregate to roof planes.
+
+The `r.pv` met inputs from `pvgis_data.tar` are just **UK-wide data rasters** we sample:
+Linke turbidity `tl_0m_MM`, beam/diffuse clear-sky coefficients `kcb_MM`/`kcd_MM`,
+3-hourly temperatures `t2m_avg_MM_HH` (+ `t_gradient`, `t_offset_f_era`),
+`windeffect_MM`, `spectraleffect_{cSi,CdTe}_MM`. **None needs GRASS.**
+
+## The contract to reproduce
+
+The port is a drop-in replacement for `pvgis(...)` (`model_solar_pv.py:146`). The natural
+seam is the per-pixel quantities `aggregate_pixel_results` already consumes:
+
+- `kwh_year` — 1 kWp-equivalent yearly kWh, per pixel.
+- `month_01_wh` … `month_12_wh` — representative-day Wh, per pixel.
+- `horizon_00` … `horizon_NN` — radians, per pixel.
+
+Match at that seam and the whole downstream (`aggregate_pixel_results`,
+`pv_roof_plane.horizon real[]`, reports, `PV_MODEL_VERSION`) is untouched in Phases 1–2.
+
+## Target architecture
+
+Replace `solar_pv/pvgis/{pvmaps,pvmaps_setup,grass_gis_user}.py` with:
+
+```
+solar_pv/pv/horizon.py       # port of r.horizonmask: DEM + mask -> per-pixel horizon profile
+solar_pv/pv/irradiation.py   # port of r.sun clear-sky model (ESRA / Hofierka-Šúri)
+solar_pv/pv/pv_model.py      # r.pv PV layer: module temp + poly efficiency + wind/spectral
+solar_pv/pv/met_data.py      # sample the 27700 met GeoTIFFs (from pvgis_data_uk.tar)
+solar_pv/pv/run_pv.py        # orchestration replacing pvgis()
+solar_pv/pv/golden/          # Phase 0 validation harness (see below)
+```
+
+Notes:
+
+- **Met data** ships as pre-extracted **27700 GeoTIFFs** — precisely the contents of the
+  `pvgis_data_uk.tar` already provided (396 members). Sampled per-job with numpy/GDAL.
+  Deletes `pvmaps_setup.py` and the `PVGIS_GRASS_DBASE_DIR` env var; changes the form of
+  the `pvgis_data.tar` dependency to "a directory of GeoTIFFs".
+- **Reuse**: solar declination is already ported (`pvmaps._calc_solar_declination`,
+  `pvmaps.py:255`); monthly representative days are `_monthly_pv_time_steps`
+  (`pvmaps.py:274`). Aspect/slope convention conversions (`pvmaps.py:442`) and flat-roof
+  overrides (`pvmaps.py:446`) become plain numpy; GDAL-computed slope/aspect are already
+  fed in (`pvgis.py:108`).
+- **Parallelism**: vectorise across pixels with numpy; outer loop is ~12 days × ~96
+  timesteps. Keep an `mp` pool at the per-tile/per-building level if needed, instead of
+  GRASS's per-raster threads.
+
+## Validation strategy (Phase 0 is load-bearing)
+
+**There is currently no frozen PVMAPS oracle in the repo.** `testdata/pvmaps/outputs`
+(the `hpv_wind_spectral_*` / `horizon090_*` golden rasters) is **gitignored** and
+regenerated on each GRASS test run. The only committed references are gdaldem slope/aspect
+(`test_pvmaps_real_data/expected/`) and the cached PVGIS API (`api_real_pv_output.pkl`,
+1024 `([12×E_d], E_year)` tuples) — which has diverged from PVMAPS.
+
+So the **first task is to generate and *freeze* PVMAPS golden rasters** for a set of
+validation areas, while GRASS still builds. Losing the ability to run PVMAPS before this
+is done means losing the only oracle for the 1–2% target.
+
+Three tiers of check, tightest first:
+
+1. **Port vs frozen PVMAPS golden rasters** (pass/fail, ≤~1–2% on yearly kWh; a companion
+   tolerance on monthly Wh and on horizon angle in degrees). Primary gate.
+2. **Component checks** — horizon rasters vs frozen `horizon090_*`; optionally beam/diffuse
+   intermediate rasters. Localises regressions.
+3. **PVGIS API shape check** (loose, secondary) — reuse the sample points +
+   `api_real_pv_output.pkl` machinery in `test_pvmaps.py` to confirm the port stays in the
+   right ballpark and tracks seasonality/orientation. Not a gate.
+
+Validation areas already have committed inputs (elevation, mask, flat-roof overrides,
+sample locations): `test_pvmaps_real_data` and `test_pvmaps_real_data_{alnwick,alnwick_flat,thurso}`.
+These span flat/hilly/urban/coastal and edge-of-met-coverage (thurso lacks spectral+wind
+data), which is good coverage. Freeze goldens for all four.
+
+## Phased plan
+
+**Phase 0 — Freeze goldens + build the harness (do first, while GRASS builds).**
+- Script to run the current `PVMaps` on the committed real-area inputs and freeze
+  yearly/monthly/horizon output rasters into a committed golden directory (not the
+  gitignored `outputs/`). Uses the provided `pvgis_data_uk.tar` so setup skips the slow
+  world→UK conversion.
+- Reusable comparison harness: raster %-diff (masked), API shape-diff (reuse
+  `test_pvmaps.py` helpers), acceptance thresholds. Wired as a test that is skipped until
+  `solar_pv.pv.run_pv` exists, then flips to the pass/fail gate.
+- **Characterise** the natural port-vs-GRASS divergence early to confirm 1–2% is
+  achievable before committing to Phase 2 in full.
+
+**Phase 1 — Port A (horizon). ✅ DONE (2026-09-15).** `solar_pv/pv/horizon.py` +
+`horizon_geo.py`, a faithful numpy port of `r.horizonmask` (nearest-neighbour ray march,
+`length = hypot(di·ew_res, dj·ns_res)`, Earth-curvature drop, running-max slope, clamp
+0–π/2). Takes a mask so only building-footprint pixels are evaluated (index-gather over the
+masked origins, so a sparse mask is cheap), matching r.horizonmask; the full DEM is still
+used as terrain. Validated against the frozen goldens (`solar_pv/pv/golden/horizon_check.py`,
+`test_golden.HorizonPortTest`): **mean abs error ≤0.04°, p99 = 0° (>99% of pixels
+bit-identical to GRASS)** across all four areas; the only differences are 0.02–0.13% of
+pixels at near-obstruction diagonal nearest-neighbour ties (inherent to the algorithm; they
+wash out in roof-plane averaging). Plus analytic unit tests in `solar_pv/pv/test_horizon.py`.
+
+Things learned that Phase 2 depends on:
+- r.horizon does **not** march along the nominal grid azimuth: it derives the direction via
+  a geographic round-trip, so rays are rotated by the local grid convergence (up to ~1.3° at
+  Thurso). `horizon_geo.grass_marching_vectors` reproduces this; ignoring it moves whole
+  percent of pixels. r.pv/r.sun read the horizon rasters by nominal index, so the port keeps
+  the same per-direction ordering.
+- The committed test elevation and the goldens sit on grids offset by a **sub-pixel** shift
+  (GRASS resamples the DEM onto its mask-zoomed region on import); the validation warps the
+  elevation onto the golden grid first. Production rasters share one grid, so this is a
+  fixture-only concern — but Phase 2's PV port must consume the *same* slope/aspect/horizon
+  grid the goldens were computed on.
+- The `360 % horizon_slices` truncation quirk (`pvmaps.py:59`) is gone for free — the port
+  takes float direction steps.
+
+**Phase 2 — Port B (irradiation + PV).** The hard, high-effort part. ESRA clear-sky model
+(beam/diffuse/reflected on an inclined surface with horizon shadowing) per the r.sun refs
+(Hofierka & Šúri 2002; JRC PVGIS calculation docs cited in `constants.py`). Then the PVMAPS
+PV layer: module temperature from 3-hourly `t2m` + irradiance, 8-coeff polynomial
+efficiency, albedo 0.2, wind + spectral raster corrections, monthly→annual sum
+(`pvmaps.py:541`). Validate against yearly/monthly goldens, then end-to-end against
+`pv_roof_plane` kWh. Keep the Postgis-raster seam so it's a true drop-in.
+
+**Phase 3 — Remove the DB round-trip (the payoff).** Once outputs match, feed pixel arrays
+straight into `aggregate_pixel_results` in-process; delete `_write_results_to_db` /
+`rasters_to_postgis` / `pixels_for_buildings` for this path. This is where the wrapping
+actually collapses.
+
+**Phase 4 — Delete GRASS + toolchain.** Remove `grass_gis_user.py`, `pvmaps.py`,
+`pvmaps_setup.py`, `nix/grass-8.2.0-pvmaps.nix`, the `pkgs2205` 22.05 pin + `buildGrass`
+logic in `default.nix`, the `710-pvmaps-nix` dependency, `PVGIS_GRASS_DBASE_DIR`, and the
+`test_pvmaps/` suite (superseded). Update both `CLAUDE.md`s and READMEs. **Bump
+`PV_MODEL_VERSION`** (`src/constants.py` in the webapp) — numbers change, so cost-benefit
+seeding/reports must distinguish old GRASS jobs.
+
+## Risks & effort
+
+- **r.sun port accuracy (Phase 2) dominates.** Well-documented, fully vectorisable, but
+  getting beam/diffuse/reflected + the PVMAPS temperature/efficiency layer to agree to
+  1–2% is iterative. Budget most of the project here.
+- **Hitting 1–2% vs a frozen, quirky C implementation** may surface undocumented PVMAPS
+  behaviours (e.g. the flat-roof aspect/slope overrides, the wind/spectral null-defaulting
+  to 1.0 in `pvmaps.py:521/531`, the `r.pv` return-code-1-on-success quirk). Component
+  checks (tier 2) are there to localise these.
+- **Performance**: GRASS is C + multiprocessed for a reason. Spike a large-area job early
+  in Phase 2 before committing to the numpy approach.
+- **Met-data provenance**: one-time dependency on the UK 27700 GeoTIFFs. The provided
+  `pvgis_data_uk.tar` matches what `pvmaps_setup._transfer_raster` produces (4326→27700 via
+  the 7-param shift, `pvmaps_setup.py:162`); script the extraction reproducibly.
+
+## Open questions
+
+- Where do frozen goldens live? Committing ~1 MB/area of GeoTIFF is fine; a larger set may
+  want git-lfs or a data bucket. (Current `outputs/` is gitignored precisely to avoid this.)
+- Do any reports/consumers read `pv_roof_plane.horizon` in a way that constrains the
+  horizon output format/precision beyond what aggregation needs? (Not found in webapp `src/`
+  so far.)
