@@ -116,6 +116,8 @@ def get_srid(filename: str, fallback: int = None) -> int:
 
 
 def rasterize(pg_uri: str, mask_sql: str, mask_file: str, res: float, srid: int):
+    res = abs(res)
+    
     cmd = shlex.split(f"""
         gdal_rasterize
         -sql "{mask_sql}"
@@ -149,6 +151,9 @@ def rasterize_3d(pg_uri: str,
     else:
         xres = res[0]
         yres = res[1]
+
+    xres = abs(xres)
+    yres = abs(yres)
 
     res = subprocess.run(f"""
         gdal_rasterize
