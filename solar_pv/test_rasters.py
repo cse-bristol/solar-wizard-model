@@ -1,24 +1,29 @@
 # This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 import os
+import shutil
 import subprocess
+import tempfile
 import unittest
 from os.path import join
 from statistics import mean
 
 try:
     import testing.postgresql
+    _HAS_TESTING_POSTGRESQL = True
 except ModuleNotFoundError:
-    pass
+    _HAS_TESTING_POSTGRESQL = False
 
 import psycopg2
 import psycopg2.extras
 
 from solar_pv.rasters import create_elevation_override_raster
 
-_TEST_ELEVATION_RASTER: str = os.path.realpath(
-    "../testdata/solar_pv/rasters/inputs/elevation_4326.tif")
-_TEST_OUT_DIR: str = os.path.realpath("../../testdata/solar_pv/rasters/outputs")
+# Anchor test data to this file, not the cwd, so the test runs from any directory.
+_TESTDATA_DIR: str = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "testdata")
+_TEST_ELEVATION_RASTER: str = os.path.join(
+    _TESTDATA_DIR, "solar_pv", "rasters", "inputs", "elevation_4326.tif")
 _TEST_JOB_ID: int = 0
 
 _HEIGHTS = {
@@ -29,14 +34,16 @@ _HEIGHTS = {
 }
 
 
-@unittest.skip("db test")
+@unittest.skipUnless(_HAS_TESTING_POSTGRESQL, "testing.postgresql not installed")
 class RastersTests(unittest.TestCase):
     def setUp(self):
         self.postgresql = testing.postgresql.Postgresql()
         self.pg_uri: str = self.postgresql.url()
+        self.out_dir: str = tempfile.mkdtemp()
 
     def tearDown(self):
         self.postgresql.stop()
+        shutil.rmtree(self.out_dir, ignore_errors=True)
 
     def _create_test_db_tables(self):
         # create mastermap. building & height tables, and job buildings table
@@ -109,9 +116,11 @@ class RastersTests(unittest.TestCase):
                exclusion_reason models.pv_exclusion_reason,
                height real
             );
-            INSERT INTO solar_pv_job_0.buildings (toid) VALUES ('t0');
-            INSERT INTO solar_pv_job_0.buildings (toid) VALUES ('t1');
-            INSERT INTO solar_pv_job_0.buildings (toid) VALUES ('t2');
+            -- geom_27700 is populated from the (4326) mastermap geometry: this test
+            -- works throughout in 4326, matching the 4326 elevation raster, so the
+            -- rasterize extent and the centroid lookups below line up.
+            INSERT INTO solar_pv_job_0.buildings (toid, geom_27700)
+            SELECT toid, geom_4326 FROM mastermap.building WHERE toid IN ('t0', 't1', 't2');
             """
 
         with psycopg2.connect(self.pg_uri, cursor_factory=psycopg2.extras.DictCursor) as conn:
@@ -125,7 +134,7 @@ class RastersTests(unittest.TestCase):
 
         # 1.
         # Initially no outdated lidar buildings
-        e_o_r = create_elevation_override_raster(self.pg_uri, _TEST_JOB_ID, _TEST_OUT_DIR, _TEST_ELEVATION_RASTER)
+        e_o_r = create_elevation_override_raster(self.pg_uri, _TEST_JOB_ID, self.out_dir, _TEST_ELEVATION_RASTER)
         self.assertIsNone(e_o_r)
 
         # 2.
@@ -136,7 +145,7 @@ class RastersTests(unittest.TestCase):
                 curs.execute("UPDATE solar_pv_job_0.buildings set exclusion_reason = 'OUTDATED_LIDAR_COVERAGE'::models.pv_exclusion_reason WHERE toid = 't0';"
                              "UPDATE solar_pv_job_0.buildings set exclusion_reason = 'OUTDATED_LIDAR_COVERAGE'::models.pv_exclusion_reason WHERE toid = 't1';")
                 conn.commit()
-                e_o_r = create_elevation_override_raster(self.pg_uri, _TEST_JOB_ID, _TEST_OUT_DIR, _TEST_ELEVATION_RASTER)
+                e_o_r = create_elevation_override_raster(self.pg_uri, _TEST_JOB_ID, self.out_dir, _TEST_ELEVATION_RASTER)
                 self.assertIsNotNone(e_o_r)
 
                 # Get centres => test points
@@ -146,7 +155,7 @@ class RastersTests(unittest.TestCase):
                 test_points = curs.fetchall()
 
                 # Get values at test points
-                patch_raster_filename: str = join(_TEST_OUT_DIR, 'elevation_override.tif')
+                patch_raster_filename: str = join(self.out_dir, 'elevation_override.tif')
                 for (toid, test_point_x, test_point_y, exp_height) in test_points:
                     res = subprocess.run(f"""
                         gdallocationinfo

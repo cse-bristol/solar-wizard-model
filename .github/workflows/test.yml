@@ -22,10 +22,8 @@ jobs:
         export NIX_BUILD_GRASS=false
         nix-shell --run "echo 'Nix environment ready'"
     
-    - name: Run tests (excluding PVMAPS and database tests)
+    - name: Run tests (excluding PVMAPS)
       env:
         NIX_BUILD_GRASS: false
       run: |
         nix-shell --run "python3 -m unittest discover -s . -p 'test_*.py' -v"
-      # Note: This excludes test_rasters.py (already skipped) and PVMAPS tests
-      # which require GRASS GIS and PVGIS data that aren't available in CI

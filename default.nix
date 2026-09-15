@@ -31,8 +31,8 @@ pkgs.mkShell {
     d="${toString ./.}"
     python_bin="${python}/bin/python"
 
-    # Only (re)install when either the requirements file or the interpreter changes:
-    req_sum="$(cksum "$d/requirements.txt") $python_bin"
+    # Only (re)install when either requirements file or the interpreter changes:
+    req_sum="$(cksum "$d/requirements.txt" "$d/requirements-dev.txt") $python_bin"
 
     if [ "$(cat "$d/.venv/.venv.cksum" 2>/dev/null)" != "$req_sum" ]; then
       echo "installing solar-wizard-model python dependencies ..."
@@ -61,6 +61,10 @@ pkgs.mkShell {
       # so --no-deps keeps pip from re-resolving them:
       python -m pip install --no-deps -e "$d" \
         || { echo "failed to install solar-wizard-model" >&2; return 1; }
+
+      # test-only deps:
+      python -m pip install -r "$d/requirements-dev.txt" -q --uploaded-prior-to=P7D \
+        || { echo "failed to install requirements-dev.txt (see error above)" >&2; return 1; }
 
       echo "$req_sum" > "$d/.venv/.venv.cksum"
     else
