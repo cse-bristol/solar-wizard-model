@@ -14,7 +14,9 @@ from contextlib import ExitStack, contextmanager
 from os.path import join
 from typing import Union, Optional
 
+import numpy as np
 import psycopg2
+from psycopg2.extensions import register_adapter, AsIs, Float
 from psycopg2.sql import SQL, Identifier, Composed, Literal
 from psycopg2 import OperationalError
 
@@ -22,6 +24,20 @@ from solar_pv.paths import SQL_DIR
 
 PG_NULL = "\\N"
 MAX_CONN_ATTEMPTS = 10
+
+
+# numpy scalars have no default psycopg2 adapter; since numpy 2.0 their repr is
+# `np.float64(...)` etc., which psycopg2 would otherwise emit verbatim into SQL.
+def _register_numpy_adapters():
+    register_adapter(np.bool_, lambda v: AsIs("true" if v else "false"))
+    for t in (np.float16, np.float32, np.float64):
+        register_adapter(t, lambda v: Float(float(v)))
+    for t in (np.int8, np.int16, np.int32, np.int64,
+              np.uint8, np.uint16, np.uint32, np.uint64):
+        register_adapter(t, lambda v: AsIs(int(v)))
+
+
+_register_numpy_adapters()
 
 
 def sql_command(pg_conn, command: Union[str, Composed], bindings: dict = None, result_extractor=None, **kwargs):

@@ -29,7 +29,7 @@ def _load_data(filename: str) -> RoofDetBuilding:
 def _roofdet(toid: str, res: float):
     np.random.seed(_SEED)
     filename = f"{toid}.json" if not toid.endswith(".json") else toid
-    planes = _detect_building_roof_planes(_load_data(join(_ROOFDET_DATA, filename)), filename, res, debug=True)
+    planes = _detect_building_roof_planes(_load_data(join(_ROOFDET_DATA, filename)), filename, res, debug=False)
     return sorted([plane['aspect'] for plane in planes])
 
 
