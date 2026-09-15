@@ -128,8 +128,11 @@ class GrassGISUser(ABC):
                             f"{grass_env.get('PATH', '')}"
 
         grass_lib = join(self._grass_install_dir, 'lib')
-        grass_env["LD_LIBRARY_PATH"] = f"{grass_lib}{os.pathsep}" \
-                                       f"{grass_env.get('LD_LIBRARY_PATH', '')}"
+        # Don't inherit the process-wide LD_LIBRARY_PATH into GRASS: it points at the model
+        # python's libs (needed by its manylinux wheels), which are built against a newer glibc
+        # than GRASS's separately-pinned python can load. GRASS is RPATH-complete and its wrapper
+        # adds what else it needs, so only its own lib dir belongs here.
+        grass_env["LD_LIBRARY_PATH"] = grass_lib
 
         # Ref https://grasswiki.osgeo.org/wiki/Working_with_GRASS_without_starting_it_explicitly#Python:_GRASS_GIS_8_with_existing_location
         python_path: str = join(self._grass_install_dir, "etc", "python")

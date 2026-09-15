@@ -53,6 +53,12 @@ pkgs.mkShell {
       # purity enforcement (as on the CI runners), which otherwise breaks the gdal_array build.
       export CPLUS_INCLUDE_PATH="$(python -c 'import numpy; print(numpy.get_include())')''${CPLUS_INCLUDE_PATH:+:$CPLUS_INCLUDE_PATH}"
 
+      # Force gdal to rebuild against the current numpy: pip's wheel cache keys on the sdist
+      # hash and not numpy's version (gdal doesn't declare numpy as a build dep), so a cached
+      # gdal wheel built against a different numpy is otherwise silently reused and then fails
+      # to import:
+      python -m pip cache remove 'gdal*' >/dev/null 2>&1 || true
+
       # Don't install versions released in the last 7 days, to reduce risk of supply chain attacks:
       python -m pip install -r "$d/requirements.txt" -q --no-build-isolation --uploaded-prior-to=P7D \
         || { echo "failed to install requirements.txt (see error above)" >&2; return 1; }
