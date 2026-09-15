@@ -54,21 +54,27 @@ class GeosTest(ParameterisedTestCase):
         ], grid_cell_xy)
 
     def test_project(self):
-        self.parameterised_test([
+        cases = [
             (-1.3183623236379631, 51.69980008039696, 4326, 27700, (447205.00083648594, 200336.99951118266)),
             (447205.00083648594, 200336.99951118266, 27700, 4326, (-1.3183623116012846, 51.69980007593203)),
-        ], project)
+        ]
+        for x, y, src_srs, dst_srs, expected in cases:
+            actual = project(x, y, src_srs, dst_srs)
+            for a, e in zip(actual, expected):
+                self.assertAlmostEqual(a, e, places=6)
 
     def test_project_geom(self):
-        def to_test(geom, src_srs, dst_srs):
-            return project_geom(geom, src_srs, dst_srs).wkt
-
-        self.parameterised_test([
+        cases = [
             (square(-1.3183623236379631, 51.69980008039696, 0.001), 4326, 27700,
              "POLYGON ((447205.00083648594 200336.99951118266, 447203.9628190113 200448.21811441745, 447273.07100138796 200448.8635877514, 447274.11054237804 200337.64498984604, 447205.00083648594 200336.99951118266))"),
             (square(447205.00083648594, 200336.99951118266, 1000), 27700, 4326,
              "POLYGON ((-1.3183623116012846 51.69980007593203, -1.3182272411473017 51.708790588071906, -1.3037559220079633 51.70870576100723, -1.3038938600255106 51.69971527605842, -1.3183623116012846 51.69980007593203))"),
-        ], to_test)
+        ]
+        for geom, src_srs, dst_srs, expected_wkt in cases:
+            actual = project_geom(geom, src_srs, dst_srs)
+            expected = wkt.loads(expected_wkt)
+            self.assertTrue(actual.equals_exact(expected, tolerance=1e-6),
+                            f"\nExpected: {expected.wkt}\nActual  : {actual.wkt}")
 
     def test_largest_polygon(self):
         self.parameterised_test([
@@ -86,7 +92,9 @@ class GeosTest(ParameterisedTestCase):
         print(test_hex_poly)
 
         simplified = simplify_by_angle(test_hex_poly).normalize()
-        assert simplified.wkt == "POLYGON ((-10 10, 0.0000000000000036 27.32050807568877, 20 27.32050807568877, 30 10, 20 -7.320508075688771, -0.0000000000000089 -7.320508075688771, -10 10))"
+        expected = wkt.loads("POLYGON ((-10 10, 0 27.32050807568877, 20 27.32050807568877, "
+                             "30 10, 20 -7.320508075688771, 0 -7.320508075688771, -10 10))").normalize()
+        assert simplified.equals_exact(expected, tolerance=1e-9), simplified.wkt
 
     def test_polygon_line_segments(self):
         def _polygon_line_segments(p):

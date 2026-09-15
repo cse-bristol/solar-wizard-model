@@ -6,7 +6,7 @@ import numpy as np
 from shapely.geometry import Polygon
 from skimage import measure
 from skimage import segmentation
-from skimage.future.graph import rag_mean_color, cut_threshold
+from skimage.graph import rag_mean_color, cut_threshold
 from sklearn.linear_model import LinearRegression
 
 
@@ -43,12 +43,32 @@ def _image(xy: np.ndarray, vals: np.ndarray, res: float, nodata: float):
     return image, idxs
 
 
+_BASE_COMPACTNESS = 30
+
+
+def _slic_compactness(image: np.ndarray) -> float:
+    """Compactness for `segmentation.slic` that is invariant to the raster's value scale.
+
+    skimage >=0.19 rescales the input to [0, 1] before running SLIC (to make
+    `compactness` insensitive to the input's value scale). 
+    
+    That rescaling divides the colour distances by the value range, shifting the spatial/
+    colour balance the segmentation thresholds were tuned for (under skimage 0.18, which did
+    not rescale). Dividing the base compactness by the value range recreates the original behaviour.
+    """
+    value_range = float(image.max() - image.min())
+    return _BASE_COMPACTNESS / value_range if value_range > 0 else _BASE_COMPACTNESS
+
+
 def _segment(image: np.ndarray, mask: np.ndarray, threshold: float):
-    initial_segments = segmentation.slic(image, compactness=30, start_label=1, mask=mask)
+    # channel_axis=None: these are 2D grayscale rasters, not multichannel (skimage
+    # >=0.19 assumes the last axis is colour channels otherwise).
+    compactness = _slic_compactness(image)
+    initial_segments = segmentation.slic(image, compactness=compactness, start_label=1, mask=mask, channel_axis=None)
     # Not clear why this sometimes returns an array of 0s, looks to be a bug caused by this break though:
     # https://github.com/scikit-image/scikit-image/blob/main/skimage/segmentation/_slic.pyx#L332
     if np.count_nonzero(initial_segments) == 0:
-        initial_segments = segmentation.slic(image, compactness=30, start_label=1, mask=mask, enforce_connectivity=False)
+        initial_segments = segmentation.slic(image, compactness=compactness, start_label=1, mask=mask, enforce_connectivity=False, channel_axis=None)
 
     g = rag_mean_color(image, initial_segments, connectivity=2)
 

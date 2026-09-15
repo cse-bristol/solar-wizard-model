@@ -271,8 +271,11 @@ def _simplify_ring_by_angle(coords, tolerance_degrees: float) -> Polygon:
 
 
 def _get_angle(vec_1, vec_2):
+    vec_1 = np.asarray(vec_1)
+    vec_2 = np.asarray(vec_2)
     dot = np.dot(vec_1, vec_2)
-    det = np.cross(vec_1, vec_2)
+    # 2D cross product (z component). numpy 2 removed np.cross for 2D vectors:
+    det = vec_1[..., 0] * vec_2[..., 1] - vec_1[..., 1] * vec_2[..., 0]
     angle_in_rad = np.arctan2(det, dot)
     return np.degrees(angle_in_rad)
 

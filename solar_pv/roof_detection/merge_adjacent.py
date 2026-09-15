@@ -2,7 +2,7 @@ from typing import Dict, Tuple
 
 import numpy as np
 from skimage import morphology
-from skimage.future.graph import RAG, merge_hierarchical
+from skimage.graph import RAG, merge_hierarchical
 from skimage.measure import perimeter_crofton
 from sklearn import metrics
 from sklearn.linear_model import LinearRegression
@@ -155,7 +155,7 @@ def _update_node_data(graph, src: int, dst: int):
     dst_node["r2"] = metrics.r2_score(z_subset, z_pred)
     dst_node["mae"] = merged_score
     dst_node["mse"] = metrics.mean_squared_error(z_subset, z_pred)
-    dst_node["rmse"] = metrics.mean_squared_error(z_subset, z_pred, squared=False)
+    dst_node["rmse"] = metrics.root_mean_squared_error(z_subset, z_pred)
     try:
         dst_node["msle"] = metrics.mean_squared_log_error(z_subset, z_pred)
     except ValueError:

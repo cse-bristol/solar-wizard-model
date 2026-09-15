@@ -434,7 +434,7 @@ def _plane_metrics(estimator, X, y, mask_without_excluded, sample_idxs) -> dict:
         "r2": metrics.r2_score(y_true, y_pred),
         "mae": metrics.mean_absolute_error(y_true, y_pred),
         "mse": metrics.mean_squared_error(y_true, y_pred),
-        "rmse": metrics.mean_squared_error(y_true, y_pred, squared=False),
+        "rmse": metrics.root_mean_squared_error(y_true, y_pred),
         "msle": msle,
         "mape": metrics.mean_absolute_percentage_error(y_true, y_pred),
     }

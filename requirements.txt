@@ -1,9 +1,9 @@
-# versions match nix channel nixos-22.05, except shapely:
-psycopg2==2.9.3
-requests==2.27.1
-gdal==3.4.2
-numpy==1.21.5
-scikit-learn==1.0.2
-scikit-image==0.18.3
-shapely==2.0.1
-networkx==2.7.1
+psycopg2==2.9.12
+requests==2.34.2
+# gdal must match the native libgdal = 3.12.4 is from nixpkgs 26.05
+gdal==3.12.4
+numpy==2.5.3
+scikit-learn==1.9.0
+scikit-image==0.26.0
+shapely==2.1.2
+networkx==3.6.1

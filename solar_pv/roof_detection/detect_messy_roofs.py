@@ -3,7 +3,7 @@ from typing import Dict, List
 import numpy as np
 from networkx import Graph
 from skimage import measure
-from skimage.future.graph import RAG
+from skimage.graph import RAG
 
 from solar_pv.datatypes import RoofPlane
 from solar_pv.roof_detection.premade_planes import _image
@@ -14,6 +14,11 @@ _NODATA = -9999
 
 _MESS_THRESHOLD_PCT = 0.14
 _TOTAL_MESS_THRESHOLD_PCT = 0.85
+# A flat plane touching at least this many separate obstacle groups is treated as
+# messy even if their total area is below _MESS_THRESHOLD_PCT: a roof fragmented by
+# many small obstacles (vents, pipes, AC units) is cluttered regardless of how much
+# area they add up to:
+_MESS_GROUP_COUNT_THRESHOLD = 5
 
 
 def _obstacle_groups_img(planes: Dict[int, RoofPlane], labels, xy, res: float, connectivity: int):
@@ -67,21 +72,24 @@ def _rag(planes: Dict[int, RoofPlane], obstacle_groups_img, connectivity: int) -
     return graph
 
 
+def _obstacle_neighbours(graph: Graph, n: int):
+    for neighbour_idx in graph.neighbors(n):
+        neighbour = graph.nodes[neighbour_idx]
+        if neighbour['obstacle_group'] is True:
+            yield neighbour
+
+
 def _mess_score(graph: Graph, n: int) -> int:
     """
     Each flat plane is scored according to the sum of the size of each obstacle group
     it connects to:
     """
-    mess_score = 0
-    for neighbour_idx in graph.neighbors(n):
-        neighbour = graph.nodes[neighbour_idx]
-        if neighbour['obstacle_group'] is False:
-            continue
-        # obstacle_group_valid = all([graph.nodes[_n].get('is_flat') for _n in graph.neighbors(neighbour_idx)])
-        # if obstacle_group_valid:
-        #     mess_score += neighbour['inliers']
-        mess_score += neighbour['inliers']
-    return mess_score
+    return sum(neighbour['inliers'] for neighbour in _obstacle_neighbours(graph, n))
+
+
+def _obstacle_group_count(graph: Graph, n: int) -> int:
+    """The number of separate obstacle groups a flat plane connects to."""
+    return sum(1 for _ in _obstacle_neighbours(graph, n))
 
 
 def detect_messy_roofs(planes: Dict[int, RoofPlane], labels, xy, res: float, debug: bool = False) -> List[RoofPlane]:
@@ -98,6 +106,11 @@ def detect_messy_roofs(planes: Dict[int, RoofPlane], labels, xy, res: float, deb
 
     Good flat roofs tend to lead directly on to the edge of the building, or there may
     be a layer of outliers between it and the edge of the building.
+
+    A flat plane is rejected as messy if the obstacle groups it touches make up more
+    than `_MESS_THRESHOLD_PCT` of its pixels, or if it touches at least
+    `_MESS_GROUP_COUNT_THRESHOLD` separate obstacle groups (many small obstacles, even
+    if their total area is modest).
 
     If more than a threshold percentage of the pixels are either in an obstacle group
     or a flat roof that has been rejected for mess, reject the whole building.
@@ -126,9 +139,16 @@ def detect_messy_roofs(planes: Dict[int, RoofPlane], labels, xy, res: float, deb
         if node['is_flat'] is True:
             mess_score = _mess_score(graph, n)
             mess_score_pct = mess_score / size
+            obstacle_group_count = _obstacle_group_count(graph, n)
+            # messy if either heavily obstructed by area, or fragmented by many
+            # separate obstacles:
+            is_messy = (mess_score_pct >= _MESS_THRESHOLD_PCT
+                        or obstacle_group_count >= _MESS_GROUP_COUNT_THRESHOLD)
             if debug:
-                print(f"plane {n} had raw score {mess_score}, pct {mess_score_pct}, threshold is {_MESS_THRESHOLD_PCT}")
-            if mess_score_pct < _MESS_THRESHOLD_PCT:
+                print(f"plane {n} had raw score {mess_score}, pct {mess_score_pct}, "
+                      f"obstacle groups {obstacle_group_count} (thresholds "
+                      f"{_MESS_THRESHOLD_PCT}, {_MESS_GROUP_COUNT_THRESHOLD})")
+            if not is_messy:
                 planes.append(node)
             else:
                 mess_inliers += size
