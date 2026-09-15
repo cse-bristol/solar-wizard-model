@@ -48,6 +48,11 @@ pkgs.mkShell {
       python -m pip install -q setuptools wheel "$numpy_pin" \
         || { echo "failed to install build deps" >&2; return 1; }
 
+      # Make numpy's headers findable via the compiler's env rather than only the -I
+      # GDAL's setup.py passes: nix's cc-wrapper strips -I paths outside the store under
+      # purity enforcement (as on the CI runners), which otherwise breaks the gdal_array build.
+      export CPLUS_INCLUDE_PATH="$(python -c 'import numpy; print(numpy.get_include())')''${CPLUS_INCLUDE_PATH:+:$CPLUS_INCLUDE_PATH}"
+
       # Don't install versions released in the last 7 days, to reduce risk of supply chain attacks:
       python -m pip install -r "$d/requirements.txt" -q --no-build-isolation --uploaded-prior-to=P7D \
         || { echo "failed to install requirements.txt (see error above)" >&2; return 1; }
