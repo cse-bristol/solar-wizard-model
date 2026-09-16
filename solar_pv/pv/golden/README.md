@@ -21,12 +21,20 @@ capture and commit goldens.
   `point_year_diff()`, and geotiff read + grid-alignment helpers.
 - `horizon_check.py` — Phase 1: warps the elevation onto the golden grid, runs
   `solar_pv.pv.horizon`, and reports per-area angle-error stats.
-- `test_golden.py` — fixture-sanity tests, `HorizonPortTest` (Phase 1 gate, active), and
-  `PortAcceptanceTest` (Phase 2 PV gate, skipped until `solar_pv.pv.run_pv` exists).
+- `rpv_check.py` — Phase 2: `check_day` compares the r.pv port against the frozen r.pv
+  reference (raw daily hpv) on identical inputs; `check_annual` runs the full port (met
+  sampled from `pvgis_data_uk.tar` + wind/spectral + annual sum) vs the `kwh_year` golden.
+- `test_golden.py` — fixture-sanity, `HorizonPortTest` (Phase 1), `RpvCorePortTest` (Phase 2
+  r.pv core), `AnnualPortTest` (Phase 2 end-to-end) — all active.
 - `../../../bin/capture_pvmaps_goldens.py` — runs PVMAPS and freezes goldens into
   `testdata/pvmaps/goldens/<area>/` as `kwh_year.tif`, `month_NN_wh.tif`, `horizon_NN.tif`.
-- `../../../bin/check_horizon_port.py` — dev diagnostic: per-direction horizon error vs the
-  goldens (`--nominal` to compare without the grid-convergence correction).
+- `../../../bin/capture_rpv_reference.py` — freezes the exact r.pv inputs (adjusted
+  slope/aspect, horizon, per-pixel met, wind/spectral) + raw hpv into `<area>/rpv/`.
+- `../../../bin/check_horizon_port.py`, `../../../bin/check_rpv_port.py` — dev diagnostics.
+
+The permanent (golden-independent) tests live beside the modules: `solar_pv/pv/test_*.py`
+(analytic + physical-property + regression-fixture tests). The `golden/` tests here are the
+scaffolding to delete once the port ships.
 
 ## Usage
 

@@ -14,7 +14,7 @@ Two kinds of test:
 """
 import unittest
 
-from solar_pv.pv.golden import compare, horizon_check
+from solar_pv.pv.golden import compare, horizon_check, rpv_check
 from solar_pv.pv.golden.fixtures import AREAS, GOLDEN_ROOT
 
 # The tight target agreed 2026-09-15 (yearly kWh, port vs frozen PVMAPS golden):
@@ -74,26 +74,45 @@ class HorizonPortTest(unittest.TestCase):
         self.assertGreater(checked, 0, "no areas had frozen horizon goldens to check")
 
 
-@unittest.skip("port acceptance gate: enable once solar_pv.pv.run_pv and frozen goldens exist")
-class PortAcceptanceTest(unittest.TestCase):
-    """
-    Turn this on in Phase 2. For each area with frozen goldens, run the port over the same
-    inputs and assert the per-pixel yearly kWh raster matches within MAX_ABS_PC_YEAR.
+class RpvCorePortTest(unittest.TestCase):
+    """Phase 2: the r.pv port reproduces GRASS r.pv on identical inputs (per representative
+    day), for every area with a frozen r.pv reference. The isolated maths match to ~machine
+    precision bar a few shadow-boundary nearest-neighbour ties."""
 
-    Sketch (fill in when run_pv lands):
-
-        from solar_pv.pv.run_pv import run_pv_on_area   # future
+    def test_rpv_matches_reference(self):
+        checked = 0
         for area in AREAS:
-            if not area.has_goldens():
+            if not rpv_check.has_rpv_reference(area):
                 continue
-            out = run_pv_on_area(area)                    # writes kwh_year.tif etc
-            diff = compare.raster_diff(out.kwh_year, join(area.golden_dir, "kwh_year.tif"))
-            self.assertTrue(diff.within(MAX_ABS_PC_YEAR), f"{area.name}: {diff}")
-    """
+            for day, month in rpv_check.MONTHLY_DAYS:
+                checked += 1
+                stats = rpv_check.check_day(area, day, month)
+                with self.subTest(area=area.name, day=day):
+                    self.assertLess(stats.mean_pc, 0.05, str(stats))
+                    self.assertLess(stats.p99_pc, 0.1, str(stats))
+                    self.assertGreaterEqual(stats.pct_within_2, 99.5, str(stats))
+        self.assertGreater(checked, 0, "no area had a frozen r.pv reference to check")
 
-    def test_placeholder(self):
-        self.assertTrue(GOLDEN_ROOT)
-        self.assertIsNotNone(compare.raster_diff)
+
+class AnnualPortTest(unittest.TestCase):
+    """Phase 2 end-to-end: the full port (r.pv over 12 months + met sampled from
+    pvgis_data_uk.tar + wind/spectral + annual sum) reproduces the kwh_year golden, given the
+    GRASS-adjusted slope/aspect + horizon. Isolates everything except slope/aspect derivation
+    (which production supplies via GDAL, as it does today)."""
+
+    def test_kwh_year_matches_golden(self):
+        if not rpv_check.has_met_tar():
+            self.skipTest("pvgis_data_uk.tar not present")
+        checked = 0
+        for area in AREAS:
+            if not rpv_check.has_rpv_reference(area):
+                continue
+            checked += 1
+            stats = rpv_check.check_annual(area)
+            with self.subTest(area=area.name):
+                self.assertLess(stats.mean_pc, MAX_ABS_PC_YEAR, str(stats))
+                self.assertGreaterEqual(stats.pct_within_2, 99.5, str(stats))
+        self.assertGreater(checked, 0, "no area had a frozen r.pv reference to check")
 
 
 if __name__ == "__main__":

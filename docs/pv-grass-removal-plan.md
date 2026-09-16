@@ -28,6 +28,41 @@ Why:
   PVMAPS/`r.pv` is frozen; the PVGIS API is still actively developed and has **diverged**
   from it, so the API is only a secondary *shape* check (seasonality, orientation
   response) at a loose tolerance — never the pass/fail gate for the 1–2% target.
+- **Slope/aspect stay on GDAL (`gdaldem`), unchanged (decided 2026-09-16).** See below.
+
+## Decision: slope/aspect generation stays on GDAL
+
+We keep slope and aspect exactly as they are — computed once by `generate_rasters` via
+`gdal_helpers.slope`/`aspect` (`gdaldem`, GRASS-free) and loaded to the `SLOPE`/`ASPECT`
+tables. We do **not** port GRASS `r.slope.aspect`. Why:
+
+- **No GRASS dependency to remove.** Production already forces the GDAL rasters into r.pv
+  (`forced_slope_filename` / `forced_aspect_filename_compass` in `pvgis.py`), deliberately —
+  the code notes GRASS `r.slope.aspect` aspects diverge by ~3° after the 27700 switch. So
+  porting `r.slope.aspect` would re-implement something the model chose not to use.
+- **Aspect is a shared, first-class input.** Roof detection (`detect_roofs.py`) reads the
+  same `ASPECT`/`SLOPE` tables. It must stay a single `generate_rasters` output, not be
+  re-derived inside the PV port (which would risk the PV and roof-detection paths drifting).
+- **The PV port treats slope/aspect as inputs**, like horizon — agnostic to provenance.
+- **What actually drives the PV aspect is the roof-plane override, not the raw raster.**
+  `generate_aspect_override_raster` rasterises each *usable* plane's single fitted
+  aspect/slope; `gdaldem` is only the base/fallback outside detected planes. So "the PV
+  aspect" is really roof-detection output, already in the DB — another reason the base
+  raster's exact provenance matters little.
+
+Consequences for the remaining work:
+- The port must reproduce `create_pvmap`'s `_apply_slope_aspect_correction` — flat-roof
+  default (slope < threshold → 10°/270) and the override merge — as a few numpy `where`
+  ops, not a raster algorithm.
+- Optional cleanup (low priority): today aspect makes a compass→grass→compass round-trip
+  (`gdaldem` compass → `_conv_aspect` → r.pv's internal grass→compass). The port can carry
+  one convention and drop the churn, provided the flat-roof/override merge stays consistent.
+- **Validation gap to close in Phase 3:** the current goldens used GRASS `r.slope.aspect`
+  (the capture neither forced the GDAL rasters nor applied plane overrides), so they are
+  *not* the production path — fine for isolating the r.pv maths (what Phase 2 validated), but
+  the production drop-in should be validated one level up: run a real job area through both
+  the old GRASS `pvgis()` and the new port (GDAL slope/aspect + real roof-plane overrides)
+  and diff the `pv_roof_plane` results.
 
 ## What GRASS actually does for us
 
@@ -161,13 +196,33 @@ Things learned that Phase 2 depends on:
 - The `360 % horizon_slices` truncation quirk (`pvmaps.py:59`) is gone for free — the port
   takes float direction steps.
 
-**Phase 2 — Port B (irradiation + PV).** The hard, high-effort part. ESRA clear-sky model
-(beam/diffuse/reflected on an inclined surface with horizon shadowing) per the r.sun refs
-(Hofierka & Šúri 2002; JRC PVGIS calculation docs cited in `constants.py`). Then the PVMAPS
-PV layer: module temperature from 3-hourly `t2m` + irradiance, 8-coeff polynomial
-efficiency, albedo 0.2, wind + spectral raster corrections, monthly→annual sum
-(`pvmaps.py:541`). Validate against yearly/monthly goldens, then end-to-end against
-`pv_roof_plane` kWh. Keep the Postgis-raster seam so it's a true drop-in.
+**Phase 2 — Port B (irradiation + PV).** The hard, high-effort part. Full spec reverse-
+engineered in [`docs/r-pv-algorithm.md`](r-pv-algorithm.md).
+- **✅ r.pv core done (2026-09-15):** `solar_pv/pv/irradiation.py` + `pv_model.py` port the
+  ESRA clear-sky model (beam/diffuse/reflected on the inclined roof with horizon shadowing,
+  −a angle losses, real-sky kcb/kcd coefficients) plus the PVMAPS temperature/efficiency PV
+  layer, integrated over the representative day. Validated against a frozen r.pv reference
+  (`bin/capture_rpv_reference.py` → `solar_pv/pv/golden/rpv_check.py`,
+  `test_golden.RpvCorePortTest`) on **identical** inputs: all 12 months of thurso match raw
+  `hpv` to **mean <0.006%, 100% within 2%** (a few sub-0.1% shadow-boundary ties). The one
+  subtle bug was the aspect convention — r.pv converts the raster to compass internally
+  before the geometry transform (see the spec's gotcha).
+- **✅ met sampling + assembly + end-to-end done (2026-09-16):** `solar_pv/pv/met_data.py`
+  samples the met GeoTIFFs straight from `pvgis_data_uk.tar` via `/vsitar/` (nearest-neighbour,
+  which reproduces GRASS's r.import resampling **exactly** — 0.00000 diff vs the captured met);
+  `solar_pv/pv/run_pv.py` applies the wind + spectral corrections (gaps → 1.0) and sums
+  months→year, and `compute_pv` is the whole-grid orchestrator. Validated end-to-end against
+  the `kwh_year` golden for thurso (`test_golden.AnnualPortTest`): **mean 0.0007%, 100% within
+  2%** with met sampled live from the tar (thurso does carry wind+spectral ≈1.05, so this
+  exercises those paths). Self-contained tests (`test_run_pv.py`, `test_met_data.py`,
+  `test_irradiation.py` regression fixture) survive removal of the golden scaffolding.
+- **Remaining (production drop-in, straddles Phase 3):** the numerical port is complete; what's
+  left is wiring it in place of `pvgis()`/`create_pvmap`. Slope/aspect stay on GDAL (see the
+  decision above); the port consumes the existing `generate_rasters` output and reproduces
+  `_apply_slope_aspect_correction` (flat-roof default + roof-plane/elevation **overrides** from
+  `create_elevation_override_raster` etc.) in numpy. Then feed per-pixel arrays straight to
+  `aggregate_pixel_results` (Phase 3), dropping the Postgis raster round-trip, and validate at
+  the `pv_roof_plane` level against the old GRASS path on a real job.
 
 **Phase 3 — Remove the DB round-trip (the payoff).** Once outputs match, feed pixel arrays
 straight into `aggregate_pixel_results` in-process; delete `_write_results_to_db` /
