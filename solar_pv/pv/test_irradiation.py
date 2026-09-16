@@ -64,65 +64,67 @@ class SubFunctionTest(unittest.TestCase):
 class PhysicalPropertyTest(unittest.TestCase):
 
     def test_south_beats_north_in_summer(self):
-        # aspect is GRASS CCW-from-East: south = 270, north = 90.
-        south = _pv(slope=35, aspect=270, day=162)
-        north = _pv(slope=35, aspect=90, day=162)
+        # aspect is compass (0 = N, clockwise): south = 180, north = 360.
+        south = _pv(slope=35, aspect=180, day=162)
+        north = _pv(slope=35, aspect=360, day=162)
         self.assertGreater(south, north * 1.15)
 
     def test_east_west_symmetry_in_summer(self):
-        # SE (315) and SW (225) are mirror orientations -> near-equal daily energy under
+        # SE (135) and SW (225) are mirror orientations -> near-equal daily energy under
         # symmetric (no-shadow, flat-temperature) conditions.
-        se = _pv(slope=35, aspect=315, day=162)
+        se = _pv(slope=35, aspect=135, day=162)
         sw = _pv(slope=35, aspect=225, day=162)
         self.assertAlmostEqual(se, sw, delta=0.02 * se)
 
     def test_clearer_sky_gives_more_energy(self):
-        dull = _pv(slope=30, aspect=270, cbh=0.5, day=162)
-        clear = _pv(slope=30, aspect=270, cbh=1.0, day=162)
+        dull = _pv(slope=30, aspect=180, cbh=0.5, day=162)
+        clear = _pv(slope=30, aspect=180, cbh=1.0, day=162)
         self.assertGreater(clear, dull)
 
     def test_horizon_shadow_reduces_energy(self):
-        clear = _pv(slope=30, aspect=270, day=162)
+        clear = _pv(slope=30, aspect=180, day=162)
         # a 40-degree wall all around blocks the low sun:
-        walled = _pv(slope=30, aspect=270, horizon=[math.radians(40)] * 8, day=162)
+        walled = _pv(slope=30, aspect=180, horizon=[math.radians(40)] * 8, day=162)
         self.assertLess(walled, clear)
 
     def test_steep_south_beats_flat_in_winter(self):
         # low winter sun favours a tilt toward it:
-        flat = _pv(slope=5, aspect=270, day=17)
-        tilted = _pv(slope=35, aspect=270, day=17)
+        flat = _pv(slope=5, aspect=180, day=17)
+        tilted = _pv(slope=35, aspect=180, day=17)
         self.assertGreater(tilted, flat)
 
 
 # Complete pixel cases captured from the thurso r.pv reference; expected = GRASS r.pv hpv.
-# (See bin/capture_rpv_reference.py / docs/r-pv-algorithm.md.)
+# aspect is compass (0 = N, clockwise), converted from the GRASS CCW-from-East aspect r.pv
+# consumed (S 270->180, N 90->360, E 360->90). (See bin/capture_rpv_reference.py /
+# docs/r-pv-algorithm.md.)
 REGRESSION = [
-    dict(tag="june_flat_south", day=162, slope=10.00000, aspect=270.00000, elev=38.1350,
+    dict(tag="june_flat_south", day=162, slope=10.00000, aspect=180.00000, elev=38.1350,
          lat=1.02270667, lon=-0.06163945, linke=3.72466, cbh=0.239581, cdh=1.686120,
          horizon=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.060101, 0.0],
          temps=[9.1111, 8.772, 10.1393, 11.7185, 12.4906, 12.7094, 11.8796, 10.1409],
          expected=4156.91064),
-    dict(tag="june_steep_south", day=162, slope=34.57690, aspect=270.00000, elev=38.1230,
+    dict(tag="june_steep_south", day=162, slope=34.57690, aspect=180.00000, elev=38.1230,
          lat=1.02270670, lon=-0.06163919, linke=3.72466, cbh=0.239581, cdh=1.686120,
          horizon=[0.0, 0.0, 0.0, 0.0, 0.0, 0.041358, 0.0, 0.0],
          temps=[9.1111, 8.772, 10.1393, 11.7185, 12.4906, 12.7094, 11.8796, 10.1409],
          expected=4059.23120),
-    dict(tag="june_steep_north", day=162, slope=36.44596, aspect=90.00000, elev=38.1500,
+    dict(tag="june_steep_north", day=162, slope=36.44596, aspect=360.00000, elev=38.1500,
          lat=1.02270749, lon=-0.06163852, linke=3.72466, cbh=0.239581, cdh=1.686120,
          horizon=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
          temps=[9.1111, 8.772, 10.1393, 11.7185, 12.4906, 12.7094, 11.8796, 10.1409],
          expected=3212.17114),
-    dict(tag="june_shadowed", day=162, slope=35.63406, aspect=360.00000, elev=31.0300,
+    dict(tag="june_shadowed", day=162, slope=35.63406, aspect=90.00000, elev=31.0300,
          lat=1.02270515, lon=-0.06164170, linke=3.72466, cbh=0.239581, cdh=1.686120,
          horizon=[1.010623, 1.222365, 1.314702, 0.782229, 0.961739, 0.782229, 0.139402, 0.100799],
          temps=[9.1111, 8.772, 10.1393, 11.7185, 12.4906, 12.7094, 11.8796, 10.1409],
          expected=3186.57935),
-    dict(tag="jan_flat_south", day=17, slope=10.00000, aspect=270.00000, elev=38.1350,
+    dict(tag="jan_flat_south", day=17, slope=10.00000, aspect=180.00000, elev=38.1350,
          lat=1.02270667, lon=-0.06163945, linke=3.18425, cbh=0.235446, cdh=0.836138,
          horizon=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.060101, 0.0],
          temps=[2.9296, 2.8031, 2.7901, 2.7777, 4.1343, 4.0183, 3.3056, 3.1786],
          expected=293.96561),
-    dict(tag="jan_steep_south", day=17, slope=34.57690, aspect=270.00000, elev=38.1230,
+    dict(tag="jan_steep_south", day=17, slope=34.57690, aspect=180.00000, elev=38.1230,
          lat=1.02270670, lon=-0.06163919, linke=3.18425, cbh=0.235446, cdh=0.836138,
          horizon=[0.0, 0.0, 0.0, 0.0, 0.0, 0.041358, 0.0, 0.0],
          temps=[2.9296, 2.8031, 2.7901, 2.7777, 4.1343, 4.0183, 3.3056, 3.1786],

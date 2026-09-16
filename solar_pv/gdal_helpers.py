@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import tempfile
 import textwrap
-from typing import List, Tuple, Union, Callable
+from typing import List, Optional, Tuple, Union, Callable
 
 import math
 import numpy as np
@@ -141,9 +141,13 @@ def rasterize_3d(pg_uri: str,
                  mask_file: str,
                  res: Union[float, Tuple[float, float]],
                  srid: int,
-                 output_type: str = "Float64"):
+                 output_type: str = "Float64",
+                 bounds: Optional[Tuple[float, float, float, float]] = None):
     """
-    Creates a new raster using the Z value for the burn value for each polygon & nan outside of polygons
+    Creates a new raster using the Z value for the burn value for each polygon & nan outside of polygons.
+
+    :param bounds: optional (xmin, ymin, xmax, ymax) target extent. When given (with res), the
+        output lands on exactly that grid, so it can be read without a further warp.
     """
     if isinstance(res, float):
         xres = res
@@ -155,10 +159,12 @@ def rasterize_3d(pg_uri: str,
     xres = abs(xres)
     yres = abs(yres)
 
+    te = f"-te {bounds[0]} {bounds[1]} {bounds[2]} {bounds[3]}" if bounds is not None else ""
+
     res = subprocess.run(f"""
         gdal_rasterize
         -sql "{esc_double_quotes(mask_sql)}"
-        -3d -tr {xres} {yres}
+        -3d -tr {xres} {yres} {te}
         -init {math.nan} -ot {output_type}
         -of GTiff -a_srs EPSG:{srid}
         "PG:{pg_uri}"

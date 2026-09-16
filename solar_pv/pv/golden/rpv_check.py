@@ -43,6 +43,14 @@ def solar_declination(day: int) -> float:
     return math.asin(0.3978 * math.sin(d1 - 1.4 + 0.0355 * math.sin(d1 - 0.0489)))
 
 
+def _grass_to_compass(aspect_grass_deg: np.ndarray) -> np.ndarray:
+    """The captured aspect_adjusted rasters are GRASS CCW-from-East; the port now works in
+    compass, so convert (0 stays 0 = flat, else 90-a if a<90 else 450-a)."""
+    a = np.asarray(aspect_grass_deg, dtype=np.float64)
+    conv = np.where(a < 90.0, 90.0 - a, 450.0 - a)
+    return np.where(a == 0.0, 0.0, conv)
+
+
 def _latlon(gt, shape):
     rows, cols = shape
     cc, rr = np.meshgrid(np.arange(cols), np.arange(rows))
@@ -80,7 +88,7 @@ def check_day(area: Area, day: int, month: int) -> RpvStats:
         return compare._read_band(join(d, name))
 
     slope, gt, shape = compare.read_geotiff(join(d, "slope_adjusted.tif"))
-    aspect = rd("aspect_adjusted.tif")
+    aspect = _grass_to_compass(rd("aspect_adjusted.tif"))
     elev = rd("elevation.tif")
     linke = rd(f"linke_{mm}.tif")
     cbh = rd(f"kcb_{mm}.tif")
@@ -121,23 +129,52 @@ def check_annual(area: Area) -> RpvStats:
     slope/aspect + horizon, so this isolates everything except slope/aspect derivation)."""
     d = rpv_dir(area)
     slope, gt, shape = compare.read_geotiff(join(d, "slope_adjusted.tif"))
-    aspect = compare._read_band(join(d, "aspect_adjusted.tif"))
+    aspect = _grass_to_compass(compare._read_band(join(d, "aspect_adjusted.tif")))
     elev = compare._read_band(join(d, "elevation.tif"))
     n_dir = int(round(360 / HORIZON_STEP_DEGREES))
     horizon = np.stack([compare._read_band(join(d, f"horizon_{i:02d}.tif"))
                         for i in range(n_dir)], axis=-1)
     kwh_gold = compare._read_band(join(area.golden_dir, "kwh_year.tif"))
 
-    lat, lon = _latlon(gt, shape)
     valid = (np.isfinite(kwh_gold) & np.isfinite(slope) & np.isfinite(aspect)
              & np.isfinite(elev) & np.all(np.isfinite(horizon), axis=-1))
 
     met = met_data.MetData(MET_TAR, gt, shape, resample="near")
-    _, kwh_year = run_pv.compute_pv(slope, aspect, elev, lat, lon, horizon,
+    _, kwh_year = run_pv.compute_pv(slope, aspect, elev, gt, horizon,
                                     HORIZON_STEP_DEGREES, met, CSI_COEFFS, valid=valid)
 
     port = kwh_year[valid]
     gold = kwh_gold[valid]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        pc = np.abs(100.0 * (port - gold) / gold)
+    pc = pc[np.isfinite(pc)]
+    return RpvStats(area.name, 0, int(pc.size), float(pc.mean()),
+                    float(np.percentile(pc, 99)), float(pc.max()),
+                    float(100.0 * np.mean(pc < 2.0)))
+
+
+def check_fields_annual(area: Area) -> RpvStats:
+    """As check_annual, but through run_pv.compute_pv_fields — the whole-grid assembly the
+    orchestrator uses (lat/lon + met + compute_pv + PixelFields packaging). Confirms the packaged
+    kwh_year field still matches the golden."""
+    d = rpv_dir(area)
+    slope, gt, shape = compare.read_geotiff(join(d, "slope_adjusted.tif"))
+    aspect = _grass_to_compass(compare._read_band(join(d, "aspect_adjusted.tif")))
+    elev = compare._read_band(join(d, "elevation.tif"))
+    n_dir = int(round(360 / HORIZON_STEP_DEGREES))
+    horizon = np.stack([compare._read_band(join(d, f"horizon_{i:02d}.tif"))
+                        for i in range(n_dir)], axis=-1)
+    kwh_gold = compare._read_band(join(area.golden_dir, "kwh_year.tif"))
+
+    valid = (np.isfinite(kwh_gold) & np.isfinite(slope) & np.isfinite(aspect)
+             & np.isfinite(elev) & np.all(np.isfinite(horizon), axis=-1))
+
+    met = met_data.MetData(MET_TAR, gt, shape, resample="near")
+    fields = run_pv.compute_pv_fields(slope, aspect, elev, horizon, gt, met,
+                                      CSI_COEFFS, HORIZON_STEP_DEGREES, valid=valid)
+
+    port = fields.values["kwh_year"]
+    gold = kwh_gold[fields.rows, fields.cols]
     with np.errstate(divide="ignore", invalid="ignore"):
         pc = np.abs(100.0 * (port - gold) / gold)
     pc = pc[np.isfinite(pc)]

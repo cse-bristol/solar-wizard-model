@@ -22,7 +22,7 @@ Faithful to r.horizonmask/main.c:
   maxlength are search optimisations that don't change the result within max_distance).
 """
 import math
-from typing import Sequence
+from typing import Sequence, Tuple
 
 import numpy as np
 
@@ -48,16 +48,20 @@ def nominal_vectors(directions_rad: Sequence[float]):
     return [(math.cos(a), math.sin(a)) for a in directions_rad]
 
 
-def compute_horizons(elevation: np.ndarray,
-                     ew_res: float,
-                     ns_res: float,
-                     direction_vectors: Sequence,
-                     max_distance: float,
-                     earth_radius: float = EARTH_RADIUS,
-                     mask: np.ndarray = None) -> np.ndarray:
+def compute_horizons_flat(elevation: np.ndarray,
+                          ew_res: float,
+                          ns_res: float,
+                          direction_vectors: Sequence,
+                          max_distance: float,
+                          earth_radius: float = EARTH_RADIUS,
+                          mask: np.ndarray = None
+                          ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    :param elevation: 2D DEM, north-up (row 0 = north), as read from a GeoTIFF. nodata cells
-        must be <= NODATA_BELOW (or NaN).
+    Horizon profiles for only the evaluated cells, without ever allocating a full grid — the
+    memory-lean form used on real job grids, where the mask covers a small fraction of cells.
+
+    :param elevation: 2D DEM, north-up (row 0 = north). nodata cells must be <= NODATA_BELOW
+        (or NaN).
     :param ew_res: east-west cell size (metres, positive).
     :param ns_res: north-south cell size (metres, positive; pass abs of a negative GT[5]).
     :param direction_vectors: one (cos, sin) unit vector per direction, in the CCW-from-East
@@ -66,10 +70,10 @@ def compute_horizons(elevation: np.ndarray,
         convergence-corrected directions exactly.
     :param max_distance: horizon search radius in metres.
     :param mask: optional 2D array; horizons are computed only where it is truthy (typically
-        building-footprint pixels), the rest of the output being NaN. The full elevation is
-        still used as terrain. When None, every valid-elevation cell is evaluated.
-    :return: array (n_directions, rows, cols) of horizon angles in radians, clamped to
-        [0, pi/2]; unevaluated / nodata-origin cells are NaN.
+        building-footprint pixels). The full elevation is still used as terrain. When None,
+        every valid-elevation cell is evaluated.
+    :return: (values, rows, cols): values is (M, n_directions) horizon angles in radians
+        clamped to [0, pi/2]; rows/cols are the (M,) grid indices of those evaluated cells.
     """
     z = np.asarray(elevation, dtype=np.float64)
     valid = np.isfinite(z) & (z > NODATA_BELOW)
@@ -86,7 +90,7 @@ def compute_horizons(elevation: np.ndarray,
     orow, ocol = np.nonzero(evaluate)
     z_orig = z[orow, ocol]
 
-    out = np.full((len(direction_vectors), rows, cols), np.nan, dtype=np.float64)
+    values = np.empty((orow.size, len(direction_vectors)), dtype=np.float64)
 
     for d_idx, (cos_a, sin_a) in enumerate(direction_vectors):
         best_tan = np.full(orow.shape, -np.inf)
@@ -123,6 +127,25 @@ def compute_horizons(elevation: np.ndarray,
 
         # atan of the running-max slope, clamped to [0, pi/2]: best_tan == -inf (nothing
         # rose above the origin) -> atan -> -pi/2 -> clamps to 0.
-        out[d_idx][orow, ocol] = np.clip(np.arctan(best_tan), 0.0, PI_HALF)
+        values[:, d_idx] = np.clip(np.arctan(best_tan), 0.0, PI_HALF)
 
+    return values, orow, ocol
+
+
+def compute_horizons(elevation: np.ndarray,
+                     ew_res: float,
+                     ns_res: float,
+                     direction_vectors: Sequence,
+                     max_distance: float,
+                     earth_radius: float = EARTH_RADIUS,
+                     mask: np.ndarray = None) -> np.ndarray:
+    """Dense form: as compute_horizons_flat, but scattered back into a full
+    (n_directions, rows, cols) grid (NaN for unevaluated / nodata-origin cells). Used where the
+    grid is small (validation); prefer compute_horizons_flat on real job grids."""
+    values, orow, ocol = compute_horizons_flat(
+        elevation, ew_res, ns_res, direction_vectors, max_distance, earth_radius, mask)
+    rows, cols = np.asarray(elevation).shape
+    out = np.full((len(direction_vectors), rows, cols), np.nan, dtype=np.float64)
+    for d_idx in range(len(direction_vectors)):
+        out[d_idx][orow, ocol] = values[:, d_idx]
     return out

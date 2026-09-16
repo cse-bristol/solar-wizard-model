@@ -1,9 +1,9 @@
 # This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 """
-Native-Python port of the r.pv / r.sun clear-sky irradiation + PV integration
-(Phase 2 of the GRASS removal). Faithful to grass_modules/r.pv/{main.c,rsunlib.c} for the
-PVMAPS invocation; the exact spec is in docs/r-pv-algorithm.md.
+Native-Python port of the r.pv / r.sun clear-sky irradiation + PV integration. Faithful to
+grass_modules/r.pv/{main.c,rsunlib.c} for the PVMAPS invocation; the exact spec is in
+docs/r-pv-algorithm.md.
 
 `compute_daily_pv` integrates one representative day: for each timestep from sunrise to
 sunset it finds the sun position, tests terrain shadowing against the horizon profile,
@@ -39,14 +39,14 @@ def _wrap_pi(a):
     return out
 
 
-def compute_daily_pv(slope_deg, aspect_deg, elevation, latitude, longitude,
+def compute_daily_pv(slope_deg, aspect_compass_deg, elevation, latitude, longitude,
                      horizon, horizon_step_deg,
                      linke, cbh, cdh, temps8, albedo,
                      day, declination, coeffs,
                      step=0.25, return_components=False):
     """
-    :param slope_deg, aspect_deg: (n,) roof slope and GRASS aspect (CCW from East) in degrees;
-        aspect value exactly 0 means flat/UNDEF (r.pv convention).
+    :param slope_deg, aspect_compass_deg: (n,) roof slope and compass aspect (0 = N, clockwise)
+        in degrees; aspect value exactly 0 means flat/UNDEF (as gdaldem's -zero_for_flat emits).
     :param elevation: (n,) pixel elevation (m).
     :param latitude, longitude: (n,) pixel-centre lat/lon in radians.
     :param horizon: (n, n_dir) horizon heights (radians), direction d = d*horizon_step_deg CCW
@@ -60,7 +60,7 @@ def compute_daily_pv(slope_deg, aspect_deg, elevation, latitude, longitude,
     :return: (n,) daily PV energy (the glob_pow / hpv pixel value, pre wind/spectral).
     """
     slope_deg = np.asarray(slope_deg, dtype=np.float64)
-    aspect_deg = np.asarray(aspect_deg, dtype=np.float64)
+    aspect_compass_deg = np.asarray(aspect_compass_deg, dtype=np.float64)
     z = np.asarray(elevation, dtype=np.float64)
     lat = np.asarray(latitude, dtype=np.float64)
     lon = np.asarray(longitude, dtype=np.float64)
@@ -70,12 +70,11 @@ def compute_daily_pv(slope_deg, aspect_deg, elevation, latitude, longitude,
     albedo = np.broadcast_to(np.asarray(albedo, dtype=np.float64), z.shape)
 
     slope = slope_deg * DEG2RAD
-    aspect_undef = aspect_deg == 0.0
-    # r.pv converts the CCW-from-East aspect raster to compass (0=N, "270 is south" input)
-    # internally before the geometry transform (main.c ~L1344); the converted value feeds
-    # both cos_v/sin_v and the shift12hrs test, so convert up front:
-    aspect_compass = np.where(aspect_deg < 90.0, 90.0 - aspect_deg, 450.0 - aspect_deg)
-    aspect = np.where(aspect_undef, 0.0, aspect_compass * DEG2RAD)
+    # aspect is compass (0 = N, clockwise), 0 marking flat/UNDEF. r.pv works in compass
+    # internally (main.c ~L1344 converts its CCW-from-East input up front, feeding both
+    # cos_v/sin_v and the shift12hrs test), so the compass value is fed straight in here:
+    aspect_undef = aspect_compass_deg == 0.0
+    aspect = np.where(aspect_undef, 0.0, aspect_compass_deg * DEG2RAD)
     oriented = (~aspect_undef) & (slope != 0.0)
 
     g_norm_extra = com_sol_const(day)

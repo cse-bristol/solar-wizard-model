@@ -216,18 +216,70 @@ engineered in [`docs/r-pv-algorithm.md`](r-pv-algorithm.md).
   2%** with met sampled live from the tar (thurso does carry wind+spectral ≈1.05, so this
   exercises those paths). Self-contained tests (`test_run_pv.py`, `test_met_data.py`,
   `test_irradiation.py` regression fixture) survive removal of the golden scaffolding.
-- **Remaining (production drop-in, straddles Phase 3):** the numerical port is complete; what's
-  left is wiring it in place of `pvgis()`/`create_pvmap`. Slope/aspect stay on GDAL (see the
-  decision above); the port consumes the existing `generate_rasters` output and reproduces
-  `_apply_slope_aspect_correction` (flat-roof default + roof-plane/elevation **overrides** from
-  `create_elevation_override_raster` etc.) in numpy. Then feed per-pixel arrays straight to
-  `aggregate_pixel_results` (Phase 3), dropping the Postgis raster round-trip, and validate at
-  the `pv_roof_plane` level against the old GRASS path on a real job.
+- **✅ slope/aspect correction done (2026-09-16):** `solar_pv/pv/slope_aspect.py` ports
+  `_apply_slope_aspect_correction` (compass→grass conversion + flat-roof default + roof-plane
+  slope/aspect override merge) as numpy `where` ops, feeding `compute_daily_pv` its GRASS-
+  convention `aspect_adjusted`. Unit-tested (`test_slope_aspect.py`). Slope/aspect themselves
+  stay on GDAL (see the decision above).
 
-**Phase 3 — Remove the DB round-trip (the payoff).** Once outputs match, feed pixel arrays
-straight into `aggregate_pixel_results` in-process; delete `_write_results_to_db` /
-`rasters_to_postgis` / `pixels_for_buildings` for this path. This is where the wrapping
-actually collapses.
+**Phase 2 is complete** as a numerical port: elevation/mask/slope/aspect/overrides + met →
+per-pixel monthly Wh + yearly kWh, every stage validated against GRASS to <0.01% (or unit-
+tested where it's pure logic). What remains is integration, below.
+
+**Phase 3 — Remove the DB round-trip (the payoff). ▶ started (2026-09-16).**
+- **✅ core primitive:** `solar_pv/pv/pixels.py` `pixels_for_geoms` extracts per-building
+  pixels straight from the in-memory PV arrays (centre-in-polygon, shapely-vectorised),
+  returning the exact `{toid: [pixel dict]}` shape `aggregate_pixel_results` consumes — the
+  in-process replacement for `postgis.pixels_for_buildings`. `run_pv.field_arrays` packages
+  the compute output into the field dict it wants (kwh_year, month_NN_wh, horizon_NN). Both
+  unit-tested (`test_pixels.py`, `test_run_pv.py`).
+- **✅ injectable pixel source (2026-09-16):** `aggregate_pixel_results.aggregate_from_arrays`
+  drives the unchanged `_aggregate_pixel_data` weighting math from in-memory `field_arrays`
+  (via `pixels_for_geoms`) instead of `pixels_for_buildings`. Roof planes + building geoms
+  still load from the DB (`_load_roof_planes` / new `_load_building_geoms`, same paged
+  building selection). Runs single-process, extracting each page's pixels in the main process;
+  sharing the arrays across a worker pool (memmap/shared memory) is deferred until benchmarked
+  against a real large-area job. The DELETE + `pv_building` INSERT are factored into
+  `_delete_existing_results` / `_insert_pv_buildings`, shared with the old GRASS path.
+  Validated DB-free by rasterising the committed pixel-aggregation fixture and re-extracting it
+  by geometry — identical roof-plane `kwh_year_avg` + horizon (`test_aggregate_pixel_results.
+  AggregateFromArraysTest`).
+- **✅ top-level orchestrator (2026-09-16):** `run_pv.run_pv()` replaces `pvgis()` end-to-end
+  with no GRASS and no Postgis raster round-trip: read elevation/slope/aspect/mask + build the
+  DB overrides → patch elevation → horizon (Phase 1, convergence-corrected vectors) →
+  slope/aspect correction (Phase 2) → `compute_pv_fields` (lat/lon + met + `compute_pv` +
+  `field_arrays`) → `aggregate_from_arrays`. Mask + override rasters are warped onto the
+  elevation grid (`_read_on_grid`), reproducing GRASS's region-zoom co-registration. Met now
+  comes from `pvgis_data_uk.tar` (no `PVGIS_GRASS_DBASE_DIR`). `compute_pv_fields` is validated
+  against the `kwh_year` golden through the full assembly (`test_golden.FieldsAnnualPortTest`,
+  <2% all four areas) and its wiring unit-tested (`test_run_pv.ComputePvFieldsTest`).
+- **✅ wired into `model_solar_pv` (2026-09-16):** the `pvgis()` call is swapped for `run_pv()`.
+  The old GRASS `pvgis()` / `pvmaps` stay in the tree for the validation diff and are removed in
+  Phase 4.
+- **✅ memory: sparse fields (2026-09-16):** the per-pixel PV fields exist only at the
+  building-footprint pixels, a small fraction of a job grid, so materialising them full-grid was
+  untenable (~35 GB for a 5 km job at 1 m, dominated by the `(rows, cols, n_dir)` horizon).
+  `horizon.compute_horizons_flat`, `run_pv.compute_pv_flat` and `solar_pv/pv/pixels.PixelFields`
+  carry only the N valid pixels (flat arrays + a searchsorted coordinate lookup) end-to-end;
+  `run_pv` never builds a full-grid field, and `field_arrays` stores float32. Peak drops to a few
+  GB, scaling with building count not the bbox. `compute_pv`/`compute_horizons` keep a dense form
+  for the small-grid validation. (Remaining transient: the met layers are still sampled full-grid
+  per month — a later lever if needed.)
+- **✅ aggregation paginated + parallel (2026-09-16):** `aggregate_from_arrays` pages over
+  buildings (bounding the DB result + working set); the main process does the DB reads and
+  per-page pixel extraction (which needs the in-memory fields), and a worker pool runs the
+  CPU-heavy `_aggregate_pixel_data`, with at most ~2×workers pages in flight so memory stays
+  bounded. Matches the GRASS path's parallelism for large jobs (500k+ buildings). Worker/page
+  tuning wants a real-job profile.
+- **✅ mask read without resampling (2026-09-16):** the buffered building mask shares the
+  elevation grid's pixel phase and resolution (rasterised with `gdal_rasterize -tap`; elevation
+  is warped onto `mask_buf0`'s grid), differing only in extent, so it is cropped by integer pixel
+  offset (`_read_cropped`) rather than warped.
+- **▶ remaining — the acceptance gate:** validate at the `pv_roof_plane` level against the old
+  GRASS path on a **real job area** (the higher-level check the golden rasters can't provide —
+  see the slope/aspect decision). Needs a live DB + LiDAR: run a job through both paths and diff
+  `pv_roof_plane`. This is the one Phase 3 step that can't be exercised offline; do it before
+  Phase 4 deletes the GRASS path.
 
 **Phase 4 — Delete GRASS + toolchain.** Remove `grass_gis_user.py`, `pvmaps.py`,
 `pvmaps_setup.py`, `nix/grass-8.2.0-pvmaps.nix`, the `pkgs2205` 22.05 pin + `buildGrass`

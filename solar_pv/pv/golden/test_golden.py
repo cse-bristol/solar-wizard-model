@@ -115,5 +115,26 @@ class AnnualPortTest(unittest.TestCase):
         self.assertGreater(checked, 0, "no area had a frozen r.pv reference to check")
 
 
+class FieldsAnnualPortTest(unittest.TestCase):
+    """Phase 3: run_pv.compute_pv_fields (the whole-grid assembly the orchestrator drives:
+    lat/lon + met + compute_pv + field_arrays packaging) reproduces the kwh_year golden, given
+    the captured GRASS-adjusted slope/aspect + horizon. Guards the assembly around the
+    already-validated compute_pv core."""
+
+    def test_kwh_year_field_matches_golden(self):
+        if not rpv_check.has_met_tar():
+            self.skipTest("pvgis_data_uk.tar not present")
+        checked = 0
+        for area in AREAS:
+            if not rpv_check.has_rpv_reference(area):
+                continue
+            checked += 1
+            stats = rpv_check.check_fields_annual(area)
+            with self.subTest(area=area.name):
+                self.assertLess(stats.mean_pc, MAX_ABS_PC_YEAR, str(stats))
+                self.assertGreaterEqual(stats.pct_within_2, 99.5, str(stats))
+        self.assertGreater(checked, 0, "no area had a frozen r.pv reference to check")
+
+
 if __name__ == "__main__":
     unittest.main()

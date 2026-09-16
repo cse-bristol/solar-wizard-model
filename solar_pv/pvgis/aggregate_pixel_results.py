@@ -11,7 +11,7 @@ import numpy as np
 import time
 import traceback
 from calendar import mdays
-from collections import defaultdict
+from collections import defaultdict, deque
 from typing import List, Dict, Tuple
 
 import math
@@ -25,6 +25,7 @@ from shapely.strtree import STRtree
 from solar_pv.db_funcs import count, sql_command, connection
 from solar_pv.geos import square
 from solar_pv.postgis import pixels_for_buildings
+from solar_pv.pv.pixels import PixelFields, pixels_for_geoms
 from solar_pv import tables
 from solar_pv.util import get_cpu_count
 
@@ -51,14 +52,7 @@ def aggregate_pixel_results(pg_uri: str,
     start_time = time.time()
 
     with connection(pg_uri) as pg_conn:
-        sql_command(
-            pg_conn,
-            """
-            DELETE FROM models.pv_roof_plane WHERE job_id = %(job_id)s;
-            DELETE FROM models.pv_building WHERE job_id = %(job_id)s;
-            """,
-            {"job_id": job_id},
-            buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE))
+        _delete_existing_results(pg_conn, job_id)
 
     with mp.get_context("spawn").Pool(workers) as pool:
         wrapped_iterable = ((pg_uri, job_id, raster_tables, resolution,
@@ -68,17 +62,125 @@ def aggregate_pixel_results(pg_uri: str,
             pass
 
     with connection(pg_uri) as pg_conn:
-        sql_command(
-            pg_conn,
-            """
-            INSERT INTO models.pv_building
-            SELECT %(job_id)s, toid, exclusion_reason, height
-            FROM {buildings};            
-            """,
-            {"job_id": job_id},
-            buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE))
+        _insert_pv_buildings(pg_conn, job_id)
 
     logging.info(f"PVMAPS results loaded, took {round(time.time() - start_time, 2)} s.")
+
+
+def aggregate_from_arrays(pg_uri: str,
+                          job_id: int,
+                          pixel_fields: PixelFields,
+                          resolution: float,
+                          peak_power_per_m2: float,
+                          system_loss: float,
+                          page_size: int = 1000,
+                          workers: int = None) -> None:
+    """
+    Aggregate the per-pixel PV outputs to roof planes, taking them as an in-memory PixelFields
+    and reusing the _aggregate_pixel_data weighting math.
+
+    Roof planes and building geometries come from the DB; the pixels come from
+    pixels_for_geoms(pixel_fields, ...). The field names (kwh_year, month_01_wh..month_12_wh,
+    horizon_00..NN, in that order, as run_pv produces them) name the per-pixel fields.
+
+    Paginated over buildings. The main process does the DB reads and the per-page pixel
+    extraction (which needs the in-memory fields); the CPU-heavy per-building roof-plane
+    aggregation runs on a worker pool. At most ~2*workers pages are in flight, so memory stays
+    bounded regardless of job size.
+    """
+    field_names = list(pixel_fields.values)
+    pages = math.ceil(count(pg_uri, tables.schema(job_id), tables.BUILDINGS_TABLE) / page_size)
+    if workers is None:
+        workers = load_results_cpu_count()
+    workers = max(1, min(pages, workers))
+    logging.info(f"{pages} pages of {page_size} buildings to aggregate PV results for, "
+                 f"{workers} workers")
+
+    start_time = time.time()
+
+    with connection(pg_uri) as pg_conn:
+        _delete_existing_results(pg_conn, job_id)
+
+    if pages:
+        with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as read_conn, \
+                connection(pg_uri) as write_conn:
+            # generator: extract each page's roof planes + pixels lazily, in the main process:
+            jobs = ((job_id, field_names, resolution, peak_power_per_m2, system_loss,
+                     _load_roof_planes(read_conn, job_id, page, page_size),
+                     pixels_for_geoms(pixel_fields,
+                                      _load_building_geoms(read_conn, job_id, page, page_size)))
+                    for page in range(pages))
+            with mp.get_context("spawn").Pool(workers) as pool:
+                _run_aggregation(pool, jobs, workers, write_conn, job_id)
+            _insert_pv_buildings(write_conn, job_id)
+
+    logging.info(f"PV results loaded, took {round(time.time() - start_time, 2)} s.")
+
+
+def _run_aggregation(pool, jobs, workers: int, write_conn, job_id: int) -> None:
+    """Feed page jobs to the pool keeping at most ~2*workers in flight (so only that many pages'
+    pixels are extracted and buffered at once), writing each page's roofs as it completes."""
+    jobs = iter(jobs)
+    inflight = deque()
+    for _ in range(workers * 2):
+        try:
+            inflight.append(pool.apply_async(_aggregate_page, (next(jobs),)))
+        except StopIteration:
+            break
+    while inflight:
+        roofs_to_write = inflight.popleft().get()
+        _write_results(write_conn, job_id, roofs_to_write)
+        try:
+            inflight.append(pool.apply_async(_aggregate_page, (next(jobs),)))
+        except StopIteration:
+            pass
+
+
+def _aggregate_page(job) -> List[dict]:
+    """Worker: aggregate one page's buildings to roof planes. `job` carries the page's already-
+    extracted roof planes and pixels (both plain picklable dicts), so the worker touches neither
+    the DB nor the in-memory fields."""
+    job_id, field_names, resolution, peak_power_per_m2, system_loss, roof_planes, pixels = job
+    roofs_to_write = []
+    for toid, toid_roof_planes in roof_planes.items():
+        try:
+            roofs = _aggregate_pixel_data(
+                roof_planes=toid_roof_planes,
+                pixels=pixels.get(toid, []),
+                job_id=job_id,
+                pixel_fields=field_names,
+                resolution=resolution,
+                peak_power_per_m2=peak_power_per_m2,
+                system_loss=system_loss)
+            roofs_to_write.extend(roofs)
+        except Exception as e:
+            print(f"PV pixel data aggregation failed on building {toid}:")
+            traceback.print_exc()
+            _write_test_data({'pixels': pixels.get(toid, []), 'roofs': toid_roof_planes})
+            raise e
+    return roofs_to_write
+
+
+def _delete_existing_results(pg_conn, job_id: int) -> None:
+    sql_command(
+        pg_conn,
+        """
+        DELETE FROM models.pv_roof_plane WHERE job_id = %(job_id)s;
+        DELETE FROM models.pv_building WHERE job_id = %(job_id)s;
+        """,
+        {"job_id": job_id})
+
+
+def _insert_pv_buildings(pg_conn, job_id: int) -> None:
+    sql_command(
+        pg_conn,
+        """
+        INSERT INTO models.pv_building
+        SELECT %(job_id)s, toid, exclusion_reason, height
+        FROM {buildings};
+        """,
+        {"job_id": job_id},
+        buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE))
 
 
 def _aggregate_results_page(pg_uri: str,
@@ -242,6 +344,8 @@ def _aggregate_pixel_data(roof_planes,
 
 
 def _write_results(pg_conn, job_id: int, roofs: List[dict]):
+    if not roofs:
+        return
     for roof in roofs:
         roof['meta'] = Json(roof['meta'])
     with pg_conn.cursor() as cursor:
@@ -362,6 +466,25 @@ def _load_roof_planes(pg_conn, job_id: int, page: int, page_size: int, toids: Li
         by_toid[roof['toid']].append(dict(roof))
 
     return dict(by_toid)
+
+
+def _load_building_geoms(pg_conn, job_id: int, page: int, page_size: int) -> Dict[str, object]:
+    """Load the page's (EPSG:27700) building geometries, keyed by toid. Uses the same
+    building_page selection (exclusion_reason IS NULL, ordered by toid) as _load_roof_planes
+    and pixels_for_buildings, so the pages line up."""
+    rows = sql_command(
+        pg_conn,
+        """
+        SELECT b.toid, ST_AsText(b.geom_27700) AS geom
+        FROM {buildings} b
+        WHERE b.exclusion_reason IS NULL
+        ORDER BY b.toid
+        OFFSET %(offset)s LIMIT %(limit)s
+        """,
+        {"offset": page * page_size, "limit": page_size},
+        buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
+        result_extractor=lambda rows: rows)
+    return {r['toid']: wkt.loads(r['geom']) for r in rows}
 
 
 def _write_test_data(test_data):
