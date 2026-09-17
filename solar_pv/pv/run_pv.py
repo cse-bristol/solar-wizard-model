@@ -8,7 +8,7 @@ planes, with no GRASS and no raster round-trip through Postgis.
 `run_pv` is the top-level orchestrator. Below it, the r.pv core (solar_pv.pv.irradiation) runs
 for each representative month; `monthly_wh_and_annual` applies the wind and spectral corrections
 and sums to a yearly total (the r.pv + wind/spectral + annual-sum steps of the PVMAPS pipeline);
-`compute_pv`/`compute_pv_fields` drive the whole grid. See docs/r-pv-algorithm.md.
+`compute_pv_flat`/`compute_pv_fields` drive the whole grid.
 """
 import math
 import os
@@ -21,7 +21,7 @@ from osgeo import gdal, osr
 from solar_pv.pv import irradiation as ir
 from solar_pv.pv.pixels import PixelFields
 from solar_pv import stage
-from solar_pv.constants import FLAT_ROOF_DEGREES_THRESHOLD, SYSTEM_LOSS
+from solar_pv.constants import SYSTEM_LOSS
 from solar_pv.paths import RESOURCES_DIR
 from solar_pv.pv import horizon as hz, horizon_geo, slope_aspect
 from solar_pv.pv.met_data import MetData
@@ -39,7 +39,7 @@ GeoTransform = Tuple[float, float, float, float, float, float]
 # (index, representative day-of-year, month, days-in-month) — matches PVMAPS
 # _monthly_pv_time_steps() / _get_annual_rasters (num_days weighting):
 MONTHLY_STEPS = [
-    (0, 17, 1, 31), (1, 46, 2, 28), (2, 75, 3, 31), (3, 103, 4, 30),
+    (0, 17, 1, 31), (1, 46, 2, 28), (2, 75, 3, 31), (3, 105, 4, 30),
     (4, 135, 5, 31), (5, 162, 6, 30), (6, 198, 7, 31), (7, 228, 8, 31),
     (8, 259, 9, 30), (9, 289, 10, 31), (10, 319, 11, 30), (11, 345, 12, 31),
 ]
@@ -125,7 +125,7 @@ def compute_pv_flat(rows: np.ndarray, cols: np.ndarray,
 
     monthly_hpv, monthly_wind, monthly_spectral = [], [], []
     for _, day, month, _ in MONTHLY_STEPS:
-        m = met.for_month(month).at(idx)
+        m = met.for_month(month, idx)
         monthly_hpv.append(ir.compute_daily_pv(
             slope_deg, aspect_compass_deg, elevation, lat, lon,
             horizon, horizon_step_deg,
@@ -135,37 +135,6 @@ def compute_pv_flat(rows: np.ndarray, cols: np.ndarray,
         monthly_spectral.append(m.spectral)
 
     return monthly_wh_and_annual(monthly_hpv, monthly_wind, monthly_spectral)
-
-
-def compute_pv(slope_deg: np.ndarray, aspect_compass_deg: np.ndarray, elevation: np.ndarray,
-               geotransform: GeoTransform, horizon: np.ndarray,
-               horizon_step_deg: float, met, coeffs: Sequence[float],
-               valid: Optional[np.ndarray] = None, albedo: float = 0.2
-               ) -> Tuple[List[np.ndarray], np.ndarray]:
-    """
-    Dense (full-grid) form of compute_pv_flat, for small grids (validation). All spatial inputs
-    are 2D (rows, cols), except `horizon` which is (rows, cols, n_dir). `valid` is an optional
-    boolean mask of pixels to evaluate (default: finite slope/aspect/elevation/horizon). Returns
-    (monthly_wh, kwh_year) as 2D arrays, NaN outside `valid`. On real job grids use
-    compute_pv_flat, which never allocates the full grid.
-    """
-    shape = np.asarray(slope_deg).shape
-    if valid is None:
-        valid = (np.isfinite(slope_deg) & np.isfinite(aspect_compass_deg) & np.isfinite(elevation)
-                 & np.all(np.isfinite(horizon), axis=-1))
-    idx = np.nonzero(valid)
-    flat_wh, flat_year = compute_pv_flat(
-        idx[0], idx[1], slope_deg[idx], aspect_compass_deg[idx], elevation[idx],
-        horizon[idx], geotransform, horizon_step_deg, met, coeffs, albedo)
-
-    monthly_wh = []
-    for wh in flat_wh:
-        full = np.full(shape, np.nan)
-        full[idx] = wh
-        monthly_wh.append(full)
-    kwh_year = np.full(shape, np.nan)
-    kwh_year[idx] = flat_year
-    return monthly_wh, kwh_year
 
 
 def _latlon_at(geotransform: GeoTransform, rows: np.ndarray,
@@ -280,7 +249,6 @@ def run_pv(pg_uri: str,
            horizon_search_radius: int,
            horizon_slices: int,
            peak_power_per_m2: float,
-           flat_roof_degrees: int,
            elevation_raster: str,
            mask_raster: str,
            slope_raster: str,
@@ -341,8 +309,6 @@ def run_pv(pg_uri: str,
     slope_adjusted, aspect_adjusted = slope_aspect.apply_correction(
         slope_deg=_read_aligned(slope_raster, shape)[hrow, hcol],
         aspect_compass_deg=_read_aligned(aspect_raster, shape)[hrow, hcol],
-        flat_roof_degrees=flat_roof_degrees,
-        flat_roof_threshold=FLAT_ROOF_DEGREES_THRESHOLD,
         aspect_override_compass_deg=_read_aligned(aspect_override_raster, shape)[hrow, hcol],
         slope_override_deg=_read_aligned(slope_override_raster, shape)[hrow, hcol])
     elev = elevation[hrow, hcol]

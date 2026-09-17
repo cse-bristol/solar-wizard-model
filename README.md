@@ -19,7 +19,16 @@ The model has the following software dependencies:
 
 The PV generation model is native Python (numpy/GDAL): an LLM port of the GRASS/PVMAPS `r.horizonmask`
 and `r.pv` (from [PVMAPS](https://joint-research-centre.ec.europa.eu/pvgis-online-tool/pvgis-data-download/pvmaps_en))
-algorithms. GRASS is no longer a runtime dependency. See `docs/pv-grass-removal-plan.md`.
+algorithms. GRASS is no longer a runtime dependency.
+
+The python port has been tested against `r.pv`:
+
+  | Level | no-GRASS vs GRASS |
+  |---|---|
+  | Portfolio total Σ kwh_year_avg (geom-identical) | **−0.08%** |
+  | Portfolio total (entire file, incl. roof-detection noise) | −0.07% |
+  | Per-roof kwh_year_avg | mean **0.81%**, median 0.52%, p95 2.6%, p99 4.1%, max 9.1% |
+  | Horizon angle | mean 0.14°, p99 2.3° |
 
 The model has the following data dependencies:
 * building footprint geometries

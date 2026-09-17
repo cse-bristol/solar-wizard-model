@@ -129,22 +129,3 @@ def compute_horizons_flat(elevation: np.ndarray,
         values[:, d_idx] = np.clip(np.arctan(best_tan), 0.0, PI_HALF)
 
     return values, orow, ocol
-
-
-def compute_horizons(elevation: np.ndarray,
-                     ew_res: float,
-                     ns_res: float,
-                     direction_vectors: Sequence,
-                     max_distance: float,
-                     earth_radius: float = EARTH_RADIUS,
-                     mask: np.ndarray = None) -> np.ndarray:
-    """Dense form: as compute_horizons_flat, but scattered back into a full
-    (n_directions, rows, cols) grid (NaN for unevaluated / nodata-origin cells). Used where the
-    grid is small (validation); prefer compute_horizons_flat on real job grids."""
-    values, orow, ocol = compute_horizons_flat(
-        elevation, ew_res, ns_res, direction_vectors, max_distance, earth_radius, mask)
-    rows, cols = np.asarray(elevation).shape
-    out = np.full((len(direction_vectors), rows, cols), np.nan, dtype=np.float64)
-    for d_idx in range(len(direction_vectors)):
-        out[d_idx][orow, ocol] = values[:, d_idx]
-    return out

@@ -123,7 +123,7 @@ def _aggregate_page(job) -> List[dict]:
         except Exception as e:
             print(f"PV pixel data aggregation failed on building {toid}:")
             traceback.print_exc()
-            _write_test_data({'pixels': pixels.get(toid, []), 'roofs': toid_roof_planes})
+            _write_test_data(toid, {'pixels': pixels.get(toid, []), 'roofs': toid_roof_planes})
             raise e
     return roofs_to_write
 
@@ -419,12 +419,13 @@ def _load_building_geoms(pg_conn, job_id: int, page: int, page_size: int) -> Dic
     return {r['toid']: wkt.loads(r['geom']) for r in rows}
 
 
-def _write_test_data(test_data):
-    """Write test data for building"""
+def _write_test_data(toid, test_data):
+    """Dump a failed building's pixels/roofs for debugging: to DEBUG_DATA_DIR if set, else stdout.
+    Runs on the aggregation error path, so it must never raise itself and mask the real error."""
     debug_data_dir = os.environ.get("DEBUG_DATA_DIR")
-    os.makedirs(debug_data_dir, exist_ok=True)
     if debug_data_dir:
-        fname = join(debug_data_dir, f"pixel_agg_{test_data['toid']}.json")
+        os.makedirs(debug_data_dir, exist_ok=True)
+        fname = join(debug_data_dir, f"pixel_agg_{toid}.json")
         with open(fname, 'w') as f:
             json.dump(test_data, f, sort_keys=True, default=str)
         print(f"Wrote debug data to {fname}")

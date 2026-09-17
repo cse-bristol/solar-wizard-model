@@ -96,8 +96,7 @@ class PhysicalPropertyTest(unittest.TestCase):
 
 # Complete pixel cases captured from the thurso r.pv reference; expected = GRASS r.pv hpv.
 # aspect is compass (0 = N, clockwise), converted from the GRASS CCW-from-East aspect r.pv
-# consumed (S 270->180, N 90->360, E 360->90). (See bin/capture_rpv_reference.py /
-# docs/r-pv-algorithm.md.)
+# consumed (S 270->180, N 90->360, E 360->90).
 REGRESSION = [
     dict(tag="june_flat_south", day=162, slope=10.00000, aspect=180.00000, elev=38.1350,
          lat=1.02270667, lon=-0.06163945, linke=3.72466, cbh=0.239581, cdh=1.686120,

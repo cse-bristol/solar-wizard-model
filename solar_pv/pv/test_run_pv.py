@@ -17,11 +17,12 @@ class _StubMet:
     def __init__(self, shape):
         self._shape = shape
 
-    def for_month(self, month: int) -> MonthMet:
-        ones = np.ones(self._shape)
+    def for_month(self, month: int, idx=None) -> MonthMet:
+        shape = self._shape if idx is None else (np.asarray(idx[0]).shape[0],)
+        ones = np.ones(shape)
         return MonthMet(
             linke=3.0 * ones, cbh=1.0 * ones, cdh=1.0 * ones,
-            temps8=np.full(self._shape + (8,), 10.0),
+            temps8=np.full(shape + (8,), 10.0),
             wind=None, spectral=None)
 
 
@@ -76,7 +77,7 @@ class FieldArraysTest(unittest.TestCase):
 
 
 class ComputePvFieldsTest(unittest.TestCase):
-    """Wiring of the whole-grid assembly (lat/lon + met + compute_pv + PixelFields packaging),
+    """Wiring of the whole-grid assembly (lat/lon + met + compute_pv_flat + PixelFields packaging),
     with a stub met. Not an accuracy check — the golden tests cover the numerics."""
 
     def setUp(self):
@@ -120,12 +121,16 @@ class SolarDeclinationTest(unittest.TestCase):
     _calc_solar_declination (which r.pv, and hence compute_daily_pv, consumes)."""
 
     def test_matches_pvmaps_reference(self):
-        # (day, PVMAPS _calc_solar_declination value):
-        reference = [(17, -0.36146), (46, -0.22358), (75, -0.03141), (105, 0.17052),
-                     (135, 0.32864), (162, 0.40265), (198, 0.36931), (228, 0.23823),
-                     (259, 0.04695), (289, -0.15219), (319, -0.32062), (345, -0.40125)]
-        for day, pvmaps_decl in reference:
-            with self.subTest(day=day):
+        # {month: (representative day-of-year, PVMAPS _calc_solar_declination value)}, keyed by
+        # month so this drives MONTHLY_STEPS' own days — the representative day each month's PV is
+        # actually computed for — rather than a parallel hardcoded list that could silently drift.
+        reference = {1: (17, -0.36146), 2: (46, -0.22358), 3: (75, -0.03141), 4: (105, 0.17052),
+                     5: (135, 0.32864), 6: (162, 0.40265), 7: (198, 0.36931), 8: (228, 0.23823),
+                     9: (259, 0.04695), 10: (289, -0.15219), 11: (319, -0.32062), 12: (345, -0.40125)}
+        for _, day, month, _ in run_pv.MONTHLY_STEPS:
+            ref_day, pvmaps_decl = reference[month]
+            with self.subTest(month=month):
+                self.assertEqual(day, ref_day, "MONTHLY_STEPS representative day-of-year drifted")
                 self.assertAlmostEqual(run_pv.solar_declination(day), -pvmaps_decl, delta=0.005)
 
 

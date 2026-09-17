@@ -5,8 +5,6 @@ Sample the meteorological inputs (Linke turbidity, real-sky beam/diffuse coeffic
 air temperature, wind and spectral corrections) for a job's raster grid. The data are UK-wide
 EPSG:27700 GeoTIFFs inside pvgis_data_uk.tar (~1.6 km cells); GDAL reads them in place via
 /vsitar/.
-
-See docs/r-pv-algorithm.md for how each layer feeds r.pv.
 """
 from dataclasses import dataclass
 
@@ -21,21 +19,15 @@ _SUFFIX = ".27700.tif"
 
 @dataclass
 class MonthMet:
-    """Per-month met arrays on the job grid (temps8 is (rows, cols, 8); wind/spectral may be
-    None where the layer has no coverage -> the assembly defaults them to 1.0)."""
+    """Per-month met arrays for a pixel selection (temps8 keeps a trailing 8-slot axis; wind/
+    spectral may be None where the layer has no coverage -> the assembly defaults them to 1.0).
+    Flat (N,)/(N, 8) when for_month was given pixel indices, else full-grid (rows, cols)/(…, 8)."""
     linke: np.ndarray
     cbh: np.ndarray
     cdh: np.ndarray
     temps8: np.ndarray
     wind: np.ndarray
     spectral: np.ndarray
-
-    def at(self, idx) -> "MonthMet":
-        """Index every layer to a pixel selection (temps8 keeps its 8-slot axis)."""
-        return MonthMet(
-            self.linke[idx], self.cbh[idx], self.cdh[idx], self.temps8[idx],
-            None if self.wind is None else self.wind[idx],
-            None if self.spectral is None else self.spectral[idx])
 
 
 class MetData:
@@ -49,38 +41,39 @@ class MetData:
         self._panel = panel
         self._resample = resample
 
-    def _sample(self, name: str, required: bool = True):
+    def _sample(self, name: str, idx=None, required: bool = True):
+        """Warp one met layer onto the job grid and return it, indexed to `idx` (a (rows, cols)
+        pixel selection) when given so no full-grid array outlives the warp. `required=False`
+        layers absent from the tar return None (the Warp raises on a missing source)."""
         rows, cols = self._shape
         gt = self._gt
         src = f"/vsitar/{self._tar}/{name}{_SUFFIX}"
+        bounds = (gt[0], gt[3] + gt[5] * rows, gt[0] + gt[1] * cols, gt[3])
         try:
-            gdal.Open(src)
+            ds = gdal.Warp("", src, format="MEM", xRes=abs(gt[1]), yRes=abs(gt[5]),
+                           resampleAlg=self._resample, outputBounds=bounds, dstSRS="EPSG:27700")
         except RuntimeError:
             if required:
                 raise
             return None
-        bounds = (gt[0], gt[3] + gt[5] * rows, gt[0] + gt[1] * cols, gt[3])
-        mem = "/vsimem/met_sample.tif"
-        gdal.Warp(mem, src, xRes=abs(gt[1]), yRes=abs(gt[5]), resampleAlg=self._resample,
-                  outputBounds=bounds, dstSRS="EPSG:27700")
-        ds = gdal.Open(mem)
         band = ds.GetRasterBand(1)
         arr = band.ReadAsArray().astype(np.float64)
         nodata = band.GetNoDataValue()
         if nodata is not None and not np.isnan(nodata):
             arr = np.where(arr == nodata, np.nan, arr)
-        ds = None
-        gdal.Unlink(mem)
-        return arr
+        return arr if idx is None else arr[idx]
 
-    def for_month(self, month: int) -> MonthMet:
+    def for_month(self, month: int, idx=None) -> MonthMet:
+        """Sample every layer for `month`. Pass `idx` (the building pixels' (rows, cols)) on a
+        real job so each layer is sliced to the footprint pixels as it is read, never held as a
+        full grid; omit it (full grid) only for small validation grids."""
         mm = f"{month:02d}"
-        temps8 = np.stack([self._sample(f"t2m_avg_{mm}_{hh:02d}") for hh in range(0, 24, 3)],
+        temps8 = np.stack([self._sample(f"t2m_avg_{mm}_{hh:02d}", idx) for hh in range(0, 24, 3)],
                           axis=-1)
         return MonthMet(
-            linke=self._sample(f"tl_0m_{mm}"),
-            cbh=self._sample(f"kcb_{mm}"),
-            cdh=self._sample(f"kcd_{mm}"),
+            linke=self._sample(f"tl_0m_{mm}", idx),
+            cbh=self._sample(f"kcb_{mm}", idx),
+            cdh=self._sample(f"kcd_{mm}", idx),
             temps8=temps8,
-            wind=self._sample(f"windeffect_{mm}", required=False),
-            spectral=self._sample(f"spectraleffect_{self._panel}_{mm}", required=False))
+            wind=self._sample(f"windeffect_{mm}", idx, required=False),
+            spectral=self._sample(f"spectraleffect_{self._panel}_{mm}", idx, required=False))

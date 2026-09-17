@@ -48,6 +48,18 @@ class MetDataTest(unittest.TestCase):
         m = met_data.MetData(MET_TAR, self.GT, self.SHAPE, panel="NoSuchPanel").for_month(6)
         self.assertIsNone(m.spectral)
 
+    def test_indexed_sampling_matches_full_grid(self):
+        # passing pixel indices (the memory-bounded job path) must give exactly the full-grid
+        # values at those pixels - the full grid is only ever materialised for validation:
+        full = self._june()
+        idx = (np.array([0, 3, 9, 5, 0]), np.array([0, 9, 1, 5, 9]))
+        flat = met_data.MetData(MET_TAR, self.GT, self.SHAPE, resample="near").for_month(6, idx)
+        np.testing.assert_array_equal(flat.linke, full.linke[idx])
+        np.testing.assert_array_equal(flat.cbh, full.cbh[idx])
+        np.testing.assert_array_equal(flat.cdh, full.cdh[idx])
+        np.testing.assert_array_equal(flat.temps8, full.temps8[idx])
+        self.assertEqual(flat.temps8.shape, (idx[0].size, 8))
+
 
 if __name__ == "__main__":
     unittest.main()

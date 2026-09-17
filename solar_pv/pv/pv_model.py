@@ -2,7 +2,7 @@
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 """
 PV power layer of the r.pv port: module temperature + polynomial efficiency, and the
-3-hourly ambient-temperature interpolation. See docs/r-pv-algorithm.md.
+3-hourly ambient-temperature interpolation.
 
 Vectorised over pixels; `coeffs` are the 8 numbers from a <panel>.coeffs file
 (coeffs[7] is the module-temp rise per W/m^2).
