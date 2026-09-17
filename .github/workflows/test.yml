@@ -17,13 +17,10 @@ jobs:
         # Match the nixpkgs pinned in 320-albion-models/shell.nix.
         nix_path: nixpkgs=https://github.com/NixOS/nixpkgs/archive/b18a4b9.tar.gz
     
-    - name: Setup Nix environment (without GRASS)
+    - name: Setup Nix environment
       run: |
-        export NIX_BUILD_GRASS=false
         nix-shell --run "echo 'Nix environment ready'"
-    
-    - name: Run tests (excluding PVMAPS)
-      env:
-        NIX_BUILD_GRASS: false
+
+    - name: Run tests
       run: |
         nix-shell --run "python3 -m unittest discover -s . -p 'test_*.py' -v"

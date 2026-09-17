@@ -211,7 +211,8 @@ def _load_rasters_to_db(pg_uri: str,
 def generate_aspect_override_raster(pg_uri: str,
                                     job_id: int,
                                     solar_dir: str,
-                                    mask_raster_27700_filename: str) -> str:
+                                    mask_raster_27700_filename: str,
+                                    bounds: Optional[Tuple[float, float, float, float]] = None) -> str:
     srid = gdal_helpers.get_srid(mask_raster_27700_filename, fallback=27700)
     res = gdal_helpers.get_res(mask_raster_27700_filename)
     aspect_raster_filename = join(solar_dir, 'aspect_override.tif')
@@ -222,7 +223,7 @@ def generate_aspect_override_raster(pg_uri: str,
         ).format(
             roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE)
         ).as_string(pg_conn)
-    gdal_helpers.rasterize_3d(pg_uri, mask_sql, aspect_raster_filename, res, srid)
+    gdal_helpers.rasterize_3d(pg_uri, mask_sql, aspect_raster_filename, res, srid, bounds=bounds)
 
     return aspect_raster_filename
 
@@ -230,7 +231,8 @@ def generate_aspect_override_raster(pg_uri: str,
 def generate_slope_override_raster(pg_uri: str,
                                    job_id: int,
                                    solar_dir: str,
-                                   mask_raster_27700_filename: str) -> str:
+                                   mask_raster_27700_filename: str,
+                                   bounds: Optional[Tuple[float, float, float, float]] = None) -> str:
     srid = gdal_helpers.get_srid(mask_raster_27700_filename, fallback=27700)
     res = gdal_helpers.get_res(mask_raster_27700_filename)
     slope_raster_filename = join(solar_dir, 'slope_override.tif')
@@ -241,7 +243,7 @@ def generate_slope_override_raster(pg_uri: str,
         ).format(
             roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE)
         ).as_string(pg_conn)
-    gdal_helpers.rasterize_3d(pg_uri, mask_sql, slope_raster_filename, res, srid)
+    gdal_helpers.rasterize_3d(pg_uri, mask_sql, slope_raster_filename, res, srid, bounds=bounds)
 
     return slope_raster_filename
 
@@ -262,7 +264,8 @@ def has_outdated_lidar(pg_uri: str, job_id: int) -> bool:
 def create_elevation_override_raster(pg_uri: str,
                                      job_id: int,
                                      solar_dir: str,
-                                     elevation_raster_27700_filename: str) -> Optional[str]:
+                                     elevation_raster_27700_filename: str,
+                                     bounds: Optional[Tuple[float, float, float, float]] = None) -> Optional[str]:
     if has_outdated_lidar(pg_uri, job_id) and count(pg_uri, "mastermap", "height") > 0:
         srid = gdal_helpers.get_srid(elevation_raster_27700_filename, fallback=27700)
         res = gdal_helpers.get_xres_yres(elevation_raster_27700_filename)
@@ -277,7 +280,7 @@ def create_elevation_override_raster(pg_uri: str,
             ).format(
                 buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE)
             ).as_string(pg_conn)
-        gdal_helpers.rasterize_3d(pg_uri, outdated_lidar_building_h_sql, patch_raster_filename, res, srid, "Float32")
+        gdal_helpers.rasterize_3d(pg_uri, outdated_lidar_building_h_sql, patch_raster_filename, res, srid, "Float32", bounds=bounds)
 
         return patch_raster_filename
     return None

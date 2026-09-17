@@ -14,7 +14,7 @@ from solar_pv.db_funcs import process_pg_uri, \
     connection, sql_command, sql_script
 from solar_pv.postgis import raster_tile_coverage_count
 from solar_pv.outdated_lidar.outdated_lidar_check import check_lidar
-from solar_pv.pvgis.pvgis import pvgis
+from solar_pv.pv.run_pv import run_pv
 from solar_pv.roof_detection.detect_roofs import detect_roofs
 from solar_pv.rasters import generate_rasters
 
@@ -88,7 +88,6 @@ def model_solar_pv(pg_uri: str,
     min_dist_to_edge_m = _validate_float(min_dist_to_edge_m, "min_dist_to_edge_m", 0)
 
     _validate_env_var("PVGIS_DATA_TAR_FILE_DIR")
-    _validate_env_var("PVGIS_GRASS_DBASE_DIR")
 
     pg_uri = process_pg_uri(pg_uri)
 
@@ -142,22 +141,21 @@ def model_solar_pv(pg_uri: str,
     #     panel_height_m=panel_height_m,
     #     panel_spacing_m=panel_spacing_m)
 
-    logging.info("Running PV-GIS...")
-    pvgis(pg_uri=pg_uri,
-          job_id=job_id,
-          solar_dir=solar_dir,
-          job_lidar_dir=job_lidar_dir,
-          resolution_metres=res,
-          pv_tech=pv_tech,
-          horizon_search_radius=horizon_search_radius,
-          horizon_slices=horizon_slices,
-          peak_power_per_m2=peak_power_per_m2,
-          flat_roof_degrees=flat_roof_degrees,
-          elevation_raster=elevation_raster_27700,
-          mask_raster=mask_raster_27700,
-          slope_raster=slope_raster_27700,
-          aspect_raster=aspect_raster_27700,
-          debug_mode=debug_mode)
+    logging.info("Running PV...")
+    run_pv(pg_uri=pg_uri,
+           job_id=job_id,
+           solar_dir=solar_dir,
+           resolution_metres=res,
+           pv_tech=pv_tech,
+           horizon_search_radius=horizon_search_radius,
+           horizon_slices=horizon_slices,
+           peak_power_per_m2=peak_power_per_m2,
+           elevation_raster=elevation_raster_27700,
+           mask_raster=mask_raster_27700,
+           slope_raster=slope_raster_27700,
+           aspect_raster=aspect_raster_27700,
+           met_tar=join(os.environ["PVGIS_DATA_TAR_FILE_DIR"], "pvgis_data_uk.tar"),
+           debug_mode=debug_mode)
 
     if not debug_mode:
         logging.info("Removing temp dir...")

@@ -3,14 +3,7 @@
 let
   pkgs = (import (fetchTarball "https://github.com/NixOS/nixpkgs/archive/b18a4b9.tar.gz") {});
 
-  # GRASS and pvmaps pinned to 22.05:
-  pkgs2205 = (import (fetchTarball "https://github.com/NixOS/nixpkgs/archive/22.05.tar.gz") {});
-
   python = pkgs.python312;
-
-  # Option to disable the (slow) GRASS build (set NIX_BUILD_GRASS=false to disable):
-  buildGrass = builtins.getEnv "NIX_BUILD_GRASS" != "false";
-  grass_pvmaps = pkgs2205.callPackage ./nix/grass-8.2.0-pvmaps.nix {};
 in
 pkgs.mkShell {
   name = "solar-wizard-model";
@@ -21,7 +14,7 @@ pkgs.mkShell {
     (pkgs.postgresql_17.withPackages (p: [ p.postgis ]))
     pkgs.postgresql_17.pg_config
     pkgs.py-spy
-  ] ++ pkgs.lib.optional buildGrass grass_pvmaps;
+  ];
 
   # numpy / scikit-learn / scikit-image etc. install as manylinux wheels that are
   # linked against a standard glibc + libstdc++:
