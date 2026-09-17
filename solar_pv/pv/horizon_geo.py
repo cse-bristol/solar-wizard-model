@@ -1,8 +1,7 @@
 # This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 """
-GDAL/OSR helpers for the horizon port: replicate r.horizonmask's exact marching directions
-(kept separate from the pure-numpy horizon.py).
+GDAL/OSR helpers for the horizon port: replicate GRASS r.horizon exact marching directions.
 
 r.horizon does not march straight along the nominal grid azimuth. For each point it steps a
 tiny distance in *geographic* space and transforms back to the projected CRS, so the

@@ -13,12 +13,22 @@ and sums to a yearly total (the r.pv + wind/spectral + annual-sum steps of the P
 import math
 import os
 from typing import Dict, List, Optional, Sequence, Tuple
+import logging
 
 import numpy as np
 from osgeo import gdal, osr
 
 from solar_pv.pv import irradiation as ir
 from solar_pv.pv.pixels import PixelFields
+from solar_pv import stage
+from solar_pv.constants import FLAT_ROOF_DEGREES_THRESHOLD, SYSTEM_LOSS
+from solar_pv.paths import RESOURCES_DIR
+from solar_pv.pv import horizon as hz, horizon_geo, slope_aspect
+from solar_pv.pv.met_data import MetData
+from solar_pv.pv.aggregate_pixel_results import aggregate_from_arrays
+from solar_pv.rasters import (create_elevation_override_raster,
+                                generate_aspect_override_raster,
+                                generate_slope_override_raster)
 
 gdal.UseExceptions()
 osr.UseExceptions()
@@ -40,6 +50,13 @@ def solar_declination(day: int) -> float:
     compute_daily_pv (the negative of PVMAPS's _calc_solar_declination)."""
     d1 = 2.0 * math.pi * day / 365.25
     return -math.asin(0.3978 * math.sin(d1 - 1.4 + 0.0355 * math.sin(d1 - 0.0489)))
+
+
+def patch_elevation(elevation: np.ndarray, override: np.ndarray) -> np.ndarray:
+    """Merge a building-height override into the elevation (both full-grid, NaN = nodata): take
+    the max where both are present (so a modelled height below the LiDAR keeps the LiDAR), else
+    whichever is present. np.fmax ignores NaN, giving exactly that."""
+    return np.fmax(override, elevation)
 
 
 def _correction(factor: Optional[np.ndarray], shape: Tuple[int, ...]) -> np.ndarray:
@@ -277,17 +294,6 @@ def run_pv(pg_uri: str,
     Slope/aspect stay on GDAL (produced by generate_rasters); the roof-plane and building-height
     overrides are still built from the DB.
     """
-    import logging
-
-    from solar_pv import stage
-    from solar_pv.constants import FLAT_ROOF_DEGREES_THRESHOLD, SYSTEM_LOSS
-    from solar_pv.paths import RESOURCES_DIR
-    from solar_pv.pv import horizon as hz, horizon_geo, slope_aspect
-    from solar_pv.pv.met_data import MetData
-    from solar_pv.pvgis.aggregate_pixel_results import aggregate_from_arrays
-    from solar_pv.rasters import (create_elevation_override_raster,
-                                  generate_aspect_override_raster,
-                                  generate_slope_override_raster)
 
     panel = _PANEL_FOR_TECH.get(pv_tech)
     if panel is None:
@@ -316,10 +322,9 @@ def run_pv(pg_uri: str,
         pg_uri=pg_uri, job_id=job_id, solar_dir=solar_dir,
         mask_raster_27700_filename=mask_raster, bounds=grid_bounds)
 
-    # Patched elevation (feeds both horizon and PV): where a building-height override is present,
-    # take max(override, elevation), else whichever is present. fmax ignores NaN.
+    # Patched elevation feeds both horizon and PV (see patch_elevation):
     if elevation_override_raster:
-        elevation = np.fmax(_read_aligned(elevation_override_raster, shape), elevation)
+        elevation = patch_elevation(elevation, _read_aligned(elevation_override_raster, shape))
 
     mask_bool = np.nan_to_num(_read_cropped(mask_raster, gt, shape)) != 0
 

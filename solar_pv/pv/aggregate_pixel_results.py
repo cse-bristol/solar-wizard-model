@@ -1,6 +1,6 @@
 # This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
-"""Convert raster data output of PVMAPS into per-panel information"""
+"""Aggregate the per-pixel PV model outputs into per-roof-plane information."""
 import json
 import logging
 import multiprocessing as mp
@@ -24,7 +24,6 @@ from shapely.strtree import STRtree
 
 from solar_pv.db_funcs import count, sql_command, connection
 from solar_pv.geos import square
-from solar_pv.postgis import pixels_for_buildings
 from solar_pv.pv.pixels import PixelFields, pixels_for_geoms
 from solar_pv import tables
 from solar_pv.util import get_cpu_count
@@ -33,38 +32,6 @@ from solar_pv.util import get_cpu_count
 def load_results_cpu_count():
     """Use 3/4s of available CPUs for aggregation (or max of 100)"""
     return min(int(get_cpu_count() * 0.75), 100)
-
-
-def aggregate_pixel_results(pg_uri: str,
-                            job_id: int,
-                            raster_tables: List[str],
-                            resolution: float,
-                            peak_power_per_m2: float,
-                            system_loss: float,
-                            workers: int = load_results_cpu_count(),
-                            page_size: int = 1000):
-    """Convert raster data output of PVMAPS into per-roof-plane information"""
-    pages = math.ceil(count(pg_uri, tables.schema(job_id), tables.BUILDINGS_TABLE) / page_size)
-    workers = min(pages, workers)
-    logging.info(f"{pages} pages of size {page_size} buildings to load PVMAPS results for")
-    logging.info(f"Using {workers} processes for loading PVMAPS results")
-
-    start_time = time.time()
-
-    with connection(pg_uri) as pg_conn:
-        _delete_existing_results(pg_conn, job_id)
-
-    with mp.get_context("spawn").Pool(workers) as pool:
-        wrapped_iterable = ((pg_uri, job_id, raster_tables, resolution,
-                             peak_power_per_m2, system_loss, page, page_size)
-                            for page in range(0, pages))
-        for res in pool.starmap(_aggregate_results_page, wrapped_iterable, chunksize=1):
-            pass
-
-    with connection(pg_uri) as pg_conn:
-        _insert_pv_buildings(pg_conn, job_id)
-
-    logging.info(f"PVMAPS results loaded, took {round(time.time() - start_time, 2)} s.")
 
 
 def aggregate_from_arrays(pg_uri: str,
@@ -181,41 +148,6 @@ def _insert_pv_buildings(pg_conn, job_id: int) -> None:
         """,
         {"job_id": job_id},
         buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE))
-
-
-def _aggregate_results_page(pg_uri: str,
-                            job_id: int,
-                            raster_tables: List[str],
-                            resolution: float,
-                            peak_power_per_m2: float,
-                            system_loss: float,
-                            page: int,
-                            page_size: int):
-    start_time = time.time()
-    with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
-        all_roof_planes = _load_roof_planes(pg_conn, job_id, page, page_size)
-        all_pixels = pixels_for_buildings(pg_conn, job_id, page, page_size, raster_tables)
-        roofs_to_write = []
-
-        for toid, toid_roof_planes in all_roof_planes.items():
-            try:
-                roofs = _aggregate_pixel_data(
-                    roof_planes=toid_roof_planes,
-                    pixels=all_pixels[toid],
-                    job_id=job_id,
-                    pixel_fields=[t.split(".")[1] for t in raster_tables],
-                    resolution=resolution,
-                    peak_power_per_m2=peak_power_per_m2,
-                    system_loss=system_loss)
-                roofs_to_write.extend(roofs)
-            except Exception as e:
-                print(f"PVMAPS pixel data aggregation failed on building {toid}:")
-                traceback.print_exc()
-                _write_test_data({'pixels': all_pixels[toid], 'roofs': toid_roof_planes})
-                raise e
-
-        _write_results(pg_conn, job_id, roofs_to_write)
-        print(f"Loaded page {page} of PVMAPS results, took {round(time.time() - start_time, 2)} s.")
 
 
 def _month_field(i: int):

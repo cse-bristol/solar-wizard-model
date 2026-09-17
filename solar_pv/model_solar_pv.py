@@ -88,7 +88,6 @@ def model_solar_pv(pg_uri: str,
     min_dist_to_edge_m = _validate_float(min_dist_to_edge_m, "min_dist_to_edge_m", 0)
 
     _validate_env_var("PVGIS_DATA_TAR_FILE_DIR")
-    _validate_env_var("PVGIS_GRASS_DBASE_DIR")
 
     pg_uri = process_pg_uri(pg_uri)
 

@@ -1,8 +1,7 @@
 # This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 """
-Native-Python port of GRASS/PVMAPS r.horizonmask (Phase 1 of the GRASS removal;
-docs/pv-grass-removal-plan.md).
+Native-Python port of GRASS r.horizon.
 
 For each requested cell and each azimuth direction (CCW from East, matching r.horizon),
 computes the angular height of the terrain horizon: the max over cells along the ray of

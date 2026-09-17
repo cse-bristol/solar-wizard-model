@@ -11,11 +11,15 @@ from solar_pv.paths import TEST_DATA
 from solar_pv import tables
 from solar_pv.constants import SYSTEM_LOSS
 from solar_pv.pv.pixels import PixelFields, pixels_for_geoms
-from solar_pv.pvgis.aggregate_pixel_results import _aggregate_page, _aggregate_pixel_data
-from solar_pv.pvgis.dev_aggregate_pixel_results import RASTER_TABLES
+from solar_pv.pv.aggregate_pixel_results import _aggregate_page, _aggregate_pixel_data
 from solar_pv.test_utils.test_funcs import ParameterisedTestCase
 
 _PIXEL_DATA = join(TEST_DATA, "pixel_aggregation")
+
+# the per-pixel PV field names, in the order run_pv produces them (36 horizon slices, matching
+# the 0001.json fixture):
+RASTER_TABLES = (['kwh_year'] + [f'month_{i:02d}_wh' for i in range(1, 13)]
+                 + [f'horizon_{i:02d}' for i in range(36)])
 
 
 def _load_data(filename: str) -> dict:

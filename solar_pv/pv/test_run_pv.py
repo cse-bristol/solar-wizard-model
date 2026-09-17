@@ -114,5 +114,31 @@ class ComputePvFieldsTest(unittest.TestCase):
         self.assertTrue(np.isfinite(pf.values["kwh_year"][0]))
 
 
+class SolarDeclinationTest(unittest.TestCase):
+    """Locks the declination formula and r.pv's sign convention against the PVMAPS reference
+    values (from totpv_incl.sh). solar_declination returns the negation of PVMAPS's
+    _calc_solar_declination (which r.pv, and hence compute_daily_pv, consumes)."""
+
+    def test_matches_pvmaps_reference(self):
+        # (day, PVMAPS _calc_solar_declination value):
+        reference = [(17, -0.36146), (46, -0.22358), (75, -0.03141), (105, 0.17052),
+                     (135, 0.32864), (162, 0.40265), (198, 0.36931), (228, 0.23823),
+                     (259, 0.04695), (289, -0.15219), (319, -0.32062), (345, -0.40125)]
+        for day, pvmaps_decl in reference:
+            with self.subTest(day=day):
+                self.assertAlmostEqual(run_pv.solar_declination(day), -pvmaps_decl, delta=0.005)
+
+
+class PatchElevationTest(unittest.TestCase):
+    """Building-height override merge: max where both present (a modelled height below the LiDAR
+    keeps the LiDAR), else whichever is present."""
+
+    def test_merge_semantics(self):
+        elevation = np.array([10.0, 20.0, 30.0, np.nan])
+        override = np.array([15.0, 5.0, np.nan, 40.0])
+        got = run_pv.patch_elevation(elevation, override)
+        np.testing.assert_array_equal(got, [15.0, 20.0, 30.0, 40.0])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -9,7 +9,7 @@ import numpy as np
 from solar_pv.paths import PROJECT_ROOT
 from solar_pv.pv import met_data
 
-MET_TAR = join(PROJECT_ROOT, "pvgis_data_uk.tar")
+MET_TAR = join(os.environ.get("PVGIS_DATA_TAR_FILE_DIR", PROJECT_ROOT), "pvgis_data_uk.tar")
 
 
 @unittest.skipUnless(os.path.exists(MET_TAR), "pvgis_data_uk.tar not present")

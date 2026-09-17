@@ -15,12 +15,19 @@ Results are inserted into 2 postgres tables:
 The model has the following software dependencies:
 * various python libraries (see `requirements.txt`, can also be installed using nix - see `default.nix`)
 * [postgreSQL](https://www.postgresql.org/) and [postGIS](https://postgis.net/)
-* [PVMAPS](https://joint-research-centre.ec.europa.eu/pvgis-online-tool/pvgis-data-download/pvmaps_en) (a [GRASS GIS](https://grass.osgeo.org/) plugin written in C) - this can be installed using `default.nix` using nix
+* [GDAL](https://gdal.org/)
+
+The PV generation model is native Python (numpy/GDAL): an LLM port of the GRASS/PVMAPS `r.horizonmask`
+and `r.pv` (from [PVMAPS](https://joint-research-centre.ec.europa.eu/pvgis-online-tool/pvgis-data-download/pvmaps_en))
+algorithms. GRASS is no longer a runtime dependency. See `docs/pv-grass-removal-plan.md`.
 
 The model has the following data dependencies:
 * building footprint geometries
 * LiDAR elevation rasters
-* irradiation raster data, which can be downloaded from the PVMAPS link above, or from https://re.jrc.ec.europa.eu/pvmaps/pvgis_data.tar. The tar file should be placed in the directory referenced by the environment variable `PVGIS_DATA_TAR_FILE_DIR`.
+* meteorological/irradiation raster data as UK-wide EPSG:27700 GeoTIFFs, packaged as
+  `pvgis_data_uk.tar` and placed in the directory referenced by `PVGIS_DATA_TAR_FILE_DIR`. (These
+  are the reprojected UK subset of the worldwide PVMAPS `pvgis_data.tar` from
+  https://re.jrc.ec.europa.eu/pvmaps/pvgis_data.tar.)
 
 We have tried to make the model as independent as possible from our internal infrastructure where it runs, but this has not been our main priority when developing and you may find things that don't work, or design decisions that don't make sense when viewed without the context of knowing how we run the model.
 
@@ -74,8 +81,7 @@ Two Python modules are included which perform this task in different ways - see 
 
 Required variables:
 
-* `PVGIS_DATA_TAR_FILE_DIR` - The directory containing the `pvgis_data.tar` file
-* `PVGIS_GRASS_DBASE_DIR` - where to create the GRASS dbase for PVMAPS
+* `PVGIS_DATA_TAR_FILE_DIR` - The directory containing the `pvgis_data_uk.tar` file
 
 Optional variables:
 
@@ -89,6 +95,4 @@ Optional variables:
 
 ## Tests
 
-Some of the tests require the PVMAPS irradiation data.
-* Download the 10GB tar file from https://re.jrc.ec.europa.eu/pvmaps/pvgis_data.tar and either place it at, or symlink to it from, `test_data/pvmaps/pvgis_data_dir/pvgis_data.tar`
-* run `python3 -m unittest`
+* run `python3 -m unittest` (inside `nix-shell`)

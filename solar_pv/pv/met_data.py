@@ -1,10 +1,10 @@
 # This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 """
-Sample the PVMAPS meteorological inputs (Linke turbidity, real-sky beam/diffuse coefficients,
-3-hourly air temperature, wind and spectral corrections) for a job's raster grid, replacing
-the GRASS raster database that pvmaps_setup built. The data are UK-wide EPSG:27700 GeoTIFFs
-inside pvgis_data_uk.tar (~1.6 km cells); GDAL reads them in place via /vsitar/.
+Sample the meteorological inputs (Linke turbidity, real-sky beam/diffuse coefficients, 3-hourly
+air temperature, wind and spectral corrections) for a job's raster grid. The data are UK-wide
+EPSG:27700 GeoTIFFs inside pvgis_data_uk.tar (~1.6 km cells); GDAL reads them in place via
+/vsitar/.
 
 See docs/r-pv-algorithm.md for how each layer feeds r.pv.
 """

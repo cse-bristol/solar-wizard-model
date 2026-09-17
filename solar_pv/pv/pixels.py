@@ -5,7 +5,7 @@ Sparse per-pixel PV fields and per-building extraction.
 
 The PV outputs (kwh_year, month_NN_wh, horizon_NN) are meaningful only at the building-footprint
 pixels, a small fraction of a job grid. `PixelFields` stores them as flat length-N arrays at the
-valid pixels rather than as full 2D grids (which, at 1 m over a 5 km job, would be tens of GB).
+valid pixels rather than as full 2D grids (which, at 1 m resolution over a 5 km job, would be tens of GB).
 
 `pixels_for_geoms` returns the {toid: [pixel dict]} shape the roof-plane aggregation consumes:
 each pixel dict has x, y, pixel_id, toid and one entry per field. A pixel belongs to a building

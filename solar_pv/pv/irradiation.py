@@ -1,9 +1,9 @@
 # This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 """
-Native-Python port of the r.pv / r.sun clear-sky irradiation + PV integration. Faithful to
-grass_modules/r.pv/{main.c,rsunlib.c} for the PVMAPS invocation; the exact spec is in
-docs/r-pv-algorithm.md.
+Native-Python port of the GRASS/PVMAPS r.pv / r.sun clear-sky irradiation + PV integration.
+Faithful to r.pv's main.c / rsunlib.c for the PVMAPS invocation; the exact reverse-engineered
+spec is in docs/r-pv-algorithm.md.
 
 `compute_daily_pv` integrates one representative day: for each timestep from sunrise to
 sunset it finds the sun position, tests terrain shadowing against the horizon profile,

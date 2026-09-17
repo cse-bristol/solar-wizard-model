@@ -7,7 +7,7 @@ Tests for the r.pv irradiation port. Three layers:
 - physical-property checks (orientation, clearness, shadowing) on synthetic pixels;
 - a regression fixture of complete pixel input->output cases whose expected values are the
   GRASS r.pv outputs (the port reproduces them to <0.01%). These freeze the validated
-  behaviour independently of the golden rasters, which are scaffolding to be removed.
+  behaviour in-repo, now that the GRASS/PVMAPS golden-raster harness has been removed.
 """
 import math
 import unittest

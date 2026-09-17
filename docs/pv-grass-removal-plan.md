@@ -1,6 +1,6 @@
 # Plan: replace GRASS GIS / PVMAPS with a native-Python solar model
 
-Status: **proposed** · Owner: Neil · Last updated: 2026-09-15
+Status: **complete** (all phases done + acceptance gate passed) · Owner: Neil · Last updated: 2026-09-16
 
 ## Goal
 
@@ -275,18 +275,47 @@ tested where it's pure logic). What remains is integration, below.
   elevation grid's pixel phase and resolution (rasterised with `gdal_rasterize -tap`; elevation
   is warped onto `mask_buf0`'s grid), differing only in extent, so it is cropped by integer pixel
   offset (`_read_cropped`) rather than warped.
-- **▶ remaining — the acceptance gate:** validate at the `pv_roof_plane` level against the old
-  GRASS path on a **real job area** (the higher-level check the golden rasters can't provide —
-  see the slope/aspect decision). Needs a live DB + LiDAR: run a job through both paths and diff
-  `pv_roof_plane`. This is the one Phase 3 step that can't be exercised offline; do it before
-  Phase 4 deletes the GRASS path.
+- **✅ acceptance gate passed (2026-09-16):** a real job area was run through both paths (GRASS
+  job 677, no-GRASS job 678, same bounds) and the `pv_roof_plane` outputs diffed. Roof detection
+  (RANSAC) is only ~96% deterministic between runs, so the comparison was restricted to the
+  1173 **geometrically-identical** roofs (same slope/aspect/area) to isolate the PV model:
 
-**Phase 4 — Delete GRASS + toolchain.** Remove `grass_gis_user.py`, `pvmaps.py`,
-`pvmaps_setup.py`, `nix/grass-8.2.0-pvmaps.nix`, the `pkgs2205` 22.05 pin + `buildGrass`
-logic in `default.nix`, the `710-pvmaps-nix` dependency, `PVGIS_GRASS_DBASE_DIR`, and the
-`test_pvmaps/` suite (superseded). Update both `CLAUDE.md`s and READMEs. **Bump
-`PV_MODEL_VERSION`** (`src/constants.py` in the webapp) — numbers change, so cost-benefit
-seeding/reports must distinguish old GRASS jobs.
+  | Level | no-GRASS vs GRASS |
+  |---|---|
+  | Portfolio total Σ kwh_year_avg (geom-identical) | **−0.08%** |
+  | Portfolio total (entire file, incl. roof-detection noise) | −0.07% |
+  | Per-roof kwh_year_avg | mean **0.81%**, median 0.52%, p95 2.6%, p99 4.1%, max 9.1% |
+  | Horizon angle | mean 0.14°, p99 2.3° |
+
+  Meets the 1–2% target with **no systematic bias** (signed total ≈ 0). The per-roof tail is a
+  roof-*size* effect, not a model error: the >2% roofs are small (median 14.8 m² vs 17.9), and
+  the spread falls monotonically with area (0–10 m²: 1.0% mean; 50 m²+: 0.28%) — the signature of
+  the pixel→roof averaging under the pixel-selection change (`ST_Clip` centroids → centre-in-
+  polygon), which washes out at portfolio level. Winter months show larger % (Dec 3.2% mean) from
+  low-sun percentage amplification but barely move the annual. For a fully confound-free re-check
+  before/after any future change, run both PV models over the **same** `roof_polygons` (skip
+  re-detection) to remove the RANSAC noise.
+
+**Phase 4 — Delete GRASS + toolchain. ✅ DONE (2026-09-16).** Deleted `grass_gis_user.py`,
+`pvmaps.py`, `pvmaps_setup.py`, `pvgis.py` (the old GRASS orchestrator), `nix/grass-8.2.0-pvmaps.nix`
++ its patches/`proj-4.9.3.nix`, the GRASS-oracle capture scripts (`bin/capture_*`,
+`bin/validate_pvmaps.py`), and the `test_pvmaps/` suite. Removed the `pkgs2205` 22.05 pin +
+`buildGrass` from `default.nix` and the GRASS package + `PVGIS_GRASS_DBASE_DIR` from the webapp's
+`server/machine-configuration.nix`, and the dead GRASS aggregation functions from
+`aggregate_pixel_results.py`. Moved `aggregate_pixel_results.py` into `solar_pv/pv/` and removed
+the now-empty `solar_pv/pvgis/` package; deleted the golden-validation harness
+(`solar_pv/pv/golden/`, `testdata/pvmaps/`, `grass_modules/`, the `bin/` re-write helpers) now the
+port is validated (the self-contained `test_irradiation` regression fixture remains as the in-repo
+oracle). Updated both `CLAUDE.md`s and the READMEs. The `pixels_for_buildings` /
+`rasters_to_postgis` / `create_raster_table` helpers stay (still used by roof detection and raster
+loading). All tests pass with no GRASS; `nix-shell` builds without the 22.05 pin.
+
+**`PV_MODEL_VERSION` stays 2**: it is a webapp gate about the `pv_roof_plane` *output schema*
+(which is unchanged), not the algorithm, so cost-benefit seeding/reports still work across the
+GRASS→native switch. (The original plan called for a bump; on review that was the wrong lever.)
+
+Ops note: `PVGIS_DATA_TAR_FILE_DIR` must now contain `pvgis_data_uk.tar` (the reprojected UK
+subset) rather than `pvgis_data.tar`; `PVGIS_GRASS_DBASE_DIR` is no longer read.
 
 ## Risks & effort
 
