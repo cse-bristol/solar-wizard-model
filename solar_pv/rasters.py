@@ -6,14 +6,15 @@ from os.path import join
 import logging
 import os
 from psycopg2.sql import Identifier, SQL
-from typing import Tuple, Optional
+from typing import List, Tuple, Optional
 
 import psycopg2.extras
 from solar_pv import tables, stage
 from solar_pv import gdal_helpers
 from solar_pv.db_funcs import connection, sql_command
-from solar_pv.lidar.lidar import LIDAR_NODATA
-from solar_pv.postgis import get_merged_lidar_tiles, rasters_to_postgis, \
+from solar_pv.lidar.lidar import LIDAR_NODATA, LidarTile
+from solar_pv.lidar.lidar_selector import select_lidar
+from solar_pv.postgis import get_job_bounds, rasters_to_postgis, \
     add_raster_constraints
 from solar_pv import mask
 from solar_pv.constants import POSTGIS_TILESIZE
@@ -24,6 +25,7 @@ from solar_pv.transformations import _7_PARAM_SHIFT
 
 def generate_rasters(pg_uri: str,
                      job_id: int,
+                     lidar_tiles: List[LidarTile],
                      job_lidar_dir: str,
                      solar_dir: str,
                      horizon_search_radius: int,
@@ -31,6 +33,10 @@ def generate_rasters(pg_uri: str,
     """
     Generate a single geoTIFF for the entire job area, as well as rasters for
     aspect, slope and a building mask.
+
+    The elevation is built from the caller-supplied `lidar_tiles` (elevation
+    rasters on disk): the resolution is chosen and overlapping tiles merged by
+    `select_lidar`, based on coverage within the job bounds.
 
     Generates all rasters in whatever SRS the input LIDAR was in (probably 27700 E/N),
     and convert to 27700 if not in 27700.
@@ -54,11 +60,17 @@ def generate_rasters(pg_uri: str,
                 res)
 
     with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
-        elevation_tiles = get_merged_lidar_tiles(pg_conn, job_id, solar_dir)
-        gdal_helpers.create_vrt(elevation_tiles, elevation_vrt)
+        bounds = get_job_bounds(pg_conn, job_id)
+
+    # The elevation must cover the bounds buffered by the horizon search radius, so
+    # horizon tracing has terrain around the edge buildings; the resolution choice is
+    # based on coverage within the (unbuffered) bounds:
+    r = horizon_search_radius
+    extent = (bounds[0] - r, bounds[1] - r, bounds[2] + r, bounds[3] + r)
+    elevation_tiles, res = select_lidar(lidar_tiles, bounds, extent, solar_dir)
+    gdal_helpers.create_vrt(elevation_tiles, elevation_vrt)
 
     srid = gdal_helpers.get_srid(elevation_vrt, fallback=27700)
-    res = gdal_helpers.get_res(elevation_vrt)
 
     unit_dims, unit = gdal_helpers.get_srs_units(elevation_vrt)
     if unit_dims != 1.0 or unit != 'metre':

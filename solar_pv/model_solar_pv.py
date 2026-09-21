@@ -13,7 +13,9 @@ from solar_pv import tables
 from solar_pv.buildings import BuildingInput, load_buildings
 from solar_pv.db_funcs import process_pg_uri, \
     connection, sql_command, sql_script
-from solar_pv.postgis import raster_tile_coverage_count
+from solar_pv.lidar.lidar import LidarTile
+from solar_pv.lidar.lidar_selector import count_usable_tiles
+from solar_pv.postgis import get_job_bounds
 from solar_pv.outdated_lidar.outdated_lidar_check import check_lidar
 from solar_pv.pv.run_pv import run_pv
 from solar_pv.roof_detection.detect_roofs import detect_roofs
@@ -25,6 +27,7 @@ def model_solar_pv(pg_uri: str,
                    lidar_dir: str,
                    job_id: int,
                    buildings: Iterable[BuildingInput],
+                   lidar_tiles: List[LidarTile],
                    horizon_search_radius: int = 1000,
                    horizon_slices: int = 36,
                    max_roof_slope_degrees: int = 70,
@@ -50,6 +53,10 @@ def model_solar_pv(pg_uri: str,
     :param buildings: the buildings to model, as BuildingInput objects (building_id +
     geometry in EPSG:27700, with optional height). The job bounds are derived from their
     extent.
+    :param lidar_tiles: the elevation rasters (LidarTile objects) to build the elevation
+    model from - any mix of 50cm/1m/2m tiles on disk, with optional per-tile year. They
+    should cover the job bounds buffered by horizon_search_radius. The resolution to work
+    at and the overlap merge are chosen by select_lidar.
     :param horizon_search_radius: how far in each direction to look when determining
     horizon height. Unit: metres
     :param horizon_slices: the number of rays traced from each point to determine horizon height
@@ -101,7 +108,7 @@ def model_solar_pv(pg_uri: str,
     logging.info("Loading buildings...")
     load_buildings(pg_uri, job_id, buildings)
 
-    if _should_skip(pg_uri, job_id):
+    if _should_skip(pg_uri, job_id, lidar_tiles=lidar_tiles):
         return
 
     job_lidar_dir = join(lidar_dir, f"job_{job_id}")
@@ -116,6 +123,7 @@ def model_solar_pv(pg_uri: str,
     elevation_raster_27700, mask_raster_27700, slope_raster_27700, aspect_raster_27700, res = generate_rasters(
         pg_uri=pg_uri,
         job_id=job_id,
+        lidar_tiles=lidar_tiles,
         job_lidar_dir=job_lidar_dir,
         solar_dir=solar_dir,
         horizon_search_radius=horizon_search_radius,
@@ -200,7 +208,9 @@ def _drop_schema(pg_uri: str, job_id: int):
         )
 
 
-def _should_skip(pg_uri: str, job_id: int, check_rasters: bool = True) -> bool:
+def _should_skip(pg_uri: str, job_id: int,
+                 lidar_tiles: List[LidarTile] = None,
+                 check_rasters: bool = True) -> bool:
     with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
         def _skip():
             sql_command(
@@ -238,8 +248,8 @@ def _should_skip(pg_uri: str, job_id: int, check_rasters: bool = True) -> bool:
             return True
 
         if check_rasters:
-            tile_cov_count = raster_tile_coverage_count(pg_conn, job_id)
-            if tile_cov_count == 0:
+            bounds = get_job_bounds(pg_conn, job_id)
+            if count_usable_tiles(lidar_tiles or [], bounds) == 0:
                 logging.info("skipping PV job, no LiDAR tiles intersect the job bounds")
                 _skip()
                 return True

@@ -8,7 +8,7 @@ from collections import defaultdict
 from os.path import join
 
 from psycopg2.sql import Identifier, SQL, Literal
-from typing import List, Dict
+from typing import List, Dict, Tuple
 
 from solar_pv.db_funcs import sql_script, sql_command
 from solar_pv.gdal_helpers import run
@@ -189,190 +189,20 @@ def set_tile_metadata(pg_conn, tile: LidarTile, table: str):
     )
 
 
-# TODO remove dependency on models.job_queue
-def _coverage(pg_conn, job_id: int, res: Resolution) -> float:
+def get_job_bounds(pg_conn, job_id: int) -> Tuple[float, float, float, float]:
     """
-    This won't be exact due to not snapping the bounds polygon
-    to a grid - but it's close enough for the types of bounds
-    polygons we expect.
+    The job bounds (building extent) as (xmin, ymin, xmax, ymax) in EPSG:27700,
+    read from the per-job `bounds_27700` table.
     """
-    if res == Resolution.R_50CM:
-        lidar_table = "lidar_50cm"
-        divisor = 4
-    elif res == Resolution.R_1M:
-        lidar_table = "lidar_1m"
-        divisor = 1
-    elif res == Resolution.R_2M:
-        lidar_table = "lidar_2m"
-        divisor = 0.25
-    else:
-        raise ValueError(f"Unknown resolution {res}")
-
     return sql_command(
         pg_conn,
         """
-        SELECT
-            (SUM(st_count(st_clip(l.rast, jq.bounds))) / %(divisor)s ) 
-                / MAX(st_area(jq.bounds)) 
-        FROM {lidar_table} l
-        LEFT JOIN models.job_queue jq ON st_intersects(l.rast, jq.bounds) 
-        WHERE jq.job_id = %(job_id)s
+        SELECT ST_XMin(bounds_27700), ST_YMin(bounds_27700),
+               ST_XMax(bounds_27700), ST_YMax(bounds_27700)
+        FROM {bounds}
         """,
-        bindings={"job_id": job_id, "divisor": divisor},
-        lidar_table=Identifier("models", lidar_table),
-        result_extractor=lambda rows: rows[0][0] or 0.0)
-
-
-# TODO remove dependency on models.job_queue
-def _target_resolution(pg_conn, job_id) -> Resolution:
-    _50cm_cov = _coverage(pg_conn, job_id, Resolution.R_50CM)
-    _1m_cov = _coverage(pg_conn, job_id, Resolution.R_1M)
-    _2m_cov = _coverage(pg_conn, job_id, Resolution.R_2M)
-    logging.info(f"LiDAR coverage:  50cm: {_50cm_cov}, 1m: {_1m_cov}, 2m: {_2m_cov}")
-
-    # We don't currently use 50cm res LiDAR unless merged into 1m or 2m as it's too slow
-    # when loading raster pixel data into the database or running RANSAC.
-    # it will still be merged into the 1m, though, so if there's more of it than 1m use
-    # its coverage %:
-    _1m_cov = max(_50cm_cov, _1m_cov)
-    if _1m_cov < 0.25 and _2m_cov > _1m_cov + 0.5:
-        target_res = Resolution.R_2M
-    else:
-        target_res = Resolution.R_1M
-    logging.info(f"Using resolution {target_res}")
-    return target_res
-
-
-# TODO remove dependency on models.job_queue
-def get_merged_lidar_tiles(pg_conn, job_id, output_dir: str) -> List[str]:
-    target_res = _target_resolution(pg_conn, job_id)
-
-    # RANSAC produces bad outputs if lower resolutions are merged into higher (e.g. 2m into 1m)
-    # as essentially the 2m tile is converted into 4 1m tiles and RANSAC rightly treats that
-    # as a flat step. So we only merge higher res into lower (e.g. 50cm into 1m)
-
-    # Use 2m, with 1m and 50cm merged in:
-    if target_res == Resolution.R_2M:
-        logging.info(f"Using 2m LiDAR")
-        sql = """
-        WITH all_res AS (
-            SELECT 
-                ST_Resample(l.rast, (SELECT rast FROM models.lidar_2m ORDER BY filename LIMIT 1)) AS rast, 
-                ST_UpperLeftX(l.rast) x, 
-                ST_UpperLeftY(l.rast) y,
-                year,
-                0.5 AS res
-            FROM models.job_queue q 
-            INNER JOIN models.lidar_50cm l ON st_intersects(l.rast, q.bounds)
-            WHERE q.job_id = %(job_id)s
-        UNION ALL
-            SELECT 
-                ST_Resample(l.rast, (SELECT rast FROM models.lidar_2m ORDER BY filename LIMIT 1)) AS rast, 
-                ST_UpperLeftX(l.rast) x, 
-                ST_UpperLeftY(l.rast) y,
-                year,
-                1.0 AS res
-            FROM models.job_queue q 
-            INNER JOIN models.lidar_1m l ON st_intersects(l.rast, q.bounds)
-            WHERE q.job_id = %(job_id)s
-        UNION ALL
-            SELECT 
-                l.rast, 
-                ST_UpperLeftX(l.rast) x, 
-                ST_UpperLeftY(l.rast) y, 
-                year,
-                2.0 AS res
-            FROM models.job_queue q 
-            INNER JOIN models.lidar_2m l ON st_intersects(l.rast, q.bounds)
-            WHERE q.job_id = %(job_id)s
-        )
-        SELECT
-            x, y, ST_AsGDALRaster(ST_Union(rast ORDER BY year ASC, res DESC), 'GTiff') AS rast 
-        FROM all_res
-        GROUP BY x, y
-        """
-    # Use 1m, with 50cm merged in:
-    else:
-        sql = """
-        WITH all_res AS (
-            SELECT 
-                ST_Resample(l.rast, (SELECT rast FROM models.lidar_1m ORDER BY filename LIMIT 1)) AS rast, 
-                ST_UpperLeftX(l.rast) x, 
-                ST_UpperLeftY(l.rast) y,
-                year,
-                0.5 AS res
-            FROM models.job_queue q 
-            INNER JOIN models.lidar_50cm l ON st_intersects(l.rast, q.bounds)
-            WHERE q.job_id = %(job_id)s
-        UNION ALL
-            SELECT 
-                l.rast, 
-                ST_UpperLeftX(l.rast) x, 
-                ST_UpperLeftY(l.rast) y, 
-                year,
-                1.0 AS res
-            FROM models.job_queue q 
-            INNER JOIN models.lidar_1m l ON st_intersects(l.rast, q.bounds)
-            WHERE q.job_id = %(job_id)s
-        )
-        SELECT
-            x, y, ST_AsGDALRaster(ST_Union(rast ORDER BY year ASC, res DESC), 'GTiff') AS rast 
-        FROM all_res
-        GROUP BY x, y
-        """
-
-    rasters = sql_command(
-        pg_conn,
-        sql,
-        bindings={"job_id": job_id},
-        result_extractor=lambda res: res)
-
-    paths = []
-    for raster in rasters:
-        filename = f"{int(raster['x'])}.{int(raster['y'])}.{job_id}.tiff"
-        file_path = join(output_dir, filename)
-        with open(file_path, 'wb') as f:
-            f.write(raster['rast'])
-        paths.append(file_path)
-    return paths
-
-
-# TODO remove dependency on models.job_queue
-def raster_tile_coverage_count(pg_conn, job_id: int) -> int:
-    target_res = _target_resolution(pg_conn, job_id)
-
-    sql = """
-    SELECT COUNT(*)
-    FROM models.job_queue q 
-    INNER JOIN {lidar_table} l ON st_intersects(l.rast, q.bounds)
-    WHERE q.job_id = %(job_id)s
-    """
-
-    if target_res == Resolution.R_2M:
-        count_2m = sql_command(
-            pg_conn,
-            sql,
-            bindings={"job_id": job_id},
-            lidar_table=Identifier("models", "lidar_2m"),
-            result_extractor=lambda res: res[0][0])
-    else:
-        count_2m = 0
-
-    count_1m = sql_command(
-        pg_conn,
-        sql,
-        bindings={"job_id": job_id},
-        lidar_table=Identifier("models", "lidar_1m"),
-        result_extractor=lambda res: res[0][0])
-
-    count_50cm = sql_command(
-        pg_conn,
-        sql,
-        bindings={"job_id": job_id},
-        lidar_table=Identifier("models", "lidar_50cm"),
-        result_extractor=lambda res: res[0][0])
-
-    return count_2m + count_1m + count_50cm
+        bounds=Identifier(tables.schema(job_id), tables.BOUNDS_TABLE),
+        result_extractor=lambda rows: tuple(rows[0]))
 
 
 def pixels_for_buildings(pg_conn,
