@@ -5,52 +5,6 @@
 CREATE SCHEMA IF NOT EXISTS models AUTHORIZATION CURRENT_USER;
 
 DO $$ BEGIN
-    GRANT USAGE ON SCHEMA models TO research;
-    ALTER DEFAULT PRIVILEGES IN SCHEMA models GRANT SELECT ON TABLES TO research;
-    GRANT USAGE ON SCHEMA models TO albion_ddl;
-    ALTER DEFAULT PRIVILEGES IN SCHEMA models GRANT SELECT ON TABLES TO albion_ddl;
-EXCEPTION
-    WHEN undefined_object THEN null;
-END $$;
-
---
--- LiDAR
---
-
-CREATE TABLE IF NOT EXISTS models.lidar_50cm (
-    rid serial PRIMARY KEY,
-    rast raster NOT NULL,
-    filename text NOT NULL,
-    year int NOT NULL,
-    product text NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS lidar_50cm_idx ON models.lidar_50cm USING gist (st_convexhull(rast));
-
-CREATE TABLE IF NOT EXISTS models.lidar_1m (
-    rid serial PRIMARY KEY,
-    rast raster NOT NULL,
-    filename text NOT NULL,
-    year int NOT NULL,
-    product text NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS lidar_1m_idx ON models.lidar_1m USING gist (st_convexhull(rast));
-
-CREATE TABLE IF NOT EXISTS models.lidar_2m (
-    rid serial PRIMARY KEY,
-    rast raster NOT NULL,
-    filename text NOT NULL,
-    year int NOT NULL,
-    product text NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS lidar_2m_idx ON models.lidar_2m USING gist (st_convexhull(rast));
-
---
--- Solar PV:
---
-DO $$ BEGIN
     CREATE TYPE models.pv_exclusion_reason AS ENUM (
         'NO_LIDAR_COVERAGE',
         'OUTDATED_LIDAR_COVERAGE',

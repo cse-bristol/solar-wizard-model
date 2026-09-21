@@ -4,15 +4,6 @@
 
 CREATE SCHEMA IF NOT EXISTS {schema} AUTHORIZATION CURRENT_USER;
 
-DO $$ BEGIN
-    GRANT USAGE ON SCHEMA {schema} TO research;
-    ALTER DEFAULT PRIVILEGES IN SCHEMA models GRANT SELECT ON TABLES TO research;
-    GRANT USAGE ON SCHEMA {schema} TO albion_ddl;
-    ALTER DEFAULT PRIVILEGES IN SCHEMA models GRANT SELECT ON TABLES TO albion_ddl;
-EXCEPTION
-    WHEN undefined_object THEN null;
-END $$;
-
 --
 -- Tracker for which model stage has been reached:
 --

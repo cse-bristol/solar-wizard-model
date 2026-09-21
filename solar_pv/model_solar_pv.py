@@ -3,8 +3,9 @@
 import logging
 import os
 import shutil
+from dataclasses import dataclass
 from os.path import join
-from typing import Iterable, List
+from typing import Iterable, List, Optional
 
 import psycopg2.extras
 from psycopg2.sql import Identifier
@@ -22,6 +23,14 @@ from solar_pv.roof_detection.detect_roofs import detect_roofs
 from solar_pv.rasters import generate_rasters
 
 
+@dataclass
+class ModelResult:
+    """The model's output tables (models.pv_building / models.pv_roof_plane) for this job,
+    read back as plain dicts. Geometries come back as WKT; horizon/meta as list/dict."""
+    buildings: List[dict]
+    roof_planes: List[dict]
+
+
 def model_solar_pv(pg_uri: str,
                    root_solar_dir: str,
                    lidar_dir: str,
@@ -37,7 +46,8 @@ def model_solar_pv(pg_uri: str,
                    peak_power_per_m2: float = 0.2,
                    pv_tech: str = "crystSi",
                    min_dist_to_edge_m: float = 0.1,
-                   debug_mode: bool = False):
+                   return_results: bool = False,
+                   debug_mode: bool = False) -> Optional[ModelResult]:
     """
     Main entrypoint to the PV model.
 
@@ -77,6 +87,9 @@ def model_solar_pv(pg_uri: str,
     based on the choice here - refer to the PVMAPS docs for more info.
     :param min_dist_to_edge_m: Min distance to the edge of the building for the roof polygon area.
     This only counts the edge of the building, not the edges of other areas of roof.
+    :param return_results: if True, read the job's rows back from models.pv_building and
+    models.pv_roof_plane and return them as a ModelResult. The rows are always written to
+    those tables regardless; this only controls whether they are also handed back in Python.
     :param debug_mode: if True, don't delete temporary files or the postgres schema
     for the job.
     """
@@ -102,6 +115,9 @@ def model_solar_pv(pg_uri: str,
     solar_dir = join(root_solar_dir, f"job_{job_id}")
     os.makedirs(solar_dir, exist_ok=True)
 
+    def _result() -> Optional[ModelResult]:
+        return _load_results(pg_uri, job_id) if return_results else None
+
     logging.info("Initialising postGIS schema...")
     _init_schema(pg_uri, job_id)
 
@@ -109,7 +125,7 @@ def model_solar_pv(pg_uri: str,
     load_buildings(pg_uri, job_id, buildings)
 
     if _should_skip(pg_uri, job_id, lidar_tiles=lidar_tiles):
-        return
+        return _result()
 
     job_lidar_dir = join(lidar_dir, f"job_{job_id}")
     os.makedirs(job_lidar_dir, exist_ok=True)
@@ -117,7 +133,7 @@ def model_solar_pv(pg_uri: str,
     _mark_buildings_too_small(pg_uri, job_id, min_roof_area_m)
 
     if _should_skip(pg_uri, job_id, check_rasters=False):
-        return
+        return _result()
 
     logging.info("Generating and loading rasters...")
     elevation_raster_27700, mask_raster_27700, slope_raster_27700, aspect_raster_27700, res = generate_rasters(
@@ -142,7 +158,7 @@ def model_solar_pv(pg_uri: str,
                  resolution_metres=res)
 
     if _should_skip(pg_uri, job_id, check_rasters=False):
-        return
+        return _result()
 
     # logging.info("Adding individual PV panels...")
     # place_panels(
@@ -178,6 +194,36 @@ def model_solar_pv(pg_uri: str,
         shutil.rmtree(job_lidar_dir)
     else:
         logging.info("Debug mode: not removing temp dir or dropping schema.")
+
+    return _result()
+
+
+def _load_results(pg_uri: str, job_id: int) -> ModelResult:
+    with connection(pg_uri) as pg_conn:
+        buildings = sql_command(
+            pg_conn,
+            """
+            SELECT to_jsonb(b) AS row
+            FROM models.pv_building b
+            WHERE b.job_id = %(job_id)s
+            ORDER BY b.building_id
+            """,
+            {"job_id": job_id},
+            result_extractor=lambda rows: [r[0] for r in rows])
+
+        roof_planes = sql_command(
+            pg_conn,
+            """
+            SELECT to_jsonb(rp) - 'roof_geom_4326'
+                   || jsonb_build_object('roof_geom_4326', ST_AsText(rp.roof_geom_4326)) AS row
+            FROM models.pv_roof_plane rp
+            WHERE rp.job_id = %(job_id)s
+            ORDER BY rp.building_id, rp.roof_plane_id
+            """,
+            {"job_id": job_id},
+            result_extractor=lambda rows: [r[0] for r in rows])
+
+    return ModelResult(buildings=buildings, roof_planes=roof_planes)
 
 
 def _init_schema(pg_uri: str, job_id: int):
