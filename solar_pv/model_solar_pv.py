@@ -4,12 +4,13 @@ import logging
 import os
 import shutil
 from os.path import join
-from typing import List
+from typing import Iterable, List
 
 import psycopg2.extras
 from psycopg2.sql import Identifier
 
 from solar_pv import tables
+from solar_pv.buildings import BuildingInput, load_buildings
 from solar_pv.db_funcs import process_pg_uri, \
     connection, sql_command, sql_script
 from solar_pv.postgis import raster_tile_coverage_count
@@ -23,7 +24,7 @@ def model_solar_pv(pg_uri: str,
                    root_solar_dir: str,
                    lidar_dir: str,
                    job_id: int,
-                   job_bounds_27700: str,
+                   buildings: Iterable[BuildingInput],
                    horizon_search_radius: int = 1000,
                    horizon_slices: int = 36,
                    max_roof_slope_degrees: int = 70,
@@ -46,9 +47,9 @@ def model_solar_pv(pg_uri: str,
     if debug_mode is False.
     :param job_id: unique integer ID for the job. Rows in the output postgres tables will
     be keyed on this ID.
-    :param job_bounds_27700: A WKT polygon string in CRS 27700 representing the bounds
-    of this job. Only buildings in mastermap.buildings that fall within these bounds
-    will be used.
+    :param buildings: the buildings to model, as BuildingInput objects (building_id +
+    geometry in EPSG:27700, with optional height). The job bounds are derived from their
+    extent.
     :param horizon_search_radius: how far in each direction to look when determining
     horizon height. Unit: metres
     :param horizon_slices: the number of rays traced from each point to determine horizon height
@@ -95,7 +96,10 @@ def model_solar_pv(pg_uri: str,
     os.makedirs(solar_dir, exist_ok=True)
 
     logging.info("Initialising postGIS schema...")
-    _init_schema(pg_uri, job_id, job_bounds_27700)
+    _init_schema(pg_uri, job_id)
+
+    logging.info("Loading buildings...")
+    load_buildings(pg_uri, job_id, buildings)
 
     if _should_skip(pg_uri, job_id):
         return
@@ -168,13 +172,12 @@ def model_solar_pv(pg_uri: str,
         logging.info("Debug mode: not removing temp dir or dropping schema.")
 
 
-def _init_schema(pg_uri: str, job_id: int, job_bounds_27700: str):
+def _init_schema(pg_uri: str, job_id: int):
     with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
         sql_script(pg_conn, 'create.db.sql')
         sql_script(
             pg_conn,
             'create.schema.sql',
-            {"job_id": job_id, "job_bounds_27700": job_bounds_27700},
             schema=Identifier(tables.schema(job_id)),
             bounds_27700=Identifier(tables.schema(job_id), tables.BOUNDS_TABLE),
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),

@@ -11,7 +11,7 @@ from typing import Tuple, Optional
 import psycopg2.extras
 from solar_pv import tables, stage
 from solar_pv import gdal_helpers
-from solar_pv.db_funcs import count, connection, sql_command
+from solar_pv.db_funcs import connection, sql_command
 from solar_pv.lidar.lidar import LIDAR_NODATA
 from solar_pv.postgis import get_merged_lidar_tiles, rasters_to_postgis, \
     add_raster_constraints
@@ -248,15 +248,17 @@ def generate_slope_override_raster(pg_uri: str,
     return slope_raster_filename
 
 
-def has_outdated_lidar(pg_uri: str, job_id: int) -> bool:
+def _outdated_lidar_with_height_count(pg_uri: str, job_id: int) -> int:
     """
-    :return: true if there is one or more buildings that aren't seen in the LiDAR
+    :return: the number of buildings not seen in the LiDAR that have a height to
+    patch the elevation raster with.
     """
     with connection(pg_uri) as pg_conn:
         return sql_command(
             pg_conn,
-            "SELECT COUNT(*) > 0 FROM {buildings} "
-            "WHERE exclusion_reason = 'OUTDATED_LIDAR_COVERAGE'::models.pv_exclusion_reason",
+            "SELECT COUNT(*) FROM {buildings} "
+            "WHERE exclusion_reason = 'OUTDATED_LIDAR_COVERAGE'::models.pv_exclusion_reason "
+            "AND height IS NOT NULL",
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
             result_extractor=lambda rows: rows[0][0])
 
@@ -266,17 +268,17 @@ def create_elevation_override_raster(pg_uri: str,
                                      solar_dir: str,
                                      elevation_raster_27700_filename: str,
                                      bounds: Optional[Tuple[float, float, float, float]] = None) -> Optional[str]:
-    if has_outdated_lidar(pg_uri, job_id) and count(pg_uri, "mastermap", "height") > 0:
+    if _outdated_lidar_with_height_count(pg_uri, job_id) > 0:
         srid = gdal_helpers.get_srid(elevation_raster_27700_filename, fallback=27700)
         res = gdal_helpers.get_xres_yres(elevation_raster_27700_filename)
         patch_raster_filename: str = join(solar_dir, 'elevation_override.tif')
 
         with connection(pg_uri) as pg_conn:
             outdated_lidar_building_h_sql = SQL(
-                "SELECT ST_Force3D(e.geom_27700, (h.abs_hmax + h.abs_h2) / 2) "
-                "FROM {buildings} e "
-                "JOIN mastermap.height h ON e.building_id = h.toid "
-                "WHERE e.exclusion_reason = 'OUTDATED_LIDAR_COVERAGE'::models.pv_exclusion_reason"
+                "SELECT ST_Force3D(geom_27700, height) "
+                "FROM {buildings} "
+                "WHERE exclusion_reason = 'OUTDATED_LIDAR_COVERAGE'::models.pv_exclusion_reason "
+                "AND height IS NOT NULL"
             ).format(
                 buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE)
             ).as_string(pg_conn)

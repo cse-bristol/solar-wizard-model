@@ -118,9 +118,14 @@ class RastersTests(unittest.TestCase):
             );
             -- geom_27700 is populated from the (4326) mastermap geometry: this test
             -- works throughout in 4326, matching the 4326 elevation raster, so the
-            -- rasterize extent and the centroid lookups below line up.
-            INSERT INTO solar_pv_job_0.buildings (building_id, geom_27700)
-            SELECT toid, geom_4326 FROM mastermap.building WHERE toid IN ('t0', 't1', 't2');
+            -- rasterize extent and the centroid lookups below line up. height is now
+            -- carried on the buildings table (the caller supplies it), not joined from
+            -- mastermap.height.
+            INSERT INTO solar_pv_job_0.buildings (building_id, geom_27700, height)
+            SELECT b.toid, b.geom_4326, (h.abs_h2 + h.abs_hmax) / 2
+            FROM mastermap.building b
+            JOIN mastermap.height h ON b.toid = h.toid
+            WHERE b.toid IN ('t0', 't1', 't2');
             """
 
         with psycopg2.connect(self.pg_uri, cursor_factory=psycopg2.extras.DictCursor) as conn:

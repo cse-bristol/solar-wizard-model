@@ -19,39 +19,30 @@ END $$;
 CREATE TABLE IF NOT EXISTS {model_stage} AS SELECT 'INIT' as stage;
 
 --
--- Create the bounds table in 27700 for quick intersection with mastermap buildings:
+-- The job bounds in 27700. Populated by the building loader from the extent of the
+-- passed buildings (solar_pv/buildings.py), not seeded here.
 --
-CREATE TABLE IF NOT EXISTS {bounds_27700} AS
-SELECT
-    %(job_id)s AS job_id,
-    ST_Multi(ST_GeomFromText(%(job_bounds_27700)s, 27700))::geometry(multipolygon, 27700) AS bounds_27700;
+CREATE TABLE IF NOT EXISTS {bounds_27700} (
+    job_id int,
+    bounds_27700 geometry(multipolygon, 27700)
+);
 
 CREATE INDEX IF NOT EXISTS bounds_27700_bounds_idx ON {bounds_27700} using gist (bounds_27700);
 
 --
--- Extract the buildings that fall within the job bounds:
+-- The buildings to model. Created empty here and populated by the building loader
+-- (solar_pv/buildings.py) from the caller-supplied buildings.
 --
-CREATE TABLE IF NOT EXISTS {buildings} AS
-SELECT
-    toid AS building_id,
-    geom_27700,
-    -- For selecting a building 'moat' for detecting outdated LiDAR:
-    ST_Buffer(geom_27700, 5, 'endcap=square join=mitre quad_segs=2') AS geom_27700_buffered_5,
-    NULL::models.pv_exclusion_reason AS exclusion_reason,
-    NULL::real AS height,
-    NULL::real AS min_ground_height,
-    NULL::real AS max_ground_height
-FROM mastermap.building_27700 b
-LEFT JOIN {bounds_27700} q ON ST_Intersects(b.geom_27700, q.bounds_27700)
-WHERE q.job_id=%(job_id)s
--- Only take buildings where the centroid is within the bounds
--- or, if the centroid touches the bounds, the bbox cannot overlap the bounds
--- above or to the left, so that buildings that overlap multiple tiles if bounds
--- have been created in a tiled layout don't get run twice:
-AND ST_Intersects(ST_Centroid(b.geom_27700), q.bounds_27700)
-AND (NOT ST_Touches(ST_Centroid(b.geom_27700), q.bounds_27700)
-     OR b.geom_27700 &<| q.bounds_27700
-     OR b.geom_27700 &>  q.bounds_27700);
+CREATE TABLE IF NOT EXISTS {buildings} (
+    building_id text,
+    geom_27700 geometry,
+    -- A building 'moat' for detecting outdated LiDAR:
+    geom_27700_buffered_5 geometry,
+    exclusion_reason models.pv_exclusion_reason,
+    height real,
+    min_ground_height real,
+    max_ground_height real
+);
 
 CREATE UNIQUE INDEX IF NOT EXISTS buildings_building_id_idx ON {buildings} (building_id);
 CREATE INDEX IF NOT EXISTS buildings_geom_27700_idx ON {buildings} USING GIST (geom_27700);
