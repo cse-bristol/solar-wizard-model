@@ -4,9 +4,38 @@ The rooftop solar PV suitability model backing [solarwizard.org.uk](https://sola
 
 The model is documented at [documents/pv_model.md](documents/pv_model.md).
 
+## Running standalone (CLI)
+
+The quickest way to run the model over an area is the command-line interface, which
+reads buildings from a vector file and LiDAR from rasters on disk, and writes the two
+result tables out as layers of a GeoPackage:
+
+```shell
+python -m solar_pv --buildings buildings.gpkg --lidar tiles/ --out results.gpkg
+```
+
+* `--buildings` is any OGR vector file (GPKG, Shapefile, GeoJSON, ...); its own SRS is
+  honoured and reprojected to EPSG:27700. `--id-field` / `--height-field` map columns onto
+  the building id and height (the id defaults to the feature id; height to none).
+* `--lidar` takes one or more GeoTIFF/VRT files or directories of them. The job bounds are
+  derived from the buildings, so the LiDAR only needs to cover that extent buffered by the
+  horizon search radius.
+* `--out` is written as a GeoPackage with two layers, `pv_building` and `pv_roof_plane`.
+* `--pg-uri` points at an existing postGIS database; if omitted, a throwaway PostGIS cluster
+  is started for the run and thrown away afterwards. That convenience uses `testing.postgresql`,
+  which is not a core dependency (the model and the `--pg-uri` path don't need it) - install it
+  with the `cli` extra: `pip install solar_model[cli]`. Without it, pass `--pg-uri`. `--keep`
+  leaves the schema, temp files and (if ephemeral) the database in place for inspection.
+* The model's tuning parameters are all exposed as `--horizon-search-radius`,
+  `--min-roof-area-m`, etc. (`python -m solar_pv --help` lists them); unset ones use the
+  model defaults.
+
+Accurate 27700<->4326 transforms need the OSTN15 datum grids in proj (see below); the
+project's nix-shell provides them, and the CLI checks for them at startup.
+
 ## Dependencies and setup
 
-The main entrypoint of the model is the function `model_solar_pv` in module `solar_pv.model_solar_pv`. The docstring for that function has documentation for how to use it and the meaning of each parameter.
+The programmatic entrypoint of the model is the function `model_solar_pv` in module `solar_pv.model_solar_pv`. The docstring for that function has documentation for how to use it and the meaning of each parameter.
 
 Results are inserted into 2 postgres tables:
 * `models.pv_building` contains LiDAR-derived building height, and a reason (if any) why the building has been skipped in PV modelling, which can be one of 4 things: `NO_LIDAR_COVERAGE`, `OUTDATED_LIDAR_COVERAGE`, `NO_ROOF_PLANES_DETECTED`, or `ALL_ROOF_PLANES_UNUSABLE`.
@@ -62,7 +91,7 @@ SELECT  ST_AsText(
 
 If the `proj` being used by postGIS doesn't have the datum grids, the result will be way off. It will only be correct if the file `OSTN15_NTv2_OSGBtoETRS.gsb` is in the directory indicated by the environment variable `PROJ_LIB` (or its default location of `/usr/share/proj` or `/usr/local/share/proj`, depending on distro, if `PROJ_LIB` is unset). If your proj version is < 7, this file is found in the project [proj-datumgrid](https://github.com/OSGeo/proj-datumgrid). If it is >=7, it is found in the project [proj-data](https://github.com/OSGeo/PROJ-data). Run `SELECT PostGIS_PROJ_Version();` To get the proj version.
 
-The postGIS in some distro package managers (e.g. debian-based ones) do include the datum grids by default; however the nixpkgs postGIS does not.
+The postGIS in some distro package managers (e.g. debian-based ones) do include the datum grids by default; however the nixpkgs postGIS does not. This project's `default.nix` therefore merges the `proj-datumgrid-europe` grids into proj's data dir and points `PROJ_DATA`/`PROJ_LIB` at the result, so the ephemeral cluster the CLI starts (and gdal's own transforms) resolve OSTN15 inside the nix-shell.
 
 ### Buildings
 

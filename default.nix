@@ -4,9 +4,30 @@ let
   pkgs = (import (fetchTarball "https://github.com/NixOS/nixpkgs/archive/b18a4b9.tar.gz") {});
 
   python = pkgs.python312;
+
+  # postgis/gdal need the OSTN15 NTv2 datum grid for accurate 27700<->4326
+  # transforms, which nixpkgs proj doesn't bundle. Merge the proj-datumgrid-europe
+  # grids into proj's own data dir (just a fetch + symlinks - no rebuild of proj or
+  # postgis) and point proj at it via PROJ_DATA below, so the ephemeral postgres the
+  # standalone CLI starts, and gdal's own transforms, resolve the grid. (The Albion
+  # harness gets this from 320-albion's shell, which serves its database.)
+  projDatumgrids = pkgs.fetchzip {
+    url = "https://github.com/OSGeo/proj-datumgrid/releases/download/europe-1.6/proj-datumgrid-europe-1.6.tar.gz";
+    sha256 = "1vh74zg653rbqr5mz3yr56qq3zc8k1haczii9zxpdb4rbw9gvv4c";
+    stripRoot = false;
+  };
+  projData = pkgs.symlinkJoin {
+    name = "proj-data-with-ntv2";
+    paths = [ "${pkgs.proj}/share/proj" projDatumgrids ];
+  };
 in
 pkgs.mkShell {
   name = "solar-wizard-model";
+
+  # so proj (used by postgis and gdal) finds the NTv2 grids added above.
+  # PROJ_DATA is the current name; PROJ_LIB is the older one, set for safety:
+  PROJ_DATA = "${projData}";
+  PROJ_LIB = "${projData}";
 
   buildInputs = [
     python
