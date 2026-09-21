@@ -33,7 +33,7 @@ CREATE INDEX IF NOT EXISTS bounds_27700_bounds_idx ON {bounds_27700} using gist 
 --
 CREATE TABLE IF NOT EXISTS {buildings} AS
 SELECT
-    toid,
+    toid AS building_id,
     geom_27700,
     -- For selecting a building 'moat' for detecting outdated LiDAR:
     ST_Buffer(geom_27700, 5, 'endcap=square join=mitre quad_segs=2') AS geom_27700_buffered_5,
@@ -53,7 +53,7 @@ AND (NOT ST_Touches(ST_Centroid(b.geom_27700), q.bounds_27700)
      OR b.geom_27700 &<| q.bounds_27700
      OR b.geom_27700 &>  q.bounds_27700);
 
-CREATE UNIQUE INDEX IF NOT EXISTS buildings_toid_idx ON {buildings} (toid);
+CREATE UNIQUE INDEX IF NOT EXISTS buildings_building_id_idx ON {buildings} (building_id);
 CREATE INDEX IF NOT EXISTS buildings_geom_27700_idx ON {buildings} USING GIST (geom_27700);
 CREATE INDEX IF NOT EXISTS buildings_geom_27700_buffered_idx ON {buildings} USING GIST (geom_27700_buffered_5);
 
@@ -62,7 +62,7 @@ CREATE INDEX IF NOT EXISTS buildings_geom_27700_buffered_idx ON {buildings} USIN
 --
 CREATE TABLE IF NOT EXISTS {roof_polygons} (
     roof_plane_id SERIAL PRIMARY KEY,
-    toid text NOT NULL,
+    building_id text NOT NULL,
     roof_geom_27700 geometry(polygon, 27700) NOT NULL,
     roof_geom_raw_27700 geometry(polygon, 27700) NOT NULL,
     x_coef double precision NOT NULL,
@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS {roof_polygons} (
     meta jsonb NOT NULL
 );
 
-CREATE INDEX ON {roof_polygons} (toid);
+CREATE INDEX ON {roof_polygons} (building_id);
 CREATE INDEX ON {roof_polygons} USING GIST (roof_geom_27700);
 CREATE INDEX ON {roof_polygons} USING GIST (roof_geom_raw_27700);
 
@@ -86,7 +86,7 @@ CREATE INDEX ON {roof_polygons} USING GIST (roof_geom_raw_27700);
 --CREATE TABLE IF NOT EXISTS {panel_polygons} (
 --    panel_id SERIAL PRIMARY KEY,
 --    roof_plane_id bigint NOT NULL REFERENCES {roof_polygons} (roof_plane_id),
---    toid text NOT NULL,
+--    building_id text NOT NULL,
 --    panel_geom_27700 geometry(polygon, 27700) NOT NULL,
 --    footprint double precision NOT NULL,
 --    area double precision NOT NULL

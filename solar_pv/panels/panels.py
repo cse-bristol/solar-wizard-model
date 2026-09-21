@@ -94,7 +94,7 @@ def _post_load(pg_uri: str, schema: str, min_roof_area_m: float):
             UPDATE {buildings} b
             SET exclusion_reason = 'ALL_ROOF_PLANES_UNUSABLE'
             WHERE
-                NOT EXISTS (SELECT FROM {roof_polygons} rp WHERE rp.usable AND rp.toid = b.toid)
+                NOT EXISTS (SELECT FROM {roof_polygons} rp WHERE rp.usable AND rp.building_id = b.building_id)
                 AND b.exclusion_reason IS NULL;
             """,
             {"min_roof_area_m": min_roof_area_m},
@@ -118,7 +118,7 @@ def _place_panel_page(pg_uri: str,
             pg_conn,
             """
             SELECT 
-                toid,
+                building_id,
                 roof_plane_id,
                 st_astext(roof_geom_27700) AS roof, 
                 aspect, slope, is_flat 
@@ -153,12 +153,12 @@ def _place_panel_page(pg_uri: str,
 
             if panels:
                 roof_plane_id = roof['roof_plane_id']
-                toid = roof['toid']
+                building_id = roof['building_id']
                 for panel in panels:
                     area = panel_width_m * panel_height_m
                     footprint = panel.area
                     roof_panels.append((roof_plane_id,
-                                        toid,
+                                        building_id,
                                         panel.wkt,
                                         area,
                                         footprint))
@@ -175,7 +175,7 @@ def _write_panels(pg_conn, job_id: int, roofs: List[Tuple[str, str, str, float, 
             cursor,
             SQL("""
                 INSERT INTO {panel_polygons}
-                (roof_plane_id, toid, panel_geom_27700, area, footprint)
+                (roof_plane_id, building_id, panel_geom_27700, area, footprint)
                 VALUES %s
             """).format(
                 panel_polygons=Identifier(schema, tables.PANEL_POLYGON_TABLE),

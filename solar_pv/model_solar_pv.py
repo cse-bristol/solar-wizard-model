@@ -207,7 +207,7 @@ def _should_skip(pg_uri: str, job_id: int, check_rasters: bool = True) -> bool:
                 WHERE exclusion_reason IS NULL;
 
                 INSERT INTO models.pv_building
-                SELECT %(job_id)s, toid, exclusion_reason, height
+                SELECT %(job_id)s, building_id, exclusion_reason, height
                 FROM {buildings};
                 """,
                 {"job_id": job_id},

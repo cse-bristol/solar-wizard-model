@@ -64,14 +64,14 @@ END $$;
 
 CREATE TABLE IF NOT EXISTS models.pv_building (
     job_id int NOT NULL,
-    toid text NOT NULL,
+    building_id text NOT NULL,
     exclusion_reason models.pv_exclusion_reason,
     height real,
-    PRIMARY KEY(job_id, toid)
+    PRIMARY KEY(job_id, building_id)
 );
 
 CREATE TABLE IF NOT EXISTS models.pv_roof_plane (
-    toid text NOT NULL,
+    building_id text NOT NULL,
     roof_plane_id int NOT NULL,
     job_id int NOT NULL,
 
@@ -136,5 +136,5 @@ CREATE TABLE IF NOT EXISTS models.pv_roof_plane (
 );
 
 CREATE INDEX IF NOT EXISTS pvrp_job_id_idx ON models.pv_roof_plane (job_id);
-CREATE INDEX IF NOT EXISTS pvrp_toid_idx ON models.pv_roof_plane (toid);
+CREATE INDEX IF NOT EXISTS pvrp_building_id_idx ON models.pv_roof_plane (building_id);
 CREATE INDEX IF NOT EXISTS pvp_geom_idx ON models.pv_roof_plane USING GIST (roof_geom_4326);

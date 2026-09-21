@@ -380,21 +380,21 @@ def pixels_for_buildings(pg_conn,
                          page: int,
                          page_size: int,
                          raster_tables: List[str],
-                         toids: List[str] = None,
+                         building_ids: List[str] = None,
                          geom_col: str = 'geom_27700',
                          force_load: bool = False) -> Dict[str, List[dict]]:
     """
-    Get a list of pixels by toid. Each pixel dict will have keys x, y, pixel_id and toid,
+    Get a list of pixels by building_id. Each pixel dict will have keys x, y, pixel_id and building_id,
     and one for each table in `raster_tables`, where the key will be the table name (without
     schema).
 
     If force_load is True, load buildings despite a set exclusion_reason. This is for
     debugging only.
     """
-    if toids:
-        toid_filter = SQL("AND b.toid = ANY( {toids} )").format(toids=Literal(toids))
+    if building_ids:
+        building_id_filter = SQL("AND b.building_id = ANY( {building_ids} )").format(building_ids=Literal(building_ids))
     else:
-        toid_filter = SQL("")
+        building_id_filter = SQL("")
 
     if force_load:
         where_clause = SQL("true")
@@ -414,24 +414,24 @@ def pixels_for_buildings(pg_conn,
             pg_conn,
             """        
             WITH building_page AS (
-                SELECT b.toid, {geom_col}
+                SELECT b.building_id, {geom_col}
                 FROM {buildings} b
                 WHERE {where_clause}
-                {toid_filter}
-                ORDER BY b.toid
+                {building_id_filter}
+                ORDER BY b.building_id
                 OFFSET %(offset)s LIMIT %(limit)s
             ),
             raster_pixels AS (
                 SELECT
-                    b.toid,
+                    b.building_id,
                     (ST_PixelAsCentroids(ST_Clip(rast, {geom_col}))).*
                 FROM building_page b
                 LEFT JOIN {raster_table} r ON ST_Intersects({geom_col}, r.rast)
             )
             SELECT
-                toid || ':' || ST_X(geom)::text || ':' || ST_Y(geom)::text AS pixel_id,
+                building_id || ':' || ST_X(geom)::text || ':' || ST_Y(geom)::text AS pixel_id,
                 val,
-                toid,
+                building_id,
                 ST_X(geom) x,
                 ST_Y(geom) y
             FROM raster_pixels;
@@ -443,7 +443,7 @@ def pixels_for_buildings(pg_conn,
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
             raster_table=Identifier(schema, rtable),
             geom_col=Identifier("b", geom_col),
-            toid_filter=toid_filter,
+            building_id_filter=building_id_filter,
             where_clause=where_clause,
             result_extractor=lambda rows: rows)
 
@@ -453,10 +453,10 @@ def pixels_for_buildings(pg_conn,
                 by_pixel_id[pixel_id] = dict(pixel)
             by_pixel_id[pixel_id][rtable] = pixel['val']
 
-    by_toid = defaultdict(list)
+    by_building_id = defaultdict(list)
     for pixel in by_pixel_id.values():
         del pixel['val']
         # Only return pixels that have a value in every table:
         if all(field in pixel for field in fields):
-            by_toid[pixel['toid']].append(pixel)
-    return dict(by_toid)
+            by_building_id[pixel['building_id']].append(pixel)
+    return dict(by_building_id)

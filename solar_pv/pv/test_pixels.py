@@ -34,8 +34,8 @@ class PixelsForGeomsTest(unittest.TestCase):
     def test_pixel_dict_shape_matches_seam(self):
         geom = box(1002.0, 1045.0, 1005.0, 1048.0)
         px = pixels.pixels_for_geoms(self._fields(), {"t1": geom})["t1"][0]
-        self.assertEqual(set(px), {"toid", "x", "y", "pixel_id", "kwh_year", "horizon_00"})
-        self.assertEqual(px["toid"], "t1")
+        self.assertEqual(set(px), {"building_id", "x", "y", "pixel_id", "kwh_year", "horizon_00"})
+        self.assertEqual(px["building_id"], "t1")
         self.assertEqual(px["pixel_id"], f"t1:{px['x']}:{px['y']}")
 
     def test_building_outside_grid_returns_nothing(self):
@@ -43,12 +43,12 @@ class PixelsForGeomsTest(unittest.TestCase):
         out = pixels.pixels_for_geoms(self._fields(), {"t1": geom})
         self.assertNotIn("t1", out)
 
-    def test_multiple_buildings_keyed_by_toid(self):
+    def test_multiple_buildings_keyed_by_building_id(self):
         out = pixels.pixels_for_geoms(self._fields(), {
             "a": box(1001.0, 1047.0, 1003.0, 1049.0),
             "b": box(1006.0, 1041.0, 1008.0, 1043.0)})
         self.assertEqual(set(out), {"a", "b"})
-        self.assertTrue(all(p["toid"] == "a" for p in out["a"]))
+        self.assertTrue(all(p["building_id"] == "a" for p in out["a"]))
 
     def test_no_data_pixels_are_dropped(self):
         # a valid mask covering only some cells -> pixels outside it are not returned even when

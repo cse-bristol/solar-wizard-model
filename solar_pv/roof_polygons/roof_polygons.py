@@ -21,7 +21,7 @@ from solar_pv.datatypes import RoofPlane, RoofPolygon
 from solar_pv.roof_polygons.split_evenly import split_evenly
 
 
-def create_roof_polygons(toid: str,
+def create_roof_polygons(building_id: str,
                          building_geom: Polygon,
                          planes: List[RoofPlane],
                          max_roof_slope_degrees: int,
@@ -43,8 +43,8 @@ def create_roof_polygons(toid: str,
         resolution_metres=resolution_metres)
     t1 = time.time()
     if t1 - t0 > 1200:
-        print(f"very slow polygon creation: {toid} took {round(t1 - t0, 2)} s")
-        _write_test_data(_to_test_data(toid, planes, building_geom))
+        print(f"very slow polygon creation: {building_id} took {round(t1 - t0, 2)} s")
+        _write_test_data(_to_test_data(building_id, planes, building_geom))
     return polygons
 
 
@@ -118,10 +118,10 @@ def _create_roof_polygons(building_geom: Polygon,
         return [p for p in plane_polys if _is_valid(p)]
 
     except Exception as e:
-        toid = planes[0]['toid']
-        print(f"Exception during roof polygon creation for TOID {toid}:")
+        building_id = planes[0]['building_id']
+        print(f"Exception during roof polygon creation for building_id {building_id}:")
         traceback.print_exception(e)
-        _write_test_data(_to_test_data(planes[0]['toid'], planes, building_geom))
+        _write_test_data(_to_test_data(planes[0]['building_id'], planes, building_geom))
         raise e
 
 
@@ -270,7 +270,7 @@ def _remove_overlaps(roof_polygons: List[RoofPolygon], debug: bool = False) -> N
                 rp2['roof_geom_27700'] = p2
 
 
-def _to_test_data(toid: str, planes: List[dict], building_geom: Polygon) -> dict:
+def _to_test_data(building_id: str, planes: List[dict], building_geom: Polygon) -> dict:
     planes_ = []
     for plane in planes:
         plane = plane.copy()
@@ -282,7 +282,7 @@ def _to_test_data(toid: str, planes: List[dict], building_geom: Polygon) -> dict
     return {
         "planes": planes_,
         "building_geom": building_geom.wkt,
-        "toid": toid,
+        "building_id": building_id,
     }
 
 
@@ -290,7 +290,7 @@ def _write_test_data(test_data):
     """Write test data for building in the format that the roof polygon tests expect"""
     debug_data_dir = os.environ.get("DEBUG_DATA_DIR")
     if debug_data_dir:
-        fname = join(debug_data_dir, f"roof_poly_{test_data['toid']}.json", 'w')
+        fname = join(debug_data_dir, f"roof_poly_{test_data['building_id']}.json", 'w')
         with open(fname) as f:
             json.dump(test_data, f, sort_keys=True, default=str)
         print(f"Wrote debug data to {fname}")

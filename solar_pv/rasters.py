@@ -275,7 +275,7 @@ def create_elevation_override_raster(pg_uri: str,
             outdated_lidar_building_h_sql = SQL(
                 "SELECT ST_Force3D(e.geom_27700, (h.abs_hmax + h.abs_h2) / 2) "
                 "FROM {buildings} e "
-                "JOIN mastermap.height h USING (toid) "
+                "JOIN mastermap.height h ON e.building_id = h.toid "
                 "WHERE e.exclusion_reason = 'OUTDATED_LIDAR_COVERAGE'::models.pv_exclusion_reason"
             ).format(
                 buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE)

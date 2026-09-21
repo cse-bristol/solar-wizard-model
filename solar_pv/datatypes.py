@@ -6,7 +6,7 @@ from shapely.geometry import Polygon
 
 class RoofDetBuilding(TypedDict):
     """Building-level inputs to roof-plane detection"""
-    toid: str
+    building_id: str
     pixels: List[dict]
     polygon: Polygon
     min_ground_height: float
@@ -15,7 +15,7 @@ class RoofDetBuilding(TypedDict):
 
 class RoofPlane(TypedDict):
     """Outputs from roof-plane detection"""
-    toid: str
+    building_id: str
     plane_type: str
     plane_id: str
 

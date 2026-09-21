@@ -103,11 +103,11 @@ class AggregateFromArraysTest(unittest.TestCase):
         with open(join(_PIXEL_DATA, "0001.json")) as f:
             building = json.load(f)
         pixels = building['pixels']
-        toid = pixels[0]['toid']
+        building_id = pixels[0]['building_id']
 
         arrays, gt, geom = _field_arrays_from_pixels(pixels, pixel_fields)
         pf = PixelFields.from_dense(arrays, gt)
-        extracted = pixels_for_geoms(pf, {toid: geom})[toid]
+        extracted = pixels_for_geoms(pf, {building_id: geom})[building_id]
         self.assertEqual(len(extracted), len(pixels),
                          "geometry re-extraction recovered a different pixel set")
 
@@ -135,10 +135,10 @@ class AggregateFromArraysTest(unittest.TestCase):
         job_id = 0
         with open(join(_PIXEL_DATA, "0001.json")) as f:
             building = json.load(f)
-        toid = building['pixels'][0]['toid']
+        building_id = building['pixels'][0]['building_id']
         job = (job_id, RASTER_TABLES, 1.0, 0.2, SYSTEM_LOSS,
-               {toid: json.loads(json.dumps(building['roofs']))},
-               {toid: building['pixels']})
+               {building_id: json.loads(json.dumps(building['roofs']))},
+               {building_id: building['pixels']})
         worker = {r['roof_plane_id']: r for r in _aggregate_page(job)}
 
         serial = {r['roof_plane_id']: r for r in _aggregate_pixel_data(

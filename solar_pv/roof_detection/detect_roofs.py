@@ -80,9 +80,9 @@ def detect_roofs(pg_uri: str,
     executor = ProcessPoolExecutor(max_workers=workers)
     try:
         futures = []
-        for batch_toids in work_queue:
+        for batch_building_ids in work_queue:
             futures.append(executor.submit(_handle_building_batch,
-                                           pg_uri, job_id, batch_toids, params))
+                                           pg_uri, job_id, batch_building_ids, params))
 
         for future in as_completed(futures):
             try:
@@ -98,27 +98,27 @@ def detect_roofs(pg_uri: str,
     stage.set_stage(pg_uri, job_id, stage.Stage.DETECT_ROOFS)
 
 
-def _handle_building_batch(pg_uri: str, job_id: int, toids: List[str], params: dict):
+def _handle_building_batch(pg_uri: str, job_id: int, building_ids: List[str], params: dict):
     start_time = time.time()
-    buildings = _load(pg_uri, job_id, toids)
+    buildings = _load(pg_uri, job_id, building_ids)
 
     polygons = []
-    for toid, building in buildings.items():
+    for building_id, building in buildings.items():
         try:
             t0 = time.time()
-            found = _detect_building_roof_planes(building, toid, params['resolution_metres'])
+            found = _detect_building_roof_planes(building, building_id, params['resolution_metres'])
             t1 = time.time()
             if t1 - t0 > 7200:
-                print(f"very slow plane detection: {toid} took {round(t1 - t0, 2)} s")
+                print(f"very slow plane detection: {building_id} took {round(t1 - t0, 2)} s")
                 _write_test_data(job_id, building)
         except Exception as e:
-            print(f"Exception during roof plane detection for TOID {toid}:")
+            print(f"Exception during roof plane detection for building_id {building_id}:")
             traceback.print_exception(e)
             _write_test_data(job_id, building)
             raise e
 
         if len(found) > 0:
-            polygons.extend(create_roof_polygons(toid, building['polygon'], found, **params))
+            polygons.extend(create_roof_polygons(building_id, building['polygon'], found, **params))
 
     try:
         _save_planes(pg_uri, job_id, polygons)
@@ -128,11 +128,11 @@ def _handle_building_batch(pg_uri: str, job_id: int, toids: List[str], params: d
         raise e
 
     batch_time = round(time.time() - start_time, 2)
-    print(f"batch of {len(toids)} buildings took {batch_time} s.")
+    print(f"batch of {len(building_ids)} buildings took {batch_time} s.")
 
 
 def _detect_building_roof_planes(building: RoofDetBuilding,
-                                 toid: str,
+                                 building_id: str,
                                  resolution_metres: float,
                                  debug: bool = False) -> List[RoofPlane]:
     pixels_in_building = building['pixels']
@@ -182,7 +182,7 @@ def _detect_building_roof_planes(building: RoofDetBuilding,
             # skip_planes, so we don't retry them)
             if detsac.plane_properties["score"] < ROOFDET_MAX_MAE:
                 planes[plane_idx] = detsac.plane_properties
-                planes[plane_idx]["toid"] = toid
+                planes[plane_idx]["building_id"] = building_id
                 labels[inlier_mask] = plane_idx
                 plane_idx += 1
                 mask[inlier_mask] = 0
@@ -225,7 +225,7 @@ def _detect_building_roof_planes(building: RoofDetBuilding,
             # skip_planes, so we don't retry them)
             if ransac.plane_properties["score"] < ROOFDET_MAX_MAE:
                 planes[plane_idx] = ransac.plane_properties
-                planes[plane_idx]["toid"] = toid
+                planes[plane_idx]["building_id"] = building_id
                 labels[inlier_mask] = plane_idx
                 plane_idx += 1
                 mask[inlier_mask] = 0
@@ -255,7 +255,7 @@ def _detect_building_roof_planes(building: RoofDetBuilding,
 
 def _load(pg_uri: str,
           job_id: int,
-          toids: List[str],
+          building_ids: List[str],
           force_load: bool = False) -> Dict[str, RoofDetBuilding]:
     """
     Load LIDAR pixel data for roof plane detection. page_size is number of
@@ -267,35 +267,35 @@ def _load(pg_uri: str,
         aspect_table = f"{tables.schema(job_id)}.{tables.ASPECT}"
         slope_table = f"{tables.schema(job_id)}.{tables.SLOPE}"
 
-        by_toid = pixels_for_buildings(pg_conn, job_id, 0, len(toids),
+        by_building_id = pixels_for_buildings(pg_conn, job_id, 0, len(building_ids),
                                        [elevation_table, aspect_table, slope_table],
-                                       toids, force_load=force_load)
+                                       building_ids, force_load=force_load)
         
-        # TODO The things in toids that aren't in list(by_toid.keys()) need marking as no coverage.
+        # TODO The things in building_ids that aren't in list(by_building_id.keys()) need marking as no coverage.
         #      Currently the outdated lidar checker misses them because there are pixels nearby.
-        buildings = _load_building_polygons(pg_conn, job_id, list(by_toid.keys()))
+        buildings = _load_building_polygons(pg_conn, job_id, list(by_building_id.keys()))
         
         loaded = {}
         for building in buildings:
-            toid = building["toid"]
-            pixels = by_toid[toid]
-            loaded[toid] = {}
-            loaded[toid]["toid"] = toid
-            loaded[toid]["polygon"] = wkt.loads(building["polygon"])
-            loaded[toid]["pixels"] = pixels
-            loaded[toid]["min_ground_height"] = building["min_ground_height"]
-            loaded[toid]["max_ground_height"] = building["max_ground_height"]
+            building_id = building["building_id"]
+            pixels = by_building_id[building_id]
+            loaded[building_id] = {}
+            loaded[building_id]["building_id"] = building_id
+            loaded[building_id]["polygon"] = wkt.loads(building["polygon"])
+            loaded[building_id]["pixels"] = pixels
+            loaded[building_id]["min_ground_height"] = building["min_ground_height"]
+            loaded[building_id]["max_ground_height"] = building["max_ground_height"]
         return loaded
 
 
-def _load_building_polygons(pg_conn, job_id, toids: List[str]) -> List[dict]:
+def _load_building_polygons(pg_conn, job_id, building_ids: List[str]) -> List[dict]:
     buildings = sql_command(
             pg_conn,
             """
-            SELECT toid, ST_AsText(geom_27700) AS polygon, min_ground_height, max_ground_height
+            SELECT building_id, ST_AsText(geom_27700) AS polygon, min_ground_height, max_ground_height
             FROM {buildings}
-            WHERE toid = ANY( %(toids)s )""",
-            {"toids": toids},
+            WHERE building_id = ANY( %(building_ids)s )""",
+            {"building_ids": building_ids},
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
             result_extractor=lambda rows: rows)
 
@@ -303,18 +303,18 @@ def _load_building_polygons(pg_conn, job_id, toids: List[str]) -> List[dict]:
 
 
 def _buildings_with_areas(pg_uri: str, job_id: int) -> List[Tuple[str, float]]:
-    """Get all building TOIDs with their areas, sorted by area (largest first) for adaptive batching"""
+    """Get all building IDs with their areas, sorted by area (largest first) for adaptive batching"""
     with connection(pg_uri, cursor_factory=DictCursor) as pg_conn:
         return sql_command(
             pg_conn,
-            """SELECT toid, ST_Area(geom_27700) as area
+            """SELECT building_id, ST_Area(geom_27700) as area
                FROM {buildings} 
                WHERE exclusion_reason IS NULL
                AND ST_Area(geom_27700) <= %(max_area)s
                ORDER BY ST_Area(geom_27700) DESC;""",
             bindings={"max_area": ROOFDET_MAX_AREA},
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
-            result_extractor=lambda rows: [(row['toid'], row['area']) for row in rows])
+            result_extractor=lambda rows: [(row['building_id'], row['area']) for row in rows])
 
 
 def _create_adaptive_batches(buildings_with_areas: List[Tuple[str, float]]) -> List[List[str]]:
@@ -327,7 +327,7 @@ def _create_adaptive_batches(buildings_with_areas: List[Tuple[str, float]]) -> L
     current_batch_size = None
     current_batch = []
     
-    for toid, area in buildings_with_areas:
+    for building_id, area in buildings_with_areas:
         if area > 10000:
             batch_size = 1
         elif area > 2000:
@@ -341,7 +341,7 @@ def _create_adaptive_batches(buildings_with_areas: List[Tuple[str, float]]) -> L
             batches.append(current_batch)
             current_batch = []
         
-        current_batch.append(toid)
+        current_batch.append(building_id)
         current_batch_size = batch_size
         
     if current_batch:
@@ -379,7 +379,7 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[RoofPolygon]):
     with semaphore_connection(pg_uri) as pg_conn, pg_conn.cursor() as cursor:
         execute_values(cursor, SQL("""
             INSERT INTO {roof_polygons} (
-                toid, 
+                building_id, 
                 roof_geom_27700, 
                 roof_geom_raw_27700, 
                 x_coef, 
@@ -395,7 +395,7 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[RoofPolygon]):
         """).format(
             roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE),
         ), argslist=planes,
-           template="""(%(toid)s, 
+           template="""(%(building_id)s, 
                         %(roof_geom_27700)s, 
                         %(roof_geom_raw_27700)s, 
                         %(x_coef)s,
@@ -419,7 +419,7 @@ def _mark_buildings_with_no_planes(pg_uri: str, job_id: int):
             UPDATE {buildings} b
             SET exclusion_reason = 'NO_ROOF_PLANES_DETECTED'
             WHERE
-                NOT EXISTS (SELECT FROM {roof_polygons} rp WHERE rp.toid = b.toid)
+                NOT EXISTS (SELECT FROM {roof_polygons} rp WHERE rp.building_id = b.building_id)
                 AND b.exclusion_reason IS NULL;
                 
             -- Update building.exclusion_reason for any buildings that have roof planes but no
@@ -427,7 +427,7 @@ def _mark_buildings_with_no_planes(pg_uri: str, job_id: int):
             UPDATE {buildings} b
             SET exclusion_reason = 'ALL_ROOF_PLANES_UNUSABLE'
             WHERE
-                NOT EXISTS (SELECT FROM {roof_polygons} rp WHERE rp.usable AND rp.toid = b.toid)
+                NOT EXISTS (SELECT FROM {roof_polygons} rp WHERE rp.usable AND rp.building_id = b.building_id)
                 AND b.exclusion_reason IS NULL;
             """,
             roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE),
@@ -450,7 +450,7 @@ def _write_test_data(job_id: int, building: RoofDetBuilding):
     debug_data_dir = os.environ.get("DEBUG_DATA_DIR")
     os.makedirs(debug_data_dir, exist_ok=True)
     if debug_data_dir:
-        fname = join(debug_data_dir, f"{job_id}_{building['toid']}.json")
+        fname = join(debug_data_dir, f"{job_id}_{building['building_id']}.json")
         with open(fname, 'w') as f:
             json.dump(building, f, default=str)
         print(f"Wrote debug data to {fname}")

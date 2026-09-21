@@ -12,9 +12,9 @@ from solar_pv.datatypes import RoofPolygon
 from solar_pv.roof_polygons.roof_polygons import _create_roof_polygons
 from solar_pv.test_utils.test_funcs import ParameterisedTestCase
 
-def _load_test_data(toid: str):
+def _load_test_data(building_id: str):
     roof_polys_dir = join(paths.TEST_DATA, "roof_polygons")
-    with open(join(roof_polys_dir, f"{toid}.json")) as f:
+    with open(join(roof_polys_dir, f"{building_id}.json")) as f:
         data = json.load(f)
         planes = data['planes']
         for plane in planes:
@@ -26,13 +26,13 @@ def _load_test_data(toid: str):
     return planes, building_geom
 
 
-def _create_polygons_using_test_data(toid: str,
+def _create_polygons_using_test_data(building_id: str,
                                      max_roof_slope_degrees: int = 80,
                                      min_roof_area_m: int = 8,
                                      min_roof_degrees_from_north: int = 45,
                                      flat_roof_degrees: int = 10,
                                      min_dist_to_edge_m: float = 0.3) -> Tuple[List[RoofPolygon], Polygon]:
-    planes, building_geom = _load_test_data(toid)
+    planes, building_geom = _load_test_data(building_id)
     planes = _create_roof_polygons(
         building_geom,
         planes,
@@ -50,8 +50,8 @@ def _create_polygons_using_test_data(toid: str,
 class RoofPolygonTest(ParameterisedTestCase):
 
     def test_roof_polygons_do_not_overlap(self):
-        def _do_test(toid: str):
-            planes, _ = _create_polygons_using_test_data(toid)
+        def _do_test(building_id: str):
+            planes, _ = _create_polygons_using_test_data(building_id)
             for p1 in planes:
                 for p2 in planes:
                     poly1 = p1['roof_geom_27700']
@@ -66,9 +66,9 @@ class RoofPolygonTest(ParameterisedTestCase):
         ], _do_test)
 
     def test_roof_polygons_stay_within_building(self):
-        def _do_test(toid: str):
+        def _do_test(building_id: str):
             min_dist_to_edge_m = 0.55
-            planes, building_geom = _create_polygons_using_test_data(toid, min_dist_to_edge_m=min_dist_to_edge_m)
+            planes, building_geom = _create_polygons_using_test_data(building_id, min_dist_to_edge_m=min_dist_to_edge_m)
             building_geom = building_geom.buffer(-min_dist_to_edge_m)
             for p in planes:
                 poly = p['roof_geom_27700']
@@ -81,8 +81,8 @@ class RoofPolygonTest(ParameterisedTestCase):
         ], _do_test)
 
     def test_failing_roof_polygons(self):
-        def _do_test(toid: str, min_dist_to_edge_m: float = 0.55):
-            _create_polygons_using_test_data(toid, min_dist_to_edge_m=min_dist_to_edge_m)
+        def _do_test(building_id: str, min_dist_to_edge_m: float = 0.55):
+            _create_polygons_using_test_data(building_id, min_dist_to_edge_m=min_dist_to_edge_m)
 
         self.parameterised_test([
             ("0008", None),
