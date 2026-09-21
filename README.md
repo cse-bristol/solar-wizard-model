@@ -38,8 +38,6 @@ The model has the following data dependencies:
   are the reprojected UK subset of the worldwide PVMAPS `pvgis_data.tar` from
   https://re.jrc.ec.europa.eu/pvmaps/pvgis_data.tar.)
 
-We have tried to make the model as independent as possible from our internal infrastructure where it runs, but this has not been our main priority when developing and you may find things that don't work, or design decisions that don't make sense when viewed without the context of knowing how we run the model.
-
 ### postgres and postGIS
 
 You will need a postGIS (postgres version >= 12; postGIS version >=3) database with some data in it (see below).
@@ -66,41 +64,26 @@ If the `proj` being used by postGIS doesn't have the datum grids, the result wil
 
 The postGIS in some distro package managers (e.g. debian-based ones) do include the datum grids by default; however the nixpkgs postGIS does not.
 
-There will need to be at least the following table in the postGIS install:
+### Buildings
 
-* schema: `mastermap`
-* table: `building_27700`
-* columns: `toid TEXT`, `geom_27700 geometry(Polygon,27700)`. It can have others but these are the only ones required.
+Buildings are passed to `model_solar_pv` as an iterable of `solar_pv.buildings.BuildingInput`:
 
-Optionally, this table will also be used if present. It is only used to burn in buildings missing from the LiDAR as obstacles to be used when detecting the horizon profiles of present buildings.
+* `building_id: str` - a unique id for the building
+* `geom_27700` - the footprint polygon in EPSG:27700, as WKT or a shapely geometry
+* `height: Optional[float]` - the building's height, only used to burn buildings missing from the LiDAR into the elevation raster as obstacles when detecting the horizon profiles of present buildings. May be omitted (`None`).
 
-* schema: `mastermap`
-* table: `height`
-* columns: `toid TEXT`, `abs_hmax`, `abs_h2`. It can have others but these are the only ones required.
-
-We use the unique building ID (TOID) and building footprint geometry from OS mastermap (hence the table names) - however this is not necessarily required: as long as the polygons align properly with the LiDAR used, any building geometry and height data could be used. TOIDs are open-licensed data but height and geometry are not.
+The job bounds are derived from the extent of the passed buildings, so any building geometry source works as long as the polygons align with the LiDAR used. We drive it from OS MasterMap TOIDs and footprints internally.
 
 ### LiDAR
 
-The model can use LiDAR in geoTIFF format at resolutions 50cm, 1m or 2m. 1m is ideal as 2m is too low-resolution to pick up many features and 50cm increases the time taken to fit planes to LiDAR. The model expects LiDAR tiles to be pre-loaded as out-of-band rasters into postGIS in the tables `models.lidar_50cm`, `models.lidar_1m`, and `models.lidar_2m`. 
-
-Two Python modules are included which perform this task in different ways - see `solar_pv.lidar.bulk_lidar_client` and `solar_pv.lidar.defra_lidar_api_client`, but as long as the LiDAR ends up in the right tables any other method is fine too.
+The model can use LiDAR in geoTIFF format at resolutions 50cm, 1m or 2m. 1m is ideal as 2m is too low-resolution to pick up many features and 50cm increases the time taken to fit planes to LiDAR. LiDAR tiles are passed to `model_solar_pv` as a list of `solar_pv.lidar.lidar.LidarTile` (a file path plus an optional year, used to prefer newer data where tiles overlap). They should be on disk and cover the job bounds buffered by `horizon_search_radius`. The model picks the resolution to work at and merges overlapping/multi-resolution tiles itself (`solar_pv.lidar.lidar_selector.select_lidar`), so any mix of 50cm/1m/2m tiles can be
+supplied.
 
 ### Environment variables
 
 Required variables:
 
 * `PVGIS_DATA_TAR_FILE_DIR` - The directory containing the `pvgis_data_uk.tar` file
-
-Optional variables:
-
-* `BULK_LIDAR_DIR` - This can be ignored unless using `solar_pv.lidar.bulk_lidar_client` to load LiDAR. This is the directory containing bulk LiDAR for England, Scotland and Wales. This should have the following directory structure:
-  * 206817_LIDAR_Comp_DSM
-    * LIDAR-DSM-50CM-ENGLAND-EA
-    * LIDAR-DSM-1M-ENGLAND-EA
-    * LIDAR-DSM-2M-ENGLAND-EA
-  * scotland
-  * wales
 
 ## Tests
 
