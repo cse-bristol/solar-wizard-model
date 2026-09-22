@@ -31,7 +31,7 @@ class PixelsForGeomsTest(unittest.TestCase):
         expected = sorted(float(r * 10 + c) for r in (2, 3, 4) for c in (2, 3, 4))
         self.assertEqual(vals, expected)
 
-    def test_pixel_dict_shape_matches_seam(self):
+    def test_pixel_dict_shape_matches_format(self):
         geom = box(1002.0, 1045.0, 1005.0, 1048.0)
         px = pixels.pixels_for_geoms(self._fields(), {"t1": geom})["t1"][0]
         self.assertEqual(set(px), {"building_id", "x", "y", "pixel_id", "kwh_year", "horizon_00"})

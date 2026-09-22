@@ -1,6 +1,6 @@
 # This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
-"""Building input seam: load caller-supplied buildings into the per-job schema."""
+"""Building inputs: load caller-supplied buildings into the per-job schema."""
 import logging
 from dataclasses import dataclass
 from typing import Iterable, Optional, Union

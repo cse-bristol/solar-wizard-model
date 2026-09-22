@@ -163,7 +163,7 @@ def compute_pv_fields(slope_adjusted: np.ndarray, aspect_adjusted: np.ndarray,
                       albedo: float = 0.2) -> PixelFields:
     """
     Assemble the sparse per-pixel PV fields from full-grid corrected slope/aspect, elevation and
-    horizon — the seam pixels_for_geoms/aggregate_from_arrays consumes. For small grids
+    horizon — the format pixels_for_geoms/aggregate_from_arrays consumes. For small grids
     (validation); run_pv builds the same PixelFields on a real job grid without densifying.
 
     :param slope_adjusted: (rows, cols) slope (degrees), after the flat-roof/override merge.
