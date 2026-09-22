@@ -81,7 +81,11 @@ class E2ETest(unittest.TestCase):
             self.assertGreater(pv_roof_plane.GetFeatureCount(), 0,
                                "no roof planes detected")
 
-            # a detected roof plane should have positive area and annual generation:
+            # a detected roof plane should have positive area and annual generation,
+            # with the P90 below the central estimate and a confidence in [0,1]:
             plane = next(iter(pv_roof_plane))
-            self.assertGreater(plane.GetField("area_avg"), 0)
-            self.assertGreater(plane.GetField("kwh_year_avg"), 0)
+            self.assertGreater(plane.GetField("area"), 0)
+            self.assertGreater(plane.GetField("kwh_year"), 0)
+            self.assertLess(plane.GetField("kwh_year_p90"), plane.GetField("kwh_year"))
+            self.assertGreaterEqual(plane.GetField("confidence"), 0)
+            self.assertLessEqual(plane.GetField("confidence"), 1)

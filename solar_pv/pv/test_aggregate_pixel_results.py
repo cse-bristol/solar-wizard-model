@@ -63,9 +63,9 @@ class PixelAggregateTestCase(ParameterisedTestCase):
                 return val
 
         self.parameterised_test([
-            ('0001.json', 43989, 'kwh_year_avg', 3063.89),
-            ('0001.json', 43989, 'kwh_m01_avg', 103.26),
-            ('0001.json', 43989, 'kwh_m06_avg', 398.89),
+            ('0001.json', 43989, 'kwh_year', 3063.89),
+            ('0001.json', 43989, 'kwh_m01', 103.26),
+            ('0001.json', 43989, 'kwh_m06', 398.89),
             ('0001.json', 43989, 'horizon', [0.06, 0.16, 0.24, 0.36, 0.37, 0.39, 0.49, 0.5, 0.49, 0.49, 0.5, 0.5, 0.41, 0.41, 0.38, 0.26, 0.25, 0.16, 0.08, 0.07, 0.06, 0.03, 0.06, 0.03, 0.02, 0.01, 0.0, 0.01, 0.0, 0.0, 0.01, 0.0, 0.0, 0.04, 0.05, 0.03]),
         ], _roof_field)
 
@@ -125,7 +125,7 @@ class AggregateFromArraysTest(unittest.TestCase):
         self.assertEqual(set(from_db), set(from_arrays))
         for rpid, db_roof in from_db.items():
             arr_roof = from_arrays[rpid]
-            self.assertAlmostEqual(db_roof['kwh_year_avg'], arr_roof['kwh_year_avg'], places=6)
+            self.assertAlmostEqual(db_roof['kwh_year'], arr_roof['kwh_year'], places=6)
             self.assertEqual([round(h, 6) for h in db_roof['horizon']],
                              [round(h, 6) for h in arr_roof['horizon']])
 
@@ -148,4 +148,4 @@ class AggregateFromArraysTest(unittest.TestCase):
 
         self.assertEqual(set(worker), set(serial))
         for rpid, w in worker.items():
-            self.assertAlmostEqual(w['kwh_year_avg'], serial[rpid]['kwh_year_avg'], places=6)
+            self.assertAlmostEqual(w['kwh_year'], serial[rpid]['kwh_year'], places=6)

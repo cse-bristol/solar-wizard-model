@@ -37,9 +37,28 @@ project's nix-shell provides them, and the CLI checks for them at startup.
 
 The programmatic entrypoint of the model is the function `model_solar_pv` in module `solar_pv.model_solar_pv`. The docstring for that function has documentation for how to use it and the meaning of each parameter.
 
-Results are inserted into 2 postgres tables:
+Results are inserted into 2 postgres tables (also the two GeoPackage layers the CLI writes):
 * `models.pv_building` contains LiDAR-derived building height, and a reason (if any) why the building has been skipped in PV modelling, which can be one of 4 things: `NO_LIDAR_COVERAGE`, `OUTDATED_LIDAR_COVERAGE`, `NO_ROOF_PLANES_DETECTED`, or `ALL_ROOF_PLANES_UNUSABLE`.
-* `models.pv_roof_plane` contains the slope and aspect of the roof plane, per-modelled-panel monthly and yearly predicted kWh, and a horizon profile. A building can have 0 to many of these.
+* `models.pv_roof_plane` contains the geometry, slope and aspect of the roof plane, its predicted kWh output, and a horizon profile. A building can have 0 to many of these.
+
+### Output fields: `pv_roof_plane`
+
+All kWh figures are **modelled estimates for a typical meteorological year, not measurements**,
+computed over the roof plane RANSAC fits to the LiDAR points.
+
+| Field | Meaning |
+|---|---|
+| `kwh_year` | Central (P50) annual generation for a typical met year. |
+| `kwh_year_p90` | Conservative annual generation (P90): a poor-weather year real generation would still exceed ~90% of the time, from inter-annual weather variation only (`kwh_year * (1 - Z_P90 * INTERANNUAL_GHI_COV)`). |
+| `kwh_jan` … `kwh_dec` | Central monthly generation (P50), typical met year. |
+| `kwp` | Installed peak power (kWp) for the usable roof area. |
+| `kwh_per_kwp` | `kwh_year / kwp`. |
+| `area` | Usable roof-plane area (m², on the roof plane). |
+| `confidence` | Per-roof `[0,1]` score for how well the roof surface is known — plane fit, aspect consistency, shape, LiDAR resolution and raw-vs-grown geometry agreement, combined as a weighted geometric mean. The individual sub-scores are kept in `meta.confidence`. Higher is more trustworthy. |
+| `horizon` | Per-slice horizon profile (obstruction angles around the roof plane). |
+| `slope`, `aspect`, `is_flat` | Roof-plane orientation; `is_flat` marks near-horizontal planes. |
+| `x_coef`, `y_coef`, `intercept` | Coefficients of the fitted plane. |
+| `meta` | JSON of roof-detection diagnostics (fit residuals, aspect/shape stats) and the `confidence` sub-scores. |
 
 The model has the following software dependencies:
 * various python libraries (see `requirements.txt`, can also be installed using nix - see `default.nix`)
@@ -54,9 +73,9 @@ The python port has been tested against `r.pv`:
 
   | Level | no-GRASS vs GRASS |
   |---|---|
-  | Portfolio total Σ kwh_year_avg (geom-identical) | **−0.08%** |
+  | Portfolio total Σ kwh_year (geom-identical) | **−0.08%** |
   | Portfolio total (entire file, incl. roof-detection noise) | −0.07% |
-  | Per-roof kwh_year_avg | mean **0.81%**, median 0.52%, p95 2.6%, p99 4.1%, max 9.1% |
+  | Per-roof kwh_year | mean **0.81%**, median 0.52%, p95 2.6%, p99 4.1%, max 9.1% |
   | Horizon angle | mean 0.14°, p99 2.3° |
 
 The model has the following data dependencies:

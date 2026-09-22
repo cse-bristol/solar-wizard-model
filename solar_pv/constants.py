@@ -43,13 +43,38 @@ ROOFDET_MAX_MAE = 1.0
 # GDAL default tile geotiff tilesize:
 POSTGIS_TILESIZE = 256
 
-# These tend to use a lot of memory. This will only slow down the horizon profiling,
-# which only takes a few minutes anyway.
-MAX_PVMAPS_PROCESSES = 6
-
 # Don't use more than this many CPUs for roof plane detection (otherwise it uses 3/4
 # of what's available)
 ROOFDET_MAX_CPUS = 100
 
 # Max area of buildings to run roof plane detection on
 ROOFDET_MAX_AREA = 50000
+
+##
+# PV output uncertainty constants:
+##
+
+# One-sided normal 90th-percentile z-score:
+Z_P90 = 1.282
+# Coefficient of variation of UK annual global horizontal irradiation between years:
+INTERANNUAL_GHI_COV = 0.05
+
+##
+# Roof-plane confidence scoring constants:
+##
+
+# aspect_circ_sd (radians) at/above which the aspect sub-score is 0. Matches the
+# roof-detection rejection threshold (Thresholds.max_aspect_circular_sd):
+CONFIDENCE_MAX_ASPECT_CIRC_SD = 1.5
+
+# LiDAR working resolution (m) -> sub-score. Finer LiDAR resolves roof detail better:
+CONFIDENCE_RESOLUTION_SCORES = {0.5: 1.0, 1.0: 0.8, 2.0: 0.2}
+
+# Weights for the geometric mean; must sum to 1:
+CONFIDENCE_WEIGHTS = {
+    "fit": 0.30,
+    "resolution": 0.25,
+    "geom_agreement": 0.20,
+    "aspect": 0.15,
+    "shape": 0.10,
+}
