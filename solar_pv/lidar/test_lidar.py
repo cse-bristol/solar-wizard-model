@@ -4,19 +4,6 @@ from solar_pv.lidar import lidar
 from solar_pv.test_utils.test_funcs import ParameterisedTestCase
 
 
-def _mocked_count_raster_pixels_pct(tiff: str, value, band: int = 1) -> float:
-    if tiff == "/home/sp2917_DSM_50CM.tiff":
-        return 0.4
-    if tiff == "/home/sp2917_DSM_1M.tiff":
-        return 0.2
-    if tiff == "/home/sp2918_DSM_50CM.tiff":
-        return 0.99
-    if tiff == "/home/sp2918_DSM_1M.tiff":
-        return 0.01
-    else:
-        raise ValueError(f"Unexpected tiff filename in mock of count_raster_pixels_pct: {tiff}")
-
-
 class LidarTestCase(ParameterisedTestCase):
 
     def test_ZippedTiles_from_file(self):

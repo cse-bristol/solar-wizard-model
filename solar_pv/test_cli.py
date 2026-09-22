@@ -44,7 +44,7 @@ class ReadBuildingsTest(unittest.TestCase):
         gpkg = join(self.dir, "buildings.gpkg")
         _write_buildings_gpkg(gpkg, epsg=4326)
 
-        buildings = read_buildings(gpkg, id_field="toid", height_field="h")
+        buildings = list(read_buildings(gpkg, id_field="toid", height_field="h"))
 
         self.assertEqual(1, len(buildings))
         b = buildings[0]
@@ -65,7 +65,7 @@ class ReadBuildingsTest(unittest.TestCase):
         gpkg = join(self.dir, "buildings.gpkg")
         _write_buildings_gpkg(gpkg, epsg=4326)
 
-        buildings = read_buildings(gpkg)
+        buildings = list(read_buildings(gpkg))
 
         self.assertEqual(1, len(buildings))
         # GPKG FIDs start at 1:
@@ -78,7 +78,7 @@ class ReadBuildingsTest(unittest.TestCase):
 
         # The polygon WKT above is lon/lat numbers, but tagged as 27700 they are
         # taken as eastings/northings - they should stay the same:
-        buildings = read_buildings(gpkg, id_field="toid")
+        buildings = list(read_buildings(gpkg, id_field="toid"))
         geom = ogr.CreateGeometryFromWkt(buildings[0].geom_27700)
         xmin, _, ymin, _ = geom.GetEnvelope()
         self.assertAlmostEqual(-2.60, xmin, places=4)

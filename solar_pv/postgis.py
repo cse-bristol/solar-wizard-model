@@ -3,6 +3,7 @@
 import logging
 
 import os
+import subprocess
 import tempfile
 from collections import defaultdict
 from os.path import join
@@ -11,7 +12,6 @@ from psycopg2.sql import Identifier, SQL, Literal
 from typing import List, Dict, Tuple
 
 from solar_pv.db_funcs import sql_script, sql_command
-from solar_pv.gdal_helpers import run
 from solar_pv.lidar.lidar import LidarTile, Resolution
 from solar_pv import tables
 
@@ -55,12 +55,21 @@ def rasters_to_postgis(pg_conn, rasters: List[str], table: str, tile_size: int,
     with tempfile.TemporaryDirectory() as temp_dir:
         sql_file = join(temp_dir, "raster.sql")
         errors = 0
-        nodata = f'-N "{nodata_val}"' if nodata_val is not None else ''
-        srid = f'-s "{int(srid)}"' if srid is not None else ''
+        opts = []
+        if nodata_val is not None:
+            opts += ["-N", str(nodata_val)]
+        if srid is not None:
+            opts += ["-s", str(int(srid))]
         for raster in rasters:
             try:
-                cmd = f'raster2pgsql -n filename {nodata} {srid} -x -a -R -t "{tile_size}x{tile_size}" "{raster}" "{table}" > {sql_file}'
-                run(cmd)
+                cmd = ["raster2pgsql", "-n", "filename", *opts,
+                       "-x", "-a", "-R", "-t", f"{tile_size}x{tile_size}",
+                       raster, table]
+                # raster2pgsql writes the SQL to stdout; capture it to the file.
+                with open(sql_file, "wb") as f:
+                    res = subprocess.run(cmd, stdout=f, stderr=subprocess.PIPE)
+                if res.returncode != 0:
+                    raise ValueError(res.stderr.decode(errors="replace"))
                 sql_script(pg_conn, sql_file)
             except Exception as e:
                 pg_conn.rollback()
