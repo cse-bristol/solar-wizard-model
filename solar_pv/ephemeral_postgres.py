@@ -10,6 +10,8 @@ try:
 except ModuleNotFoundError:
     _HAS_TESTING_POSTGRESQL = False
 
+from psycopg2.sql import SQL, Identifier
+
 from solar_pv.db_funcs import connection
 
 
@@ -33,6 +35,17 @@ def ephemeral_postgres(keep: bool = False):
     try:
         with connection(pg.url()) as pg_conn, pg_conn.cursor() as cursor:
             cursor.execute("CREATE EXTENSION postgis; CREATE EXTENSION postgis_raster;")
+            # The model loads elevation/mask rasters out-of-db (raster2pgsql -R), so
+            # the backend must be allowed to open the referenced GeoTIFFs. Set on the
+            # database so every subsequent connection inherits it.
+            cursor.execute("SELECT current_database()")
+            db = Identifier(cursor.fetchone()[0])
+            cursor.execute(SQL(
+                "ALTER DATABASE {db} SET postgis.enable_outdb_rasters = true"
+            ).format(db=db))
+            cursor.execute(SQL(
+                "ALTER DATABASE {db} SET postgis.gdal_enabled_drivers = 'ENABLE_ALL'"
+            ).format(db=db))
             pg_conn.commit()
         logging.info(f"Started ephemeral postgres at {pg.url()}")
         yield pg.url()

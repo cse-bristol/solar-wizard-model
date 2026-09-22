@@ -26,9 +26,9 @@ CREATE INDEX IF NOT EXISTS bounds_27700_bounds_idx ON {bounds_27700} using gist 
 --
 CREATE TABLE IF NOT EXISTS {buildings} (
     building_id text,
-    geom_27700 geometry,
+    geom_27700 geometry(polygon, 27700),
     -- A building 'moat' for detecting outdated LiDAR:
-    geom_27700_buffered_5 geometry,
+    geom_27700_buffered_5 geometry(polygon, 27700),
     exclusion_reason models.pv_exclusion_reason,
     height real,
     min_ground_height real,

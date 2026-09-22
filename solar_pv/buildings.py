@@ -44,21 +44,29 @@ def load_buildings(pg_uri: str, job_id: int, buildings: Iterable[BuildingInput])
             logging.info("Buildings already loaded, skipping")
             return
 
-        rows = [(b.building_id, _to_wkt(b.geom_27700), b.height) for b in buildings]
+        # Consume `buildings` in a single streaming pass so callers can pass a
+        # generator (e.g. the CLI reading a large file) without materialising every
+        # building in memory; execute_values batches by page_size.
+        loaded = 0
 
-        # exclusion_reason (set by _mark_buildings_too_small / the lidar checks) and
-        # min/max_ground_height (computed by outdated_lidar_check) are left NULL here.
+        def _rows():
+            nonlocal loaded
+            for b in buildings:
+                loaded += 1
+                yield (b.building_id, _to_wkt(b.geom_27700), b.height)
+
         with pg_conn.cursor() as cursor:
             execute_values(
                 cursor,
                 SQL("""
                     INSERT INTO {buildings} (building_id, geom_27700, height) VALUES %s
                 """).format(buildings=buildings_table),
-                argslist=rows,
-                template="(%s, ST_GeomFromText(%s, 27700), %s)")
+                argslist=_rows(),
+                template="(%s, ST_GeomFromText(%s, 27700), %s)",
+                page_size=1000)
         pg_conn.commit()
 
-        logging.info(f"Loaded {len(rows)} buildings")
+        logging.info(f"Loaded {loaded} buildings")
 
         # The 5m 'moat' used to detect outdated LiDAR:
         sql_command(

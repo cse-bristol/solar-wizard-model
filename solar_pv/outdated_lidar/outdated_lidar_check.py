@@ -208,8 +208,8 @@ def _load_buildings(pg_conn, job_id: int, page: int, page_size: int, building_id
 def _write_test_data(job_id: int, building):
     """Write test data for building in the format that the outdated LiDAR tests expect"""
     debug_data_dir = os.environ.get("DEBUG_DATA_DIR")
-    os.makedirs(debug_data_dir, exist_ok=True)
     if debug_data_dir:
+        os.makedirs(debug_data_dir, exist_ok=True)
         fname = join(debug_data_dir, f"{job_id}_{building['building_id']}.json")
         with open(fname, 'w') as f:
             json.dump(building, f, sort_keys=True, default=str)

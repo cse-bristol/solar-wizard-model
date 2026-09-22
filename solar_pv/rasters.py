@@ -67,7 +67,8 @@ def generate_rasters(pg_uri: str,
     # based on coverage within the (unbuffered) bounds:
     r = horizon_search_radius
     extent = (bounds[0] - r, bounds[1] - r, bounds[2] + r, bounds[3] + r)
-    elevation_tiles, res = select_lidar(lidar_tiles, bounds, extent, solar_dir)
+    elevation_tiles, resolution = select_lidar(lidar_tiles, bounds, extent, solar_dir)
+    res = resolution.value
     gdal_helpers.create_vrt(elevation_tiles, elevation_vrt)
 
     srid = gdal_helpers.get_srid(elevation_vrt, fallback=27700)

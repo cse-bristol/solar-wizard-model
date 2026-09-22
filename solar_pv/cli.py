@@ -14,7 +14,7 @@ import argparse
 import logging
 import os
 import tempfile
-from typing import List, Optional
+from typing import Iterable, Iterator, List, Optional
 
 from osgeo import ogr, osr
 from psycopg2.sql import SQL, Literal
@@ -44,13 +44,15 @@ _TUNING_OPTIONS = {
 
 def read_buildings(path: str,
                    id_field: Optional[str] = None,
-                   height_field: Optional[str] = None) -> List[BuildingInput]:
+                   height_field: Optional[str] = None) -> Iterator[BuildingInput]:
     """
-    Read buildings from an OGR vector file into BuildingInput objects, reprojecting
+    Stream buildings from an OGR vector file as BuildingInput objects, reprojecting
     the geometry to EPSG:27700 (the file's own SRS is honoured).
 
     building_id comes from `id_field` (or the feature id if unset); height from
-    `height_field` (or None). Only the first layer is read.
+    `height_field` (or None). Only the first layer is read. The file is opened and
+    its SRS validated eagerly, but features are yielded lazily so a large file is
+    never held in memory at once.
     """
     ogr.UseExceptions()
     datasource = ogr.Open(path)
@@ -69,22 +71,45 @@ def read_buildings(path: str,
     dst_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
     transform = osr.CoordinateTransformation(src_srs, dst_srs)
 
-    buildings = []
-    for feature in layer:
-        geom = feature.GetGeometryRef()
-        if geom is None:
-            continue
-        geom = geom.Clone()
-        geom.Transform(transform)
+    def _stream():
+        # Bind datasource into this generator's scope so GDAL keeps it alive for the
+        # generator's lifetime; if it were freed, `layer` would become invalid.
+        ds = datasource  # noqa: F841
+        for feature in layer:
+            geom = feature.GetGeometryRef()
+            if geom is None:
+                continue
+            geom = geom.Clone()
+            geom.Transform(transform)
 
-        building_id = str(feature.GetField(id_field)) if id_field \
-            else str(feature.GetFID())
-        height = feature.GetField(height_field) if height_field else None
+            building_id = str(feature.GetField(id_field)) if id_field \
+                else str(feature.GetFID())
+            height = feature.GetField(height_field) if height_field else None
 
-        buildings.append(BuildingInput(
-            building_id=building_id, geom_27700=geom.ExportToWkt(), height=height))
+            geom = _to_single_polygon(geom, building_id)
 
-    return buildings
+            yield BuildingInput(
+                building_id=building_id, geom_27700=geom.ExportToWkt(), height=height)
+
+    return _stream()
+
+
+def _to_single_polygon(geom, building_id: str):
+    """
+    Coerce a footprint to a single Polygon, which is what the model works in (and
+    what the buildings table's geometry(polygon, 27700) column accepts). Sources
+    like OSM wrap each footprint in a single-part MultiPolygon; unwrap those.
+    Genuinely multi-part footprints are outside the model's contract, so reject
+    them rather than silently dropping parts.
+    """
+    if ogr.GT_Flatten(geom.GetGeometryType()) != ogr.wkbMultiPolygon:
+        return geom
+    if geom.GetGeometryCount() == 1:
+        # Clone: GetGeometryRef borrows from the parent, which is about to go away.
+        return geom.GetGeometryRef(0).Clone()
+    raise ValueError(
+        f"Building {building_id} is a multi-part MultiPolygon "
+        f"({geom.GetGeometryCount()} parts); the model handles single polygons only")
 
 
 def discover_lidar(paths: List[str]) -> List[LidarTile]:
@@ -188,7 +213,7 @@ def _parse_args(argv: List[str]):
     return args
 
 
-def _run(pg_uri: str, args, buildings: List[BuildingInput],
+def _run(pg_uri: str, args, buildings: Iterable[BuildingInput],
          lidar_tiles: List[LidarTile]) -> None:
     check_proj_datumgrid(pg_uri)
 
@@ -197,8 +222,10 @@ def _run(pg_uri: str, args, buildings: List[BuildingInput],
 
     model_solar_pv(
         pg_uri=pg_uri,
-        root_solar_dir=args.work_dir,
-        lidar_dir=args.work_dir,
+        # distinct subdirs: the model copies its generated rasters from root_solar_dir
+        # into lidar_dir before loading them, which is a no-op copy if they coincide.
+        root_solar_dir=os.path.join(args.work_dir, "solar"),
+        lidar_dir=os.path.join(args.work_dir, "lidar"),
         job_id=args.job_id,
         buildings=buildings,
         lidar_tiles=lidar_tiles,
@@ -215,7 +242,7 @@ def main(argv: List[str] = None) -> None:
         level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 
     buildings = read_buildings(args.buildings, args.id_field, args.height_field)
-    logging.info(f"Read {len(buildings)} buildings from {args.buildings}")
+    logging.info(f"Reading buildings from {args.buildings}")
     lidar_tiles = discover_lidar(args.lidar)
     logging.info(f"Found {len(lidar_tiles)} LiDAR tiles")
 
