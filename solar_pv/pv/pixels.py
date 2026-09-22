@@ -7,8 +7,8 @@ The PV outputs (kwh_year, month_NN_wh, horizon_NN) are meaningful only at the bu
 pixels, a small fraction of a job grid. `PixelFields` stores them as flat length-N arrays at the
 valid pixels rather than as full 2D grids (which, at 1 m resolution over a 5 km job, would be tens of GB).
 
-`pixels_for_geoms` returns the {toid: [pixel dict]} shape the roof-plane aggregation consumes:
-each pixel dict has x, y, pixel_id, toid and one entry per field. A pixel belongs to a building
+`pixels_for_geoms` returns the {building_id: [pixel dict]} shape the roof-plane aggregation consumes:
+each pixel dict has x, y, pixel_id, building_id and one entry per field. A pixel belongs to a building
 when its centre falls inside the building geometry (matching the centre-based raster clipping
 this replaces); the aggregation then does the precise per-roof-plane intersection weighting.
 """
@@ -73,19 +73,19 @@ class PixelFields:
 
 
 def pixels_for_geoms(pixel_fields: PixelFields,
-                     geoms_by_toid: Dict[str, object]) -> Dict[str, List[dict]]:
+                     geoms_by_building_id: Dict[str, object]) -> Dict[str, List[dict]]:
     """
     :param pixel_fields: the sparse PV fields on a north-up grid.
-    :param geoms_by_toid: {toid: shapely (EPSG:27700) building geometry}.
-    :return: {toid: [pixel dict]}, each dict with x, y, pixel_id, toid + one key per field.
+    :param geoms_by_building_id: {building_id: shapely (EPSG:27700) building geometry}.
+    :return: {building_id: [pixel dict]}, each dict with x, y, pixel_id, building_id + one key per field.
     """
     pf = pixel_fields
     ox, ew, _, oy, _, ns = pf.geotransform  # ns is negative (north-up)
     rows, cols = pf.shape
     fields = list(pf.values)
 
-    by_toid: Dict[str, List[dict]] = defaultdict(list)
-    for toid, geom in geoms_by_toid.items():
+    by_building_id: Dict[str, List[dict]] = defaultdict(list)
+    for building_id, geom in geoms_by_building_id.items():
         minx, miny, maxx, maxy = geom.bounds
         # pixel-column/row window covering the geom bbox (centres are at +0.5):
         c0 = max(0, int(np.floor((minx - ox) / ew)))
@@ -109,10 +109,10 @@ def pixels_for_geoms(pixel_fields: PixelFields,
         pos = pf.positions(rr, cc)
         present = pos >= 0
         for r, c, x, y, p in zip(rr[present], cc[present], xs[present], ys[present], pos[present]):
-            pixel = {"toid": toid, "x": float(x), "y": float(y),
-                     "pixel_id": f"{toid}:{x}:{y}"}
+            pixel = {"building_id": building_id, "x": float(x), "y": float(y),
+                     "pixel_id": f"{building_id}:{x}:{y}"}
             for f in fields:
                 pixel[f] = float(pf.values[f][p])
-            by_toid[toid].append(pixel)
+            by_building_id[building_id].append(pixel)
 
-    return dict(by_toid)
+    return dict(by_building_id)

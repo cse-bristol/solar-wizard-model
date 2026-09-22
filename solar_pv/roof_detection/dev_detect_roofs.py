@@ -19,38 +19,38 @@ from solar_pv.lidar.lidar import LIDAR_NODATA
 from solar_pv.roof_detection.detect_roofs import _detect_building_roof_planes, _load
 
 
-def detect_toid_roofs(pg_uri: str, job_id: int, toids: Optional[List[str]], resolution_metres: float, out_dir: str, write_test_data: bool = True):
+def detect_building_id_roofs(pg_uri: str, job_id: int, building_ids: Optional[List[str]], resolution_metres: float, out_dir: str, write_test_data: bool = True):
     logging.basicConfig(level=logging.INFO,
                         format='[%(asctime)s] %(levelname)s: %(message)s')
     os.makedirs(out_dir, exist_ok=True)
 
-    by_toid = _load(pg_uri, job_id, page=0, page_size=1000, toids=toids, force_load=True)
+    by_building_id = _load(pg_uri, job_id, page=0, page_size=1000, building_ids=building_ids, force_load=True)
     all_planes = []
-    for toid, building in by_toid.items():
-        print(f"\nTOID: {toid}\n")
-        planes = _detect_building_roof_planes(building, toid, resolution_metres, debug=True)
+    for building_id, building in by_building_id.items():
+        print(f"\nbuilding_id: {building_id}\n")
+        planes = _detect_building_roof_planes(building, building_id, resolution_metres, debug=True)
         all_planes.extend(planes)
 
         if len(planes) > 0:
             print("\nROOFDET: all planes:")
             for plane in planes:
-                print(f'type {plane["plane_type"]} toid {plane["toid"]} slope {plane["slope"]} aspect {plane["aspect"]} sd {plane["sd"]} inliers {len(plane["inliers_xy"])}')
+                print(f'type {plane["plane_type"]} building_id {plane["building_id"]} slope {plane["slope"]} aspect {plane["aspect"]} sd {plane["sd"]} inliers {len(plane["inliers_xy"])}')
         else:
             print("No planes to write, not creating geoJSON")
         if write_test_data:
-            _write_test_data(toid, building)
+            _write_test_data(building_id, building)
 
     if len(all_planes) > 0:
-        _write_planes(toids, job_id, resolution_metres, out_dir, all_planes)
+        _write_planes(building_ids, job_id, resolution_metres, out_dir, all_planes)
 
 
-def _write_planes(toids: Optional[List[str]], job_id: int, resolution_metres: float, out_dir: str, planes):
-    if toids is None:
+def _write_planes(building_ids: Optional[List[str]], job_id: int, resolution_metres: float, out_dir: str, planes):
+    if building_ids is None:
         filename = f"job_{job_id}"
-    elif len(toids) == 1:
-        filename = f"job_{job_id}_{toids[0]}"
+    elif len(building_ids) == 1:
+        filename = f"job_{job_id}_{building_ids[0]}"
     else:
-        filename = f"job_{job_id}_toids"
+        filename = f"job_{job_id}_building_ids"
     t = int(time.time())
     geojson_out = join(out_dir, f"{filename}-{t}.geojson")
 
@@ -84,9 +84,9 @@ def _write_planes(toids: Optional[List[str]], job_id: int, resolution_metres: fl
     print(f"Wrote debug data to file {geojson_out}")
 
 
-def _write_test_data(toid, building):
+def _write_test_data(building_id, building):
     test_data_dir = join(paths.TEST_DATA, "roof_detection")
-    testfile = join(test_data_dir, f"{toid}.json")
+    testfile = join(test_data_dir, f"{building_id}.json")
     with open(testfile, 'w') as f:
         json.dump(building, f, default=str)
     print(f"Wrote test data to {testfile}")
@@ -131,7 +131,7 @@ if __name__ == "__main__":
     import os
     # thinness_ratio_experiments()
 
-    # detect_toid_roofs(
+    # detect_building_id_roofs(
     #     os.getenv("PGW_URI"),
     #     1659,
     #     [
@@ -204,7 +204,7 @@ if __name__ == "__main__":
     #     f"{os.getenv('DEV_DATA_DIR')}/ransac",
     #     write_test_data=False)
 
-    # detect_toid_roofs(
+    # detect_building_id_roofs(
     #     os.getenv("PGW_URI"),
     #     1649,
     #     ["osgb1000014994631"],
@@ -213,7 +213,7 @@ if __name__ == "__main__":
     #     f"{os.getenv('DEV_DATA_DIR')}/ransac",
     #     write_test_data=False)
 
-    # detect_toid_roofs(
+    # detect_building_id_roofs(
     #     os.getenv("PGW_URI"),
     #     1661,
     #     [
@@ -230,7 +230,7 @@ if __name__ == "__main__":
     #     f"{os.getenv('DEV_DATA_DIR')}/ransac",
     #     write_test_data=False)
 
-    # detect_toid_roofs(
+    # detect_building_id_roofs(
     #     os.getenv("PGW_URI"),
     #     1660,
     #     [
@@ -247,7 +247,7 @@ if __name__ == "__main__":
     #     f"{os.getenv('DEV_DATA_DIR')}/ransac",
     #     write_test_data=False)
 
-    detect_toid_roofs(
+    detect_building_id_roofs(
         os.getenv("PGW_URI"),
         1663,
         [

@@ -68,7 +68,7 @@ def _check_lidar_page(pg_uri: str, job_id: int, resolution_metres: float, min_in
             try:
                 reason, min_gh, max_gh = _check_building(building, resolution_metres, min_internal_pixels)
                 height = HeightAggregator(building['pixels']).height() if reason is None else None
-                to_write.append((building['toid'], reason, height, min_gh, max_gh))
+                to_write.append((building['building_id'], reason, height, min_gh, max_gh))
             except Exception as e:
                 print("outdated LiDAR check failed on building:")
                 _write_test_data(job_id, building)
@@ -108,16 +108,16 @@ def _write_exclusions(pg_conn, job_id: int, to_exclude: List[Tuple[str, str, flo
                     height = data.height::real,
                     min_ground_height = min_gh::real,
                     max_ground_height = max_gh::real
-                FROM (VALUES %s) AS data (toid, exclusion_reason, height, min_gh, max_gh)
-                WHERE {buildings}.toid = data.toid;
+                FROM (VALUES %s) AS data (building_id, exclusion_reason, height, min_gh, max_gh)
+                WHERE {buildings}.building_id = data.building_id;
             """).format(
                 buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
             ), argslist=to_exclude)
         pg_conn.commit()
 
             
-def _load_pixels(pg_conn, job_id: int, interior: bool, toids: List[str]):
-    if not toids:
+def _load_pixels(pg_conn, job_id: int, interior: bool, building_ids: List[str]):
+    if not building_ids:
         return []
 
     if interior:
@@ -129,14 +129,14 @@ def _load_pixels(pg_conn, job_id: int, interior: bool, toids: List[str]):
         pg_conn,
         """        
         WITH building_page AS (
-            SELECT b.toid, b.geom_27700, b.geom_27700_buffered_5
+            SELECT b.building_id, b.geom_27700, b.geom_27700_buffered_5
             FROM {buildings} b
-            WHERE b.toid = ANY( {toids} )
-            ORDER BY b.toid
+            WHERE b.building_id = ANY( {building_ids} )
+            ORDER BY b.building_id
         ),
         raster_pixels AS (
             SELECT
-                b.toid,
+                b.building_id,
                 (ST_PixelAsCentroids(ST_Clip(rast, b.geom_27700_buffered_5))).*
             FROM building_page b
             LEFT JOIN {raster_table} r ON ST_Intersects(b.geom_27700_buffered_5, r.rast)
@@ -144,38 +144,38 @@ def _load_pixels(pg_conn, job_id: int, interior: bool, toids: List[str]):
         SELECT
             ST_X(geom)::text || ':' || ST_Y(geom)::text AS pixel_id,
             val AS elevation,
-            toid,
+            building_id,
             %(interior)s AS within_building,
             %(exterior)s AS without_building,
             ST_X(geom) x,
             ST_Y(geom) y
         FROM raster_pixels
-        ORDER BY toid;
+        ORDER BY building_id;
         """,
         {
             "interior": interior,
             "exterior": not interior,
         },
-        toids=Literal(toids),
+        building_ids=Literal(building_ids),
         raster_table=raster_table,
         buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
         result_extractor=lambda rows: [dict(row) for row in rows])
 
 
-def _load_buildings(pg_conn, job_id: int, page: int, page_size: int, toids: List[str] = None) -> List[dict]:
-    if toids:
-        toid_filter = SQL("AND b.toid = ANY({toids})").format(toids=Literal(toids))
+def _load_buildings(pg_conn, job_id: int, page: int, page_size: int, building_ids: List[str] = None) -> List[dict]:
+    if building_ids:
+        building_id_filter = SQL("AND b.building_id = ANY({building_ids})").format(building_ids=Literal(building_ids))
     else:
-        toid_filter = SQL("")
+        building_id_filter = SQL("")
 
     buildings = sql_command(
         pg_conn,
         """
-        SELECT b.toid, ST_AsText(b.geom_27700) AS geom
+        SELECT b.building_id, ST_AsText(b.geom_27700) AS geom
         FROM {buildings} b
         WHERE exclusion_reason IS NULL
-        {toid_filter}
-        ORDER BY b.toid
+        {building_id_filter}
+        ORDER BY b.building_id
         OFFSET %(offset)s LIMIT %(limit)s
         """,
         {
@@ -183,24 +183,24 @@ def _load_buildings(pg_conn, job_id: int, page: int, page_size: int, toids: List
             "limit": page_size,
         },
         buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
-        toid_filter=toid_filter,
+        building_id_filter=building_id_filter,
         result_extractor=lambda rows: [dict(row) for row in rows]
     )
 
-    found_toids = [building['toid'] for building in buildings]
+    found_building_ids = [building['building_id'] for building in buildings]
 
-    interior_pixels = _load_pixels(pg_conn, job_id, True, found_toids)
-    exterior_pixels = _load_pixels(pg_conn, job_id, False, found_toids)
+    interior_pixels = _load_pixels(pg_conn, job_id, True, found_building_ids)
+    exterior_pixels = _load_pixels(pg_conn, job_id, False, found_building_ids)
 
-    buildings_by_toid = {}
+    buildings_by_building_id = {}
     for building in buildings:
         building['pixels'] = []
-        buildings_by_toid[building['toid']] = building
+        buildings_by_building_id[building['building_id']] = building
     for pixel in interior_pixels:
-        building = buildings_by_toid[pixel['toid']]
+        building = buildings_by_building_id[pixel['building_id']]
         building['pixels'].append(pixel)
     for pixel in exterior_pixels:
-        building = buildings_by_toid[pixel['toid']]
+        building = buildings_by_building_id[pixel['building_id']]
         building['pixels'].append(pixel)
     return buildings
 
@@ -208,9 +208,9 @@ def _load_buildings(pg_conn, job_id: int, page: int, page_size: int, toids: List
 def _write_test_data(job_id: int, building):
     """Write test data for building in the format that the outdated LiDAR tests expect"""
     debug_data_dir = os.environ.get("DEBUG_DATA_DIR")
-    os.makedirs(debug_data_dir, exist_ok=True)
     if debug_data_dir:
-        fname = join(debug_data_dir, f"{job_id}_{building['toid']}.json")
+        os.makedirs(debug_data_dir, exist_ok=True)
+        fname = join(debug_data_dir, f"{job_id}_{building['building_id']}.json")
         with open(fname, 'w') as f:
             json.dump(building, f, sort_keys=True, default=str)
         print(f"Wrote debug data to {fname}")

@@ -21,4 +21,15 @@ setuptools.setup(
     ],
     python_requires='>=3.7',
     install_requires=requirements,
+    # The standalone CLI can start a throwaway PostGIS cluster when no --pg-uri is
+    # given (solar_pv.ephemeral_postgres); testing.postgresql is only needed for
+    # that, so it is an opt-in extra rather than a core runtime dep. Install with
+    # `pip install solar_model[cli]`.
+    extras_require={
+        "cli": [
+            "testing.postgresql==1.3.0",
+            "testing.common.database==2.0.3",
+            "pg8000==1.31.5",
+        ],
+    },
 )

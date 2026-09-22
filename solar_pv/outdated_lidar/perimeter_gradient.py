@@ -112,7 +112,7 @@ def check_perimeter_gradient(building,
 
     if debug:
         print(f"Perimeter gradient results: total: {total}, bad: {bad}, ratio: {bad / total if bad > 0 else 'NA'}")
-        print(f"{building['toid']} min_gh: {min_ground_height} max_gh: {max_ground_height} min_bh: {min_building_height}")
+        print(f"{building['building_id']} min_gh: {min_ground_height} max_gh: {max_ground_height} min_bh: {min_building_height}")
     if total > 0 and bad / total > bad_bisector_ratio:
         return "OUTDATED_LIDAR_COVERAGE", None, None
     elif total > 0:

@@ -111,16 +111,21 @@ class RastersTests(unittest.TestCase):
             CREATE SCHEMA solar_pv_job_0;
             CREATE TABLE solar_pv_job_0.buildings
             (
-               toid text,
+               building_id text,
                geom_27700 geometry,
                exclusion_reason models.pv_exclusion_reason,
                height real
             );
             -- geom_27700 is populated from the (4326) mastermap geometry: this test
             -- works throughout in 4326, matching the 4326 elevation raster, so the
-            -- rasterize extent and the centroid lookups below line up.
-            INSERT INTO solar_pv_job_0.buildings (toid, geom_27700)
-            SELECT toid, geom_4326 FROM mastermap.building WHERE toid IN ('t0', 't1', 't2');
+            -- rasterize extent and the centroid lookups below line up. height is now
+            -- carried on the buildings table (the caller supplies it), not joined from
+            -- mastermap.height.
+            INSERT INTO solar_pv_job_0.buildings (building_id, geom_27700, height)
+            SELECT b.toid, b.geom_4326, (h.abs_h2 + h.abs_hmax) / 2
+            FROM mastermap.building b
+            JOIN mastermap.height h ON b.toid = h.toid
+            WHERE b.toid IN ('t0', 't1', 't2');
             """
 
         with psycopg2.connect(self.pg_uri, cursor_factory=psycopg2.extras.DictCursor) as conn:
@@ -142,21 +147,21 @@ class RastersTests(unittest.TestCase):
         with psycopg2.connect(self.pg_uri, cursor_factory=psycopg2.extras.DictCursor) as conn:
             with conn.cursor() as curs:
                 # Change a building to have outdated lidar
-                curs.execute("UPDATE solar_pv_job_0.buildings set exclusion_reason = 'OUTDATED_LIDAR_COVERAGE'::models.pv_exclusion_reason WHERE toid = 't0';"
-                             "UPDATE solar_pv_job_0.buildings set exclusion_reason = 'OUTDATED_LIDAR_COVERAGE'::models.pv_exclusion_reason WHERE toid = 't1';")
+                curs.execute("UPDATE solar_pv_job_0.buildings set exclusion_reason = 'OUTDATED_LIDAR_COVERAGE'::models.pv_exclusion_reason WHERE building_id = 't0';"
+                             "UPDATE solar_pv_job_0.buildings set exclusion_reason = 'OUTDATED_LIDAR_COVERAGE'::models.pv_exclusion_reason WHERE building_id = 't1';")
                 conn.commit()
                 e_o_r = create_elevation_override_raster(self.pg_uri, _TEST_JOB_ID, self.out_dir, _TEST_ELEVATION_RASTER)
                 self.assertIsNotNone(e_o_r)
 
                 # Get centres => test points
-                curs.execute("SELECT toid, ST_X(ST_Centroid(m.geom_4326)), ST_Y(ST_Centroid(m.geom_4326)), b.exclusion_reason = 'OUTDATED_LIDAR_COVERAGE'::models.pv_exclusion_reason "
+                curs.execute("SELECT m.toid, ST_X(ST_Centroid(m.geom_4326)), ST_Y(ST_Centroid(m.geom_4326)), b.exclusion_reason = 'OUTDATED_LIDAR_COVERAGE'::models.pv_exclusion_reason "
                              "FROM mastermap.building m "
-                             "JOIN solar_pv_job_0.buildings b USING (toid) ")
+                             "JOIN solar_pv_job_0.buildings b ON m.toid = b.building_id ")
                 test_points = curs.fetchall()
 
                 # Get values at test points
                 patch_raster_filename: str = join(self.out_dir, 'elevation_override.tif')
-                for (toid, test_point_x, test_point_y, exp_height) in test_points:
+                for (building_id, test_point_x, test_point_y, exp_height) in test_points:
                     res = subprocess.run(f"""
                         gdallocationinfo
                         -valonly
@@ -166,8 +171,8 @@ class RastersTests(unittest.TestCase):
                     self.assertIs(len(res.stderr), 0, f"Error running gdallocationinfo {res.stderr}")
                     if exp_height:
                         height = float(res.stdout)
-                        exp_height = mean(_HEIGHTS[toid])
-                        self.assertAlmostEqual(exp_height, height, 3, f"{toid}, exp {exp_height}, act {height}")
+                        exp_height = mean(_HEIGHTS[building_id])
+                        self.assertAlmostEqual(exp_height, height, 3, f"{building_id}, exp {exp_height}, act {height}")
                     else:
                         self.assertIs(len(res.stdout.strip()), 0)
 

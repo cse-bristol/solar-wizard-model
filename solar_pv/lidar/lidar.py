@@ -85,15 +85,20 @@ class ZippedTiles:
 class LidarTile:
     """
     Represents a LiDAR .tiff raster on disk.
+
+    Only `filename` is required. The file-based selector (`lidar_selector`) can
+    derive the resolution from the raster itself and treats a missing year as
+    "oldest"; `year`/`resolution`/`product` are populated when the caller knows
+    them.
     """
-    tile_id: str
-    year: int
-    resolution: Resolution
     filename: str
-    product: str
+    tile_id: Optional[str] = None
+    year: Optional[int] = None
+    resolution: Optional[Resolution] = None
+    product: Optional[str] = None
 
     @classmethod
-    def from_filename(cls, filename: str, year: int, product: str):
+    def from_filename(cls, filename: str, year: int = None, product: str = None):
         basename = os.path.basename(filename)
         tile_id = _tile_id(basename)
         resolution = _file_res(basename)

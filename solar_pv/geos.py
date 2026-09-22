@@ -14,10 +14,9 @@ from shapely.prepared import prep
 from shapely.strtree import STRtree
 from shapely.geometry import Polygon, shape, MultiPolygon, mapping, LineString, \
     MultiPoint, MultiLineString
-from shapely import wkt, ops, make_valid
+from shapely import ops, make_valid
 from shapely.errors import GEOSException
 
-from solar_pv.db_funcs import sql_command
 from solar_pv.lidar.en_to_grid_ref import en_to_grid_ref, is_in_range
 from solar_pv.util import round_down_to, round_up_to, frange
 
@@ -58,26 +57,6 @@ def to_geojson_dict(geom):
 def from_geojson_file(geojson_file: str):
     with open(geojson_file) as f:
         return from_geojson(f.read())
-
-
-# TODO replace with some shapely code, remove dependency on models.job_queue
-def bounds_polygon(pg_conn, job_id: int) -> Polygon:
-    """
-    Returns a shapely polygon of the job bounds, which will be buffered
-    by the horizon_search_distance if it's a PV job.
-    """
-    text = sql_command(
-        pg_conn,
-        """
-        SELECT 
-           ST_AsText(ST_Buffer(bounds, coalesce((params->>'horizon_search_radius')::int, 0))) AS bounds
-        FROM models.job_queue
-        WHERE job_id = %(job_id)s 
-        """,
-        bindings={"job_id": job_id},
-        result_extractor=lambda res: res[0][0]
-    )
-    return wkt.loads(text)
 
 
 def get_grid_cells(poly, cell_w, cell_h, spacing_w=0, spacing_h=0, grid_start: str = 'origin') -> List[Polygon]:

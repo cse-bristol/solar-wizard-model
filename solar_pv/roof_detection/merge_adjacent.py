@@ -130,7 +130,7 @@ def _update_node_data(graph, src: int, dst: int):
     # merged_score = lr.score(xy_subset, z_subset)
     merged_score = metrics.mean_absolute_error(z_subset, z_pred)
 
-    dst_node['toid'] = dst_node.get('toid', src_node.get('toid'))
+    dst_node['building_id'] = dst_node.get('building_id', src_node.get('building_id'))
     dst_node['xy_subset'] = xy_subset
     dst_node['z_subset'] = z_subset
     dst_node['score'] = merged_score

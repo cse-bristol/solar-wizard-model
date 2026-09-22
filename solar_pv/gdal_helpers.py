@@ -1,55 +1,39 @@
 # This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
-import json
 import logging
 import os
-import shlex
 import shutil
 import subprocess
-import tempfile
-import textwrap
-from typing import List, Optional, Tuple, Union, Callable
+from typing import List, Optional, Tuple, Union
 
 import math
-import numpy as np
 from osgeo import gdal
-
-from solar_pv.util import esc_double_quotes
 
 
 class RasterizeError(ValueError):
     pass
 
 
-def create_vrt(tiles: List[str], vrt_file: str):
-    logging.info("Creating vrt...")
-    if tiles and len(tiles) > 0:
-        command = f"gdalbuildvrt -resolution highest {vrt_file} {' '.join(tiles)}"
-
-        logging.info("Creating .vrt")
-
-        res = subprocess.run(shlex.split(command), capture_output=True, text=True)
+def _run(cmd: List[str], error_cls: type = ValueError) -> None:
+    """
+    Run `cmd` as an argv list, echo its output, and raise `error_cls` with  
+    stderr on a non-zero exit.
+    """
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    if res.stdout.strip():
         print(res.stdout.strip())
-        if res.returncode != 0:
-            print(res.stderr.strip())
-            raise ValueError(res.stderr)
-    else:
-        logging.warning("No tiles passed, not creating vrt")
-
-
-def files_in_vrt(vrt_file: str) -> List[str]:
-    """Given a .vrt file, return a list of the files it references."""
-    if not os.path.exists(vrt_file):
-        logging.warning(f"Vrt {vrt_file} does not exist, not extracting file list")
-        return []
-
-    res = subprocess.run(f"gdalinfo -json {vrt_file}",
-                         capture_output=True, text=True, shell=True)
     if res.returncode != 0:
-        print(res.stderr)
-        raise ValueError(res.stderr)
-    json_out = json.loads(res.stdout)
-    return [f for f in json_out['files'] if f != os.path.basename(f)]
+        if res.stderr.strip():
+            print(res.stderr.strip())
+        raise error_cls(res.stderr)
+
+
+def create_vrt(tiles: List[str], vrt_file: str):
+    if not tiles:
+        logging.warning("No tiles passed, not creating vrt")
+        return
+    logging.info("Creating vrt...")
+    _run(["gdalbuildvrt", "-resolution", "highest", vrt_file, *tiles])
 
 
 def get_res(filename: str) -> float:
@@ -74,18 +58,6 @@ def get_xres_yres(filename: str) -> (float, float):
     xres = round(xres, 10)
     yres = round(yres, 10)
     return xres, yres
-
-
-def get_res_unchecked(filename: str) -> float:
-    """
-    Get the resolution of the raster, and do not raise an error
-    if the x and y resolutions differ - return the x res.
-    """
-    gdal.UseExceptions()
-
-    f = gdal.Open(filename)
-    _, xres, _, _, _, yres = f.GetGeoTransform()
-    return abs(xres)
 
 
 def get_srs_units(filename: str) -> Tuple[float, str]:
@@ -117,23 +89,16 @@ def get_srid(filename: str, fallback: int = None) -> int:
 
 def rasterize(pg_uri: str, mask_sql: str, mask_file: str, res: float, srid: int):
     res = abs(res)
-    
-    cmd = shlex.split(f"""
-        gdal_rasterize
-        -sql "{mask_sql}"
-        -burn 1 -tr {res} {res}
-        -init 0 -ot Int16
-        -of GTiff -a_srs EPSG:{srid}
-        -tap
-        "PG:{pg_uri}"
-        {mask_file}
-        """)
-    res = subprocess.run(cmd, capture_output=True, text=True)
-
-    print(res.stdout)
-    print(res.stderr)
-    if res.returncode != 0:
-        raise RasterizeError(res.stderr)
+    _run([
+        "gdal_rasterize",
+        "-sql", mask_sql,
+        "-burn", "1", "-tr", str(res), str(res),
+        "-init", "0", "-ot", "Int16",
+        "-of", "GTiff", "-a_srs", f"EPSG:{srid}",
+        "-tap",
+        f"PG:{pg_uri}",
+        mask_file,
+    ], error_cls=RasterizeError)
 
 
 def rasterize_3d(pg_uri: str,
@@ -149,68 +114,20 @@ def rasterize_3d(pg_uri: str,
     :param bounds: optional (xmin, ymin, xmax, ymax) target extent. When given (with res), the
         output lands on exactly that grid, so it can be read without a further warp.
     """
-    if isinstance(res, float):
-        xres = res
-        yres = res
+    if isinstance(res, (tuple, list)):
+        xres, yres = res
     else:
-        xres = res[0]
-        yres = res[1]
-
+        xres = yres = res
     xres = abs(xres)
     yres = abs(yres)
 
-    te = f"-te {bounds[0]} {bounds[1]} {bounds[2]} {bounds[3]}" if bounds is not None else ""
-
-    res = subprocess.run(f"""
-        gdal_rasterize
-        -sql "{esc_double_quotes(mask_sql)}"
-        -3d -tr {xres} {yres} {te}
-        -init {math.nan} -ot {output_type}
-        -of GTiff -a_srs EPSG:{srid}
-        "PG:{pg_uri}"
-        {mask_file}
-        """.replace("\n", " "), capture_output=True, text=True, shell=True)
-    print(res.stdout)
-    print(res.stderr)
-    if res.returncode != 0:
-        raise RasterizeError(res.stderr)
-
-
-def rasterize_3d_update(pg_uri: str, mask_sql: str, raster_to_update_filename: str):
-    """
-    Updates a raster. Uses the Z value for the burn value for each polygon inplace into raster_to_update_filename
-    """
-    res = subprocess.run(f"""
-        gdal_rasterize
-        -sql "{esc_double_quotes(mask_sql)}"
-        -3d 
-        "PG:{pg_uri}"
-        {raster_to_update_filename}
-        """.replace("\n", " "), capture_output=True, text=True, shell=True)
-    print(res.stdout)
-    print(res.stderr)
-    if res.returncode != 0:
-        raise ValueError(res.stderr)
-
-
-def calc(raster_a: str, raster_b: str, expression: str, raster_out: str):
-    """Create a new raster from 2 others merged using an expression
-    """
-    res = subprocess.run(f"""
-        gdal_calc.py
-        --calc="{expression}"
-        -A "{raster_a}"
-        -B "{raster_b}"
-        --outfile="{raster_out}"
-        --type=Float32
-        --format=GTiff
-        --extent=union
-        --projectionCheck
-        """.replace("\n", " "), capture_output=True, text=True, shell=True)
-    print(res.stdout)
-    print(res.stderr)
-    if res.returncode != 0:
-        raise ValueError(res.stderr)
+    cmd = ["gdal_rasterize", "-sql", mask_sql, "-3d", "-tr", str(xres), str(yres)]
+    if bounds is not None:
+        cmd += ["-te", str(bounds[0]), str(bounds[1]), str(bounds[2]), str(bounds[3])]
+    cmd += ["-init", str(math.nan), "-ot", output_type,
+            "-of", "GTiff", "-a_srs", f"EPSG:{srid}",
+            f"PG:{pg_uri}", mask_file]
+    _run(cmd, error_cls=RasterizeError)
 
 
 def crop_or_expand(file_to_crop: str,
@@ -273,50 +190,16 @@ def reproject(raster_in: str, raster_out: str, src_srs: str, dst_srs: str):
               creationOptions=['TILED=YES', 'COMPRESS=PACKBITS', 'BIGTIFF=YES'])
 
 
-def reproject_within_bounds(raster_in: str, raster_out: str, src_srs: str, dst_srs: str,
-                            bounds: Tuple[float, float, float, float],
-                            width: int, height: int):
-    """
-    Reproject a raster. By default, will keep the same number of pixels as before.
-    :param bounds: Tuple, (ulx, lry, lrx, uly) in destination CRS units
-    """
-    gdal.Warp(raster_out, raster_in, dstSRS=dst_srs, srcSRS=src_srs,
-              width=width, height=height,
-              outputBounds=bounds,
-              creationOptions=['TILED=YES', 'COMPRESS=PACKBITS'])
-
-
-def set_resolution(in_tiff: str,
-                   out_tiff: str,
-                   res: float):
-    """
-    Output a new version of a raster with the specified resolution
-    """
-    gdal.UseExceptions()
-    in_f = gdal.Open(in_tiff)
-    _, xres, _, _, _, yres = in_f.GetGeoTransform()
-    gdal.Warp(out_tiff, in_f, xRes=res, yRes=res,
-              creationOptions=['TILED=YES', 'COMPRESS=PACKBITS', 'BIGTIFF=YES'])
-    return out_tiff
-
-
 def aspect(cropped_lidar: str, aspect_file: str):
-    run(f"gdaldem aspect {cropped_lidar} {aspect_file} -of GTiff -b 1 -zero_for_flat -co \"COMPRESS=PACKBITS\" -co \"TILED=YES\" -co \"BIGTIFF=YES\"")
+    _run(["gdaldem", "aspect", cropped_lidar, aspect_file,
+                  "-of", "GTiff", "-b", "1", "-zero_for_flat",
+                  "-co", "COMPRESS=PACKBITS", "-co", "TILED=YES", "-co", "BIGTIFF=YES"])
 
 
 def slope(cropped_lidar: str, slope_file: str):
-    run(f"gdaldem slope {cropped_lidar} {slope_file} -of GTiff -b 1  -co \"COMPRESS=PACKBITS\" -co \"TILED=YES\" -co \"BIGTIFF=YES\"")
-
-
-def merge(files: List[str], output_file: str, res: float, nodata: int):
-    """
-    Merge raster tiles. They do not need to have the same resolution.
-    Tiles later in the list will overwrite tiles earlier in the list
-    (except where the earlier tile pixel is NODATA)
-    """
-    logging.info(f"Merging tiles {files} into {output_file}...")
-    run(f"gdal_merge.py -ps {res} {res} -n {nodata} -a_nodata {nodata} -o {output_file} {' '.join(files)}")
-    return output_file
+    _run(["gdaldem", "slope", cropped_lidar, slope_file,
+                  "-of", "GTiff", "-b", "1",
+                  "-co", "COMPRESS=PACKBITS", "-co", "TILED=YES", "-co", "BIGTIFF=YES"])
 
 
 def set_nodata_value(input_tiff: str, nodata: int = -9999, band: int = 1):
@@ -354,54 +237,3 @@ def set_nodata_value(input_tiff: str, nodata: int = -9999, band: int = 1):
 
         if os.path.exists(old_tiff):
             os.remove(old_tiff)
-
-
-def count_raster_pixels(tiff: str, value, band: int = 1) -> int:
-    """
-    Count the pixels in a raster that have value `value`
-    """
-    file = gdal.Open(tiff)
-    band = file.GetRasterBand(band)
-    a = band.ReadAsArray()
-    return (a == value).sum()
-
-
-def count_raster_pixels_pct(tiff: str, value, band: int = 1) -> float:
-    """
-    Count the percentage of pixels in a raster that have value `value`
-    """
-    file = gdal.Open(tiff)
-    band = file.GetRasterBand(band)
-    a = band.ReadAsArray()
-    return (a == value).sum() / a.size
-
-
-def run(command: str):
-    command = textwrap.dedent(command).replace("\n", " ").strip()
-    res = subprocess.run(command, capture_output=True, text=True, shell=True)
-    stdout = res.stdout.strip()
-    if stdout:
-        print(stdout)
-    if res.returncode != 0:
-        stderr = res.stderr.strip()
-        if stderr:
-            print(stderr)
-        raise ValueError(res.stderr)
-
-
-def check_raster_alignment(ds1, ds2) -> None:
-    ulx, xres, xskew, uly, yskew, yres = ds1.GetGeoTransform()
-    _ulx, _xres, _xskew, _uly, _yskew, _yres = ds2.GetGeoTransform()
-    x_size = ds1.RasterXSize
-    y_size = ds1.RasterYSize
-    _x_size = ds2.RasterXSize
-    _y_size = ds2.RasterYSize
-    if x_size != _x_size or y_size != _y_size:
-        raise ValueError(f"rasters must have same size, were "
-                         f"{(x_size, y_size)} and "
-                         f"{(_x_size, _y_size)}")
-    if ulx != _ulx or xres != _xres or xskew != _xskew or \
-            uly != _uly or yskew != _yskew or yres != _yres:
-        raise ValueError(f"rasters must be same alignment, were "
-                         f"{(ulx, xres, xskew, uly, yskew, yres)} and "
-                         f"{(_ulx, _xres, _xskew, _uly, _yskew, _yres)}")

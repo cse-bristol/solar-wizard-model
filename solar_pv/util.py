@@ -33,10 +33,6 @@ def get_cpu_count():
     return len(os.sched_getaffinity(0))
 
 
-def esc_double_quotes(s: str) -> str:
-    return s.replace('"', '\\"')
-
-
 def is_newer(f1: str, f2: str) -> bool:
     """
     :return: True if f1 is newer than f2; False if f1 is not newer than f2 or f1 or f2 don't exist or are not files.

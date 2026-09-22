@@ -109,11 +109,11 @@ def _aggregate_page(job) -> List[dict]:
     the DB nor the in-memory fields."""
     job_id, field_names, resolution, peak_power_per_m2, system_loss, roof_planes, pixels = job
     roofs_to_write = []
-    for toid, toid_roof_planes in roof_planes.items():
+    for building_id, building_id_roof_planes in roof_planes.items():
         try:
             roofs = _aggregate_pixel_data(
-                roof_planes=toid_roof_planes,
-                pixels=pixels.get(toid, []),
+                roof_planes=building_id_roof_planes,
+                pixels=pixels.get(building_id, []),
                 job_id=job_id,
                 pixel_fields=field_names,
                 resolution=resolution,
@@ -121,9 +121,9 @@ def _aggregate_page(job) -> List[dict]:
                 system_loss=system_loss)
             roofs_to_write.extend(roofs)
         except Exception as e:
-            print(f"PV pixel data aggregation failed on building {toid}:")
+            print(f"PV pixel data aggregation failed on building {building_id}:")
             traceback.print_exc()
-            _write_test_data(toid, {'pixels': pixels.get(toid, []), 'roofs': toid_roof_planes})
+            _write_test_data(building_id, {'pixels': pixels.get(building_id, []), 'roofs': building_id_roof_planes})
             raise e
     return roofs_to_write
 
@@ -143,7 +143,7 @@ def _insert_pv_buildings(pg_conn, job_id: int) -> None:
         pg_conn,
         """
         INSERT INTO models.pv_building
-        SELECT %(job_id)s, toid, exclusion_reason, height
+        SELECT %(job_id)s, building_id, exclusion_reason, height
         FROM {buildings};
         """,
         {"job_id": job_id},
@@ -270,7 +270,7 @@ def _aggregate_pixel_data(roof_planes,
                 print(f"roof plane {roof_plane['roof_plane_id']} "
                       f"kWh min/avg/max: {roof_plane['kwh_year_min']} {roof_plane['kwh_year_avg']} {roof_plane['kwh_year_max']}")
         else:
-            print(f"Roof intersected no pixels: roof_plane_id {roof_plane['roof_plane_id']}, toid {roof_plane['toid']}")
+            print(f"Roof intersected no pixels: roof_plane_id {roof_plane['roof_plane_id']}, building_id {roof_plane['building_id']}")
 
     return roofs_to_write
 
@@ -285,7 +285,7 @@ def _write_results(pg_conn, job_id: int, roofs: List[dict]):
             cursor,
             SQL("""
                 INSERT INTO models.pv_roof_plane (
-                    toid, 
+                    building_id, 
                     roof_plane_id,
                     job_id, 
                     roof_geom_4326,
@@ -319,7 +319,7 @@ def _write_results(pg_conn, job_id: int, roofs: List[dict]):
             ),
             argslist=roofs,
             template="""(
-                %(toid)s, 
+                %(building_id)s, 
                 %(roof_plane_id)s, 
                 %(job_id)s, 
                 ST_SetSrid(
@@ -350,25 +350,25 @@ def _write_results(pg_conn, job_id: int, roofs: List[dict]):
         pg_conn.commit()
 
 
-def _load_roof_planes(pg_conn, job_id: int, page: int, page_size: int, toids: List[str] = None) -> Dict[str, List[dict]]:
-    if toids:
-        toid_filter = SQL("AND b.toid = ANY({toids})").format(toids=Literal(toids))
+def _load_roof_planes(pg_conn, job_id: int, page: int, page_size: int, building_ids: List[str] = None) -> Dict[str, List[dict]]:
+    if building_ids:
+        building_id_filter = SQL("AND b.building_id = ANY({building_ids})").format(building_ids=Literal(building_ids))
     else:
-        toid_filter = SQL("")
+        building_id_filter = SQL("")
 
     roofs = sql_command(
         pg_conn,
         """        
         WITH building_page AS (
-            SELECT b.toid
+            SELECT b.building_id
             FROM {buildings} b
             WHERE b.exclusion_reason IS NULL
-            {toid_filter}
-            ORDER BY b.toid
+            {building_id_filter}
+            ORDER BY b.building_id
             OFFSET %(offset)s LIMIT %(limit)s
         )
         SELECT
-            rp.toid,
+            rp.building_id,
             ST_AsText(rp.roof_geom_27700) AS roof_geom_27700,
             ST_AsText(rp.roof_geom_raw_27700) AS roof_geom_raw_27700,
             rp.roof_plane_id,
@@ -380,9 +380,9 @@ def _load_roof_planes(pg_conn, job_id: int, page: int, page_size: int, toids: Li
             rp.is_flat,
             rp.meta
         FROM building_page b 
-        INNER JOIN {roof_polygons} rp ON b.toid = rp.toid
+        INNER JOIN {roof_polygons} rp ON b.building_id = rp.building_id
         WHERE rp.usable
-        ORDER BY toid;
+        ORDER BY building_id;
         """,
         {
             "offset": page * page_size,
@@ -390,42 +390,42 @@ def _load_roof_planes(pg_conn, job_id: int, page: int, page_size: int, toids: Li
         },
         roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE),
         buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
-        toid_filter=toid_filter,
+        building_id_filter=building_id_filter,
         result_extractor=lambda rows: rows)
 
-    by_toid = defaultdict(list)
+    by_building_id = defaultdict(list)
     for roof in roofs:
-        by_toid[roof['toid']].append(dict(roof))
+        by_building_id[roof['building_id']].append(dict(roof))
 
-    return dict(by_toid)
+    return dict(by_building_id)
 
 
 def _load_building_geoms(pg_conn, job_id: int, page: int, page_size: int) -> Dict[str, object]:
-    """Load the page's (EPSG:27700) building geometries, keyed by toid. Uses the same
-    building_page selection (exclusion_reason IS NULL, ordered by toid) as _load_roof_planes
+    """Load the page's (EPSG:27700) building geometries, keyed by building_id. Uses the same
+    building_page selection (exclusion_reason IS NULL, ordered by building_id) as _load_roof_planes
     and pixels_for_buildings, so the pages line up."""
     rows = sql_command(
         pg_conn,
         """
-        SELECT b.toid, ST_AsText(b.geom_27700) AS geom
+        SELECT b.building_id, ST_AsText(b.geom_27700) AS geom
         FROM {buildings} b
         WHERE b.exclusion_reason IS NULL
-        ORDER BY b.toid
+        ORDER BY b.building_id
         OFFSET %(offset)s LIMIT %(limit)s
         """,
         {"offset": page * page_size, "limit": page_size},
         buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
         result_extractor=lambda rows: rows)
-    return {r['toid']: wkt.loads(r['geom']) for r in rows}
+    return {r['building_id']: wkt.loads(r['geom']) for r in rows}
 
 
-def _write_test_data(toid, test_data):
+def _write_test_data(building_id, test_data):
     """Dump a failed building's pixels/roofs for debugging: to DEBUG_DATA_DIR if set, else stdout.
     Runs on the aggregation error path, so it must never raise itself and mask the real error."""
     debug_data_dir = os.environ.get("DEBUG_DATA_DIR")
     if debug_data_dir:
         os.makedirs(debug_data_dir, exist_ok=True)
-        fname = join(debug_data_dir, f"pixel_agg_{toid}.json")
+        fname = join(debug_data_dir, f"pixel_agg_{building_id}.json")
         with open(fname, 'w') as f:
             json.dump(test_data, f, sort_keys=True, default=str)
         print(f"Wrote debug data to {fname}")

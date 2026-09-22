@@ -4,15 +4,18 @@ import logging
 import os
 import shutil
 from os.path import join
-from typing import List
+from typing import Iterable, List
 
 import psycopg2.extras
 from psycopg2.sql import Identifier
 
 from solar_pv import tables
+from solar_pv.buildings import BuildingInput, load_buildings
 from solar_pv.db_funcs import process_pg_uri, \
     connection, sql_command, sql_script
-from solar_pv.postgis import raster_tile_coverage_count
+from solar_pv.lidar.lidar import LidarTile
+from solar_pv.lidar.lidar_selector import count_usable_tiles
+from solar_pv.postgis import get_job_bounds
 from solar_pv.outdated_lidar.outdated_lidar_check import check_lidar
 from solar_pv.pv.run_pv import run_pv
 from solar_pv.roof_detection.detect_roofs import detect_roofs
@@ -23,7 +26,8 @@ def model_solar_pv(pg_uri: str,
                    root_solar_dir: str,
                    lidar_dir: str,
                    job_id: int,
-                   job_bounds_27700: str,
+                   buildings: Iterable[BuildingInput],
+                   lidar_tiles: List[LidarTile],
                    horizon_search_radius: int = 1000,
                    horizon_slices: int = 36,
                    max_roof_slope_degrees: int = 70,
@@ -33,7 +37,7 @@ def model_solar_pv(pg_uri: str,
                    peak_power_per_m2: float = 0.2,
                    pv_tech: str = "crystSi",
                    min_dist_to_edge_m: float = 0.1,
-                   debug_mode: bool = False):
+                   debug_mode: bool = False) -> None:
     """
     Main entrypoint to the PV model.
 
@@ -46,9 +50,13 @@ def model_solar_pv(pg_uri: str,
     if debug_mode is False.
     :param job_id: unique integer ID for the job. Rows in the output postgres tables will
     be keyed on this ID.
-    :param job_bounds_27700: A WKT polygon string in CRS 27700 representing the bounds
-    of this job. Only buildings in mastermap.buildings that fall within these bounds
-    will be used.
+    :param buildings: the buildings to model, as BuildingInput objects (building_id +
+    geometry in EPSG:27700, with optional height). The job bounds are derived from their
+    extent.
+    :param lidar_tiles: the elevation rasters (LidarTile objects) to build the elevation
+    model from - any mix of 50cm/1m/2m tiles on disk, with optional per-tile year. They
+    should cover the job bounds buffered by horizon_search_radius. The resolution to work
+    at and the overlap merge are chosen by select_lidar.
     :param horizon_search_radius: how far in each direction to look when determining
     horizon height. Unit: metres
     :param horizon_slices: the number of rays traced from each point to determine horizon height
@@ -71,6 +79,9 @@ def model_solar_pv(pg_uri: str,
     This only counts the edge of the building, not the edges of other areas of roof.
     :param debug_mode: if True, don't delete temporary files or the postgres schema
     for the job.
+
+    The results are written to models.pv_building / models.pv_roof_plane, keyed on job_id;
+    read them back from there (e.g. via `solar_pv.cli.export_results` for a GeoPackage).
     """
 
     pg_uri = _validate_str(pg_uri, "pg_uri")
@@ -95,9 +106,12 @@ def model_solar_pv(pg_uri: str,
     os.makedirs(solar_dir, exist_ok=True)
 
     logging.info("Initialising postGIS schema...")
-    _init_schema(pg_uri, job_id, job_bounds_27700)
+    _init_schema(pg_uri, job_id)
 
-    if _should_skip(pg_uri, job_id):
+    logging.info("Loading buildings...")
+    load_buildings(pg_uri, job_id, buildings)
+
+    if _should_skip(pg_uri, job_id, lidar_tiles=lidar_tiles):
         return
 
     job_lidar_dir = join(lidar_dir, f"job_{job_id}")
@@ -112,6 +126,7 @@ def model_solar_pv(pg_uri: str,
     elevation_raster_27700, mask_raster_27700, slope_raster_27700, aspect_raster_27700, res = generate_rasters(
         pg_uri=pg_uri,
         job_id=job_id,
+        lidar_tiles=lidar_tiles,
         job_lidar_dir=job_lidar_dir,
         solar_dir=solar_dir,
         horizon_search_radius=horizon_search_radius,
@@ -168,13 +183,12 @@ def model_solar_pv(pg_uri: str,
         logging.info("Debug mode: not removing temp dir or dropping schema.")
 
 
-def _init_schema(pg_uri: str, job_id: int, job_bounds_27700: str):
+def _init_schema(pg_uri: str, job_id: int):
     with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
         sql_script(pg_conn, 'create.db.sql')
         sql_script(
             pg_conn,
             'create.schema.sql',
-            {"job_id": job_id, "job_bounds_27700": job_bounds_27700},
             schema=Identifier(tables.schema(job_id)),
             bounds_27700=Identifier(tables.schema(job_id), tables.BOUNDS_TABLE),
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
@@ -197,7 +211,9 @@ def _drop_schema(pg_uri: str, job_id: int):
         )
 
 
-def _should_skip(pg_uri: str, job_id: int, check_rasters: bool = True) -> bool:
+def _should_skip(pg_uri: str, job_id: int,
+                 lidar_tiles: List[LidarTile] = None,
+                 check_rasters: bool = True) -> bool:
     with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
         def _skip():
             sql_command(
@@ -207,7 +223,7 @@ def _should_skip(pg_uri: str, job_id: int, check_rasters: bool = True) -> bool:
                 WHERE exclusion_reason IS NULL;
 
                 INSERT INTO models.pv_building
-                SELECT %(job_id)s, toid, exclusion_reason, height
+                SELECT %(job_id)s, building_id, exclusion_reason, height
                 FROM {buildings};
                 """,
                 {"job_id": job_id},
@@ -235,8 +251,8 @@ def _should_skip(pg_uri: str, job_id: int, check_rasters: bool = True) -> bool:
             return True
 
         if check_rasters:
-            tile_cov_count = raster_tile_coverage_count(pg_conn, job_id)
-            if tile_cov_count == 0:
+            bounds = get_job_bounds(pg_conn, job_id)
+            if count_usable_tiles(lidar_tiles or [], bounds) == 0:
                 logging.info("skipping PV job, no LiDAR tiles intersect the job bounds")
                 _skip()
                 return True

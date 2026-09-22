@@ -12,38 +12,38 @@ from solar_pv.outdated_lidar.outdated_lidar_check import _load_buildings, \
     _check_building
 
 
-def check_toids_lidar(pg_uri: str, job_id: int, toids: List[str], write_test_data: bool = True):
-    for toid in toids:
-        check_toid_lidar(pg_uri, job_id, toid, write_test_data)
+def check_buildings_lidar(pg_uri: str, job_id: int, building_ids: List[str], write_test_data: bool = True):
+    for building_id in building_ids:
+        check_building_lidar(pg_uri, job_id, building_id, write_test_data)
 
 
-def check_toid_lidar(pg_uri: str, job_id: int, toid: str, write_test_data: bool):
+def check_building_lidar(pg_uri: str, job_id: int, building_id: str, write_test_data: bool):
     with connection(pg_uri, cursor_factory=DictCursor) as pg_conn:
-        buildings = _load_buildings(pg_conn, job_id, page=0, page_size=1000, toids=[toid])
+        buildings = _load_buildings(pg_conn, job_id, page=0, page_size=1000, building_ids=[building_id])
     building = buildings[0]
     reason = _check_building(building, resolution_metres=1.0, min_internal_pixels=8, debug=True)
     if reason:
-        print(f"toid {toid} excluded. Reason {reason}\n")
+        print(f"building_id {building_id} excluded. Reason {reason}\n")
     else:
-        print(f"toid {toid} not excluded.\n")
+        print(f"building_id {building_id} not excluded.\n")
     if write_test_data:
-        _write_test_data(toid, building)
+        _write_test_data(building_id, building)
 
 
-def _write_test_data(toid, building):
+def _write_test_data(building_id, building):
     """
     Write out a test data CSV that can be used for unit tests.
     See test_oudated_lidar_check.py
     """
     lidar_test_data_dir = join(paths.TEST_DATA, "outdated_lidar")
-    jsonfile = join(lidar_test_data_dir, f"{toid}.json")
+    jsonfile = join(lidar_test_data_dir, f"{building_id}.json")
     with open(jsonfile, 'w') as f:
         json.dump(building, f, sort_keys=True, default=str)
 
 
 if __name__ == "__main__":
     import os
-    # check_toids_lidar(
+    # check_building_ids_lidar(
     #     os.getenv("PGW_URI"),
     #     1617,
     #     [
@@ -68,7 +68,7 @@ if __name__ == "__main__":
     #     ],
     #     write_test_data=False)
 
-    # check_toids_lidar(
+    # check_building_ids_lidar(
     #     os.getenv("PGW_URI"),
     #     1618,
     #     [
@@ -80,7 +80,7 @@ if __name__ == "__main__":
     #     ],
     #     write_test_data=False)
 
-    check_toids_lidar(
+    check_buildings_lidar(
         os.getenv("PGW_URI"),
         1623,
         [
@@ -88,7 +88,7 @@ if __name__ == "__main__":
         ],
         write_test_data=True)
 
-    # check_toids_lidar(
+    # check_building_ids_lidar(
     #     os.getenv("PGW_URI"),
     #     1622,
     #     [
