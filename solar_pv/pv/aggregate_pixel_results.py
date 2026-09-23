@@ -255,6 +255,7 @@ def _aggregate_pixel_data(roof_planes,
             # can be re-derived later without a model re-run:
             confidence, sub_scores = roof_plane_confidence(
                 meta=roof_plane['meta'],
+                slope=roof_plane['slope'],
                 is_flat=roof_plane['is_flat'],
                 resolution=resolution,
                 area_raw=geom_raw.area,

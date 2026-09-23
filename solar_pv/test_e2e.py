@@ -17,6 +17,7 @@ test runs without the ~640MB original (e.g. in CI).
 Requires the nix-shell (its proj carries the OSTN15 grids the 27700 transforms need);
 skipped only when testing.postgresql is absent.
 """
+import json
 import os
 import unittest
 from os.path import exists, dirname, join
@@ -25,7 +26,9 @@ from tempfile import TemporaryDirectory
 from osgeo import ogr
 
 from solar_pv import cli
+from solar_pv.constants import CONFIDENCE_WEIGHTS
 from solar_pv.paths import TEST_DATA
+from solar_pv.pv.confidence import combine
 
 try:
     import testing.postgresql
@@ -89,3 +92,31 @@ class E2ETest(unittest.TestCase):
             self.assertLess(plane.GetField("kwh_year_p90"), plane.GetField("kwh_year"))
             self.assertGreaterEqual(plane.GetField("confidence"), 0)
             self.assertLessEqual(plane.GetField("confidence"), 1)
+
+            pv_roof_plane.ResetReading()
+            n_merged = 0
+            for plane in pv_roof_plane:
+                self._check_confidence_meta(plane)
+                if "_MERGED_" in json.loads(plane.GetField("meta"))["plane_type"]:
+                    n_merged += 1
+            # make sure the merge path, which recomputes the aspect stats, was exercised:
+            self.assertGreater(n_merged, 0, "no merged roof planes in the fixture")
+
+    def _check_confidence_meta(self, plane):
+        """The confidence sub-scores in `meta` survive to the GeoPackage, are
+        consistent with the `confidence` column, and were derived from real
+        per-plane stats."""
+        rp_id = plane.GetField("roof_plane_id")
+        meta = json.loads(plane.GetField("meta"))
+        sub_scores = meta.get("confidence")
+        self.assertIsInstance(sub_scores, dict, f"roof plane {rp_id}: no meta.confidence")
+        self.assertEqual(set(sub_scores), set(CONFIDENCE_WEIGHTS), f"roof plane {rp_id}")
+        for k, v in sub_scores.items():
+            self.assertGreaterEqual(v, 0, f"roof plane {rp_id}: {k}")
+            self.assertLessEqual(v, 1, f"roof plane {rp_id}: {k}")
+        self.assertAlmostEqual(combine(sub_scores), plane.GetField("confidence"),
+                               delta=1e-4, msg=f"roof plane {rp_id}")
+        # real LiDAR pixel aspects never agree exactly, so an sd of 0 means the stat
+        # was never computed:
+        if not plane.GetField("is_flat"):
+            self.assertGreater(meta["aspect_circ_sd"], 0, f"roof plane {rp_id}: {meta['plane_type']}")

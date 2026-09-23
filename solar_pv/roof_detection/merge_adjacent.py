@@ -1,3 +1,4 @@
+import math
 from typing import Dict, Tuple
 
 import numpy as np
@@ -11,7 +12,7 @@ from solar_pv.constants import ROOFDET_GOOD_SCORE, FLAT_ROOF_DEGREES_THRESHOLD, 
     AZIMUTH_ALIGNMENT_THRESHOLD, FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD
 from solar_pv.datatypes import RoofPlane
 from solar_pv.roof_detection.premade_planes import _image
-from solar_pv.geos import slope_deg, aspect_deg, deg_diff
+from solar_pv.geos import slope_deg, aspect_deg, deg_diff, circular_mean_rad, circular_sd_rad
 from solar_pv.roof_detection.ransac import _group_areas
 
 DO_NOT_MERGE = 9999
@@ -124,6 +125,7 @@ def _update_node_data(graph, src: int, dst: int):
 
     xy_subset = np.concatenate([dst_node['xy_subset'], src_node['xy_subset']])
     z_subset = np.concatenate([dst_node['z_subset'], src_node['z_subset']])
+    aspect_subset = np.concatenate([dst_node['aspect_subset'], src_node['aspect_subset']])
     lr = LinearRegression()
     lr.fit(xy_subset, z_subset)
     z_pred = lr.predict(xy_subset)
@@ -133,6 +135,7 @@ def _update_node_data(graph, src: int, dst: int):
     dst_node['building_id'] = dst_node.get('building_id', src_node.get('building_id'))
     dst_node['xy_subset'] = xy_subset
     dst_node['z_subset'] = z_subset
+    dst_node['aspect_subset'] = aspect_subset
     dst_node['score'] = merged_score
 
     dst_node['x_coef'] = lr.coef_[0]
@@ -161,7 +164,7 @@ def _update_node_data(graph, src: int, dst: int):
     except ValueError:
         dst_node["msle"] = None
     dst_node["mape"] = metrics.mean_absolute_percentage_error(z_subset, z_pred)
-    dst_node["sd"] = np.std(np.abs(z_subset, z_pred))
+    dst_node["sd"] = np.std(np.abs(z_subset - z_pred))
 
     z_image, idxs = _image(xy_subset, z_subset, nodata=-9999, res=dst_node['res'])
     plane_mask = z_image != -9999
@@ -174,9 +177,10 @@ def _update_node_data(graph, src: int, dst: int):
     perimeter = perimeter_crofton(plane_mask, directions=4)
     dst_node["thinness_ratio"] = (4 * np.pi * roof_plane_area) / (perimeter * perimeter)
 
-    # TODO: circular mean and circular sd - needs aspect to be passed in
-    dst_node["aspect_circ_mean"] = 0
-    dst_node["aspect_circ_sd"] = 0
+    # units match RoofPlane as built by RANSAC: mean in degrees, sd in radians
+    aspect_rads = np.radians(aspect_subset)
+    dst_node["aspect_circ_mean"] = math.degrees(circular_mean_rad(aspect_rads))
+    dst_node["aspect_circ_sd"] = circular_sd_rad(aspect_rads)
 
     if 'aspect' in src_node and 'aspect' in dst_node:
         a1 = dst_node["aspect"]
@@ -203,13 +207,14 @@ def _hierarchical_merge(graph, labels, thresh: float = 0):
             labels[np.isin(labels, plane['labels'])] = n
             del plane["xy_subset"]
             del plane["z_subset"]
+            del plane["aspect_subset"]
             del plane["labels"]
             merged_planes[n] = plane
 
     return merged_planes, labels
 
 
-def _rag_score(xy, z, labels, planes: Dict[int, RoofPlane], res: float, nodata: int, connectivity: int = 1):
+def _rag_score(xy, z, aspect, labels, planes: Dict[int, RoofPlane], res: float, nodata: int, connectivity: int = 1):
     label_image, idxs = _image(xy, labels, res, nodata=nodata)
     graph = RAG(label_image, connectivity=connectivity)
     if graph.has_node(nodata):
@@ -228,6 +233,7 @@ def _rag_score(xy, z, labels, planes: Dict[int, RoofPlane], res: float, nodata: 
         graph.nodes[n].update({'labels': [n],
                                'xy_subset': xy_subset,
                                'z_subset': z_subset,
+                               'aspect_subset': aspect[idxs[mask]],
                                'res': res,
                                'outlier': True})
         if n in planes:
@@ -240,7 +246,7 @@ def _rag_score(xy, z, labels, planes: Dict[int, RoofPlane], res: float, nodata: 
     return graph
 
 
-def merge_adjacent(xy, z, labels, planes: Dict[int, RoofPlane],
+def merge_adjacent(xy, z, aspect, labels, planes: Dict[int, RoofPlane],
                    res: float, nodata: int,
                    connectivity: int = 1, thresh: float = 0,
                    debug: bool = False) -> Tuple[Dict[int, RoofPlane], np.ndarray]:
@@ -261,7 +267,7 @@ def merge_adjacent(xy, z, labels, planes: Dict[int, RoofPlane],
     if thresh >= DO_NOT_MERGE:
         raise ValueError(f"threshold ({thresh}) was >= DO_NOT_MERGE ({DO_NOT_MERGE})")
 
-    g = _rag_score(xy, z, labels, planes, res, nodata, connectivity=connectivity)
+    g = _rag_score(xy, z, aspect, labels, planes, res, nodata, connectivity=connectivity)
 
     if debug:
         print(f"Constructed graph with {len(planes)} planes, {g.number_of_nodes()} nodes, {g.number_of_edges()} edges")

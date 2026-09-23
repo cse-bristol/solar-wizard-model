@@ -7,7 +7,7 @@ from networkx import Graph
 from sklearn import metrics
 from sklearn.linear_model import LinearRegression
 
-from solar_pv.geos import slope_deg, aspect_deg
+from solar_pv.geos import slope_deg, aspect_deg, circular_sd_rad
 from solar_pv.roof_detection.merge_adjacent import (
     _edge_weight, _update_node_data, merge_adjacent, DO_MERGE, DO_NOT_MERGE)
 
@@ -34,11 +34,13 @@ def _plane_attrs(xy, z, **extra):
     return attrs
 
 
-def _plane_node(xy, z, **extra):
+def _plane_node(xy, z, aspect=None, **extra):
     """A full RAG plane node: plane attrs plus the graph-internal point subsets."""
     xy = np.asarray(xy, dtype=float)
     z = np.asarray(z, dtype=float)
-    node = _plane_attrs(xy, z, xy_subset=xy, z_subset=z, outlier=False, res=1, labels=[0])
+    aspect = np.full(len(z), 180.0) if aspect is None else np.asarray(aspect, dtype=float)
+    node = _plane_attrs(xy, z, xy_subset=xy, z_subset=z, aspect_subset=aspect,
+                        outlier=False, res=1, labels=[0])
     node.update(extra)
     return node
 
@@ -46,7 +48,8 @@ def _plane_node(xy, z, **extra):
 def _outlier_node(xy, z):
     xy = np.asarray(xy, dtype=float)
     z = np.asarray(z, dtype=float)
-    return dict(xy_subset=xy, z_subset=z, outlier=True, res=1, labels=[0])
+    return dict(xy_subset=xy, z_subset=z, aspect_subset=np.full(len(z), 180.0),
+                outlier=True, res=1, labels=[0])
 
 
 def _two_node_graph(node0, node1):
@@ -111,6 +114,23 @@ class UpdateNodeDataTest(unittest.TestCase):
         self.assertAlmostEqual(dst['aspect_raw'], aspect_deg(2, 3), places=6)
         self.assertAlmostEqual(dst['mae'], 0, places=6)
         self.assertAlmostEqual(dst['r2'], 1.0, places=6)
+        self.assertAlmostEqual(dst['sd'], 0, places=6)
+
+    def test_recomputes_aspect_stats_over_merged_pixels(self):
+        a = _grid(0, 2, 0, 3); b = _grid(2, 4, 0, 3)
+        za = 2 * a[:, 0] + 3 * a[:, 1]; zb = 2 * b[:, 0] + 3 * b[:, 1]
+        aspect_a = np.full(len(a), 170.0); aspect_b = np.full(len(b), 190.0)
+        g = _two_node_graph(_plane_node(a, za, aspect=aspect_a),
+                            _plane_node(b, zb, aspect=aspect_b))
+
+        _update_node_data(g, src=1, dst=0)
+        dst = g.nodes[0]
+
+        # mean in degrees, sd in radians, as RANSAC produces them:
+        self.assertAlmostEqual(dst['aspect_circ_mean'], 180.0, places=6)
+        expected_sd = circular_sd_rad(np.radians(np.concatenate([aspect_a, aspect_b])))
+        self.assertGreater(expected_sd, 0)
+        self.assertAlmostEqual(dst['aspect_circ_sd'], expected_sd, places=9)
 
 
 class MergeAdjacentTest(unittest.TestCase):
@@ -124,23 +144,24 @@ class MergeAdjacentTest(unittest.TestCase):
         labels = np.where(left, 0, 1)
         planes = {0: _plane_attrs(xy[left], z[left], plane_id="a"),
                   1: _plane_attrs(xy[~left], z[~left], plane_id="b")}
-        return xy, z, labels, planes
+        aspect = np.full(len(xy), 180.0)
+        return xy, z, aspect, labels, planes
 
     def test_adjacent_coplanar_regions_merge_into_one(self):
-        xy, z, labels, planes = self._regions(lambda b: 2 * b[:, 0] + 3 * b[:, 1])
-        merged, _ = merge_adjacent(xy, z, labels.copy(), planes, res=1, nodata=-9999)
+        xy, z, aspect, labels, planes = self._regions(lambda b: 2 * b[:, 0] + 3 * b[:, 1])
+        merged, _ = merge_adjacent(xy, z, aspect, labels.copy(), planes, res=1, nodata=-9999)
         self.assertEqual(len(merged), 1)
 
     def test_adjacent_divergent_regions_stay_separate(self):
         # right region faces the opposite way, so the two planes are kept apart:
-        xy, z, labels, planes = self._regions(lambda b: -3 * b[:, 0] + 200)
-        merged, _ = merge_adjacent(xy, z, labels.copy(), planes, res=1, nodata=-9999)
+        xy, z, aspect, labels, planes = self._regions(lambda b: -3 * b[:, 0] + 200)
+        merged, _ = merge_adjacent(xy, z, aspect, labels.copy(), planes, res=1, nodata=-9999)
         self.assertEqual(len(merged), 2)
 
     def test_rejects_threshold_at_or_above_do_not_merge(self):
-        xy, z, labels, planes = self._regions(lambda b: 2 * b[:, 0] + 3 * b[:, 1])
+        xy, z, aspect, labels, planes = self._regions(lambda b: 2 * b[:, 0] + 3 * b[:, 1])
         with self.assertRaises(ValueError):
-            merge_adjacent(xy, z, labels.copy(), planes, res=1, nodata=-9999, thresh=DO_NOT_MERGE)
+            merge_adjacent(xy, z, aspect, labels.copy(), planes, res=1, nodata=-9999, thresh=DO_NOT_MERGE)
 
 
 if __name__ == "__main__":

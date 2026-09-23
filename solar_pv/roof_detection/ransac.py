@@ -461,7 +461,7 @@ class _Candidate:
         return {
             "sd": self.sd,
             "score": self.score,
-            "aspect_circ_mean": math.degrees(self.aspect_circ_mean) if self.aspect_circ_mean else None,
+            "aspect_circ_mean": math.degrees(self.aspect_circ_mean),
             "aspect_circ_sd": self.aspect_circ_sd,
             "thinness_ratio": self.thinness_ratio,
             "cv_hull_ratio": self.cv_hull_ratio,

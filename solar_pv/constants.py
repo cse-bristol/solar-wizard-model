@@ -63,12 +63,28 @@ INTERANNUAL_GHI_COV = 0.05
 # Roof-plane confidence scoring constants:
 ##
 
+# Plane-fit MAE (metres) at/below which the fit sub-score is 1. It falls on a log
+# scale from here to 0 at ROOFDET_MAX_MAE, as residuals span orders of magnitude:
+CONFIDENCE_FULL_FIT_MAE = 0.05
+
 # aspect_circ_sd (radians) at/above which the aspect sub-score is 0. Matches the
 # roof-detection rejection threshold (Thresholds.max_aspect_circular_sd):
 CONFIDENCE_MAX_ASPECT_CIRC_SD = 1.5
 
+# Pixel aspects get noisier as slope approaches flat, so the aspect penalty fades in
+# linearly from FLAT_ROOF_DEGREES_THRESHOLD, reaching full strength at this slope:
+CONFIDENCE_ASPECT_FULL_SLOPE = 20.0
+
+# The shape sub-score rises from 0 at roof detection's area-dependent minimum
+# thinness ratio to 1 at that minimum plus this:
+CONFIDENCE_SHAPE_SPAN = 0.4
+
 # LiDAR working resolution (m) -> sub-score. Finer LiDAR resolves roof detail better:
 CONFIDENCE_RESOLUTION_SCORES = {0.5: 1.0, 1.0: 0.8, 2.0: 0.2}
+
+# Sub-scores are floored at this when combined, so a single zero sub-score ranks a
+# roof bottom without discarding what the others say about it:
+CONFIDENCE_SUB_SCORE_FLOOR = 0.05
 
 # Weights for the geometric mean; must sum to 1:
 CONFIDENCE_WEIGHTS = {

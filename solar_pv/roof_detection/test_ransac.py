@@ -11,7 +11,7 @@ from solar_pv.geos import square, slope_deg, aspect_deg
 from solar_pv.roof_detection.ransac import _group_areas, _pixel_groups, \
     _exclude_unconnected, _min_thinness_ratio, closest_azimuth, \
     get_potential_aspects, _sample, _convex_hull_ratio, _thinness_ratio, _aspect_stats, \
-    _plane_metrics, _evaluate_candidate, _FitContext, _Thresholds
+    _plane_metrics, _evaluate_candidate, _FitContext, _Thresholds, _Candidate
 
 
 class GroupAreasTest(unittest.TestCase):
@@ -319,6 +319,18 @@ class EvaluateCandidateTest(unittest.TestCase):
         self.assertEqual(cand.score, 0.0)
         self.assertEqual(int(cand.inlier_mask.sum()), n)
         self.assertEqual(cand.plane_properties("RANSAC", "id-1")["plane_id"], "id-1")
+
+
+class CandidatePlanePropertiesTest(unittest.TestCase):
+
+    def test_due_north_circular_mean_is_kept(self):
+        # a circular mean of exactly 0 rad (due north) is a real value, not missing:
+        cand = _Candidate(n_inliers=10, sd=0.1, score=0.05, aspect_circ_mean=0.0,
+                          aspect_circ_sd=0.2, thinness_ratio=0.7, cv_hull_ratio=0.9,
+                          aspect=0, inlier_mask=np.ones(10, dtype=bool),
+                          X_inlier=np.zeros((10, 2)), y_inlier=np.zeros(10),
+                          inlier_idxs=np.arange(10))
+        self.assertEqual(cand.plane_properties("RANSAC", "id")["aspect_circ_mean"], 0.0)
 
 
 class SampleTest(unittest.TestCase):

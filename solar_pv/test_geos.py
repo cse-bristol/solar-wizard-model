@@ -1,6 +1,8 @@
 # This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 import math
+
+import numpy as np
 import unittest
 
 from shapely import wkt
@@ -179,6 +181,8 @@ class GeosAnglesTest(unittest.TestCase):
         self.assertGreater(wide, narrow)
         # known value for {0, 90 degrees}: R = sqrt(2)/2, sd = sqrt(-2 ln R):
         self.assertAlmostEqual(circular_sd_rad([0, math.pi / 2]), 0.8325546, places=6)
+        # identical angles whose resultant length rounds to just over 1 mustn't raise:
+        self.assertEqual(circular_sd_rad(np.full(7, 1.0)), 0)
 
     def test_circular_variance_rad(self):
         self.assertAlmostEqual(circular_variance_rad([1.0, 1.0, 1.0]), 0, places=9)

@@ -390,10 +390,9 @@ def circular_sd_rad(pop):
 
     See https://en.wikipedia.org/wiki/Directional_statistics#Measures_of_location_and_spread
     """
-    return math.sqrt(-2 * math.log(
-        math.sqrt(sum(np.sin(pop)) ** 2 +
-                  sum(np.cos(pop)) ** 2) /
-        len(pop)))
+    r = math.sqrt(sum(np.sin(pop)) ** 2 + sum(np.cos(pop)) ** 2) / len(pop)
+    # float error can push r just over 1 for identical angles, making the log positive:
+    return math.sqrt(-2 * math.log(min(r, 1.0)))
 
 
 def circular_variance_rad(pop):

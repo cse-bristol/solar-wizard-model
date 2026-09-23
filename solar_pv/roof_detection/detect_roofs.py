@@ -240,7 +240,7 @@ def _detect_building_roof_planes(building: RoofDetBuilding,
     outliers = np.count_nonzero(labels[mask == 1])
     labels[mask == 1] = range(plane_idx + 1, outliers + plane_idx + 1)
 
-    merged_planes, new_labels = merge_adjacent(xy, z, labels, planes, resolution_metres, labels_nodata, debug=debug)
+    merged_planes, new_labels = merge_adjacent(xy, z, aspect, labels, planes, resolution_metres, labels_nodata, debug=debug)
 
     if debug:
         print("Merged planes and outliers")
