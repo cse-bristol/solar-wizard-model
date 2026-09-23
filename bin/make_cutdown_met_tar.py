@@ -8,9 +8,7 @@ the ~640MB original.
 
     python3 bin/make_cutdown_met_tar.py /path/to/full/pvgis_data_uk.tar
 
-MetData samples each layer with gdal.Warp(outputBounds=<job grid bounds>), so a
-cropped raster gives byte-identical warped output as long as it fully covers those
-bounds. The window is the fixture's lidar extent (see LIDAR below) buffered by
+The window is the fixture's lidar extent (see LIDAR below) buffered by
 BUFFER_M; met cells are ~1.6km x 2.5km so a few km of buffer is plenty. Only the
 layers MetData.for_month reads are kept (both panels' spectral correction, so
 pv_tech may be crystSi or CdTe); the full tar's unused PVMAPS inputs (t_gradient*,

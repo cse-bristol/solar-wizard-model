@@ -2,6 +2,7 @@
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 import math
 import unittest
+from unittest import mock
 
 from typing import Sequence
 
@@ -35,6 +36,36 @@ def compute_horizons(elevation: np.ndarray,
     for d_idx in range(len(direction_vectors)):
         out[d_idx][orow, ocol] = values[:, d_idx]
     return out
+
+
+def reference_horizons(z: np.ndarray, ew_res: float, ns_res: float, direction_vectors: Sequence,
+                       max_distance: float, earth_radius: float = horizon.EARTH_RADIUS,
+                       mask: np.ndarray = None) -> np.ndarray:
+    """The plain r.horizon march, one origin at a time and with no early termination, as
+    (n_evaluated, n_directions) in compute_horizons_flat's row-major origin order."""
+    valid = np.isfinite(z) & (z > horizon.NODATA_BELOW)
+    evaluate = valid if mask is None else valid & mask
+    rows, cols = z.shape
+    stepxy = 0.5 * (ew_res + ns_res)
+    out = []
+    for r, c in zip(*np.nonzero(evaluate)):
+        row = []
+        for cos_a, sin_a in direction_vectors:
+            best = -np.inf
+            for k in range(1, int(math.ceil(max_distance / stepxy)) + 2):
+                di = math.floor(k * stepxy * cos_a / ew_res + 0.5)
+                dj = math.floor(k * stepxy * sin_a / ns_res + 0.5)
+                length = math.hypot(di * ew_res, dj * ns_res)
+                if length > max_distance:
+                    break
+                if (di, dj) == (0, 0) or not (0 <= r - dj < rows and 0 <= c + di < cols):
+                    continue
+                if valid[r - dj, c + di]:
+                    curvature = 0.5 * length * length / earth_radius
+                    best = max(best, (z[r - dj, c + di] - z[r, c] - curvature) / length)
+            row.append(min(max(math.atan(best), 0.0), math.pi / 2.0))
+        out.append(row)
+    return np.array(out).reshape(-1, len(direction_vectors))
 
 
 class HorizonTest(unittest.TestCase):
@@ -103,6 +134,23 @@ class HorizonTest(unittest.TestCase):
         without = compute_horizons(z, 1.0, 1.0, [EAST], max_distance=100,
                                            earth_radius=NO_CURVATURE)
         self.assertLess(with_curv[0][1, 4], without[0][1, 4])
+
+    def test_matches_reference_march(self):
+        # rough terrain with nodata, origins right up to the grid edge (rays leaving the grid),
+        # non-square cells, and small chunks/batches so work is split across several threads
+        # and early termination kicks in mid-ray. Must be bit-identical, not just close.
+        rng = np.random.default_rng(0)
+        z = rng.uniform(0.0, 5.0, (40, 30)) + rng.choice([0.0, 0.0, 0.0, 20.0], (40, 30))
+        z[rng.random(z.shape) < 0.05] = -9999.0
+        z[rng.random(z.shape) < 0.02] = np.nan
+        mask = rng.random(z.shape) < 0.6
+        vectors = horizon.nominal_vectors(horizon.grass_directions(20.0))
+        with mock.patch.object(horizon, "CHUNK_SIZE", 64), \
+                mock.patch.object(horizon, "BATCH_SIZE", 256):
+            values, _, _ = horizon.compute_horizons_flat(z, 1.0, 2.0, vectors, 25.0,
+                                                         mask=mask, workers=4)
+        expected = reference_horizons(z, 1.0, 2.0, vectors, 25.0, mask=mask)
+        np.testing.assert_array_equal(values, expected)
 
 
 if __name__ == "__main__":

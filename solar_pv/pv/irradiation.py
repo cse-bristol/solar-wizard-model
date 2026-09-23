@@ -126,6 +126,10 @@ def compute_daily_pv(slope_deg, aspect_compass_deg, elevation, latitude, longitu
                           (sr_step_no + 1.5) * step, (sr_step_no + 0.5) * step)
     last_angle = (sunset - 12.0) * HOURANGLE
 
+    diffuse_terms = _DiffuseTerms(slope, linke, albedo)
+    pressure = np.exp(-z / 8434.5)
+    am2linke = 0.8662 * linke
+
     totpower = np.zeros_like(z)
     beam_e = np.zeros_like(z)
     diff_e = np.zeros_like(z)
@@ -160,12 +164,12 @@ def compute_daily_pv(slope_deg, aspect_compass_deg, elevation, latitude, longitu
         bh = np.zeros_like(z)
         beam = np.zeros_like(z)
         beam[lit], bh[lit] = _brad_angle_loss(
-            s0[lit], solar_alt[lit], sin_alt[lit], z[lit], linke[lit], cbh[lit],
+            s0[lit], solar_alt[lit], sin_alt[lit], pressure[lit], am2linke[lit], cbh[lit],
             g_norm_extra, oriented[lit])
 
         diff, refl = _drad_angle_loss(
-            s0, bh, solar_alt, sin_alt, is_shadow, slope, cbh_unused=None,
-            cdh=cdh, linke=linke, albedo=albedo, g_norm_extra=g_norm_extra,
+            s0, bh, solar_alt, sin_alt, is_shadow, diffuse_terms,
+            cdh=cdh, g_norm_extra=g_norm_extra,
             solar_az=solar_az, aspect=aspect, oriented=oriented)
 
         totrad = np.where(above, beam + diff + refl, 0.0)
@@ -227,15 +231,14 @@ def _horizon_shadow(sun_az, horizon_q, horizon_interval, n_dir, solar_alt):
     return horizon_height > solar_alt
 
 
-def _brad_angle_loss(s0, solar_alt, sin_alt, z, linke, cbh, g_norm_extra, oriented):
-    """Beam irradiance on the slope with -a angle loss; returns (br, bh)."""
-    p = np.exp(-z / 8434.5)
+def _brad_angle_loss(s0, solar_alt, sin_alt, p, am2linke, cbh, g_norm_extra, oriented):
+    """Beam irradiance on the slope with -a angle loss; returns (br, bh). `p` is the pressure
+    ratio exp(-z / 8434.5) and `am2linke` 0.8662 * linke (both constant over the day)."""
     temp1 = 0.1594 + solar_alt * (1.123 + 0.065656 * solar_alt)
     temp2 = 1.0 + solar_alt * (28.9344 + 277.3971 * solar_alt)
     drefract = 0.061359 * temp1 / temp2
     h0 = solar_alt + drefract
     air_mass = p / (np.sin(h0) + 0.50572 * np.power(h0 * RAD2DEG + 6.07995, -1.6364))
-    am2linke = 0.8662 * linke
     rayl = np.where(
         air_mass <= 20.0,
         1.0 / (6.6296 + air_mass * (1.7513 + air_mass * (-0.1202 + air_mass * (0.0065 - air_mass * 0.00013)))),
@@ -246,44 +249,56 @@ def _brad_angle_loss(s0, solar_alt, sin_alt, z, linke, cbh, g_norm_extra, orient
     return br, bh
 
 
-def _drad_angle_loss(s0, bh, solar_alt, sin_alt, is_shadow, slope, cbh_unused,
-                     cdh, linke, albedo, g_norm_extra, solar_az, aspect, oriented):
-    """Diffuse (returned) + reflected (rr) irradiance on the slope, with -a angle losses."""
-    cs = np.cos(slope)
-    ss = np.sin(slope)
+class _DiffuseTerms:
+    """The per-pixel parts of the diffuse/reflected model that don't vary over the day
+    (slope- and Linke-only), computed once per day instead of every timestep."""
 
-    tn = -0.015843 + linke * (0.030543 + 0.0003797 * linke)
-    A1b = 0.26463 + linke * (-0.061581 + 0.0031408 * linke)
-    A1 = np.where(A1b * tn < 0.0022, 0.0022 / tn, A1b)
-    A2 = 2.04020 + linke * (0.018945 - 0.011161 * linke)
-    A3 = -1.3025 + linke * (0.039231 + 0.0085079 * linke)
-    fd = A1 + A2 * sin_alt + A3 * sin_alt * sin_alt
-    dh = cdh * g_norm_extra * fd * tn
+    def __init__(self, slope, linke, albedo):
+        self.cs = np.cos(slope)
+        self.ss = np.sin(slope)
+        self.one_minus_cs = 1.0 - self.cs
+        self.albedo = albedo
+
+        self.tn = -0.015843 + linke * (0.030543 + 0.0003797 * linke)
+        A1b = 0.26463 + linke * (-0.061581 + 0.0031408 * linke)
+        self.A1 = np.where(A1b * self.tn < 0.0022, 0.0022 / self.tn, A1b)
+        self.A2 = 2.04020 + linke * (0.018945 - 0.011161 * linke)
+        self.A3 = -1.3025 + linke * (0.039231 + 0.0085079 * linke)
+
+        self.r_sky = (1.0 + self.cs) / 2.0
+        self.fg = self.ss - slope * self.cs - math.pi * np.sin(slope / 2.0) ** 2
+        self.fx_shadow = self.r_sky + self.fg * 0.252271
+
+        c1 = 4.0 / (3.0 * math.pi)
+        c2 = -0.074
+        diff_coeff = self.ss + (math.pi - slope - self.ss) / (1.0 + self.cs)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            refl_coeff = np.where(self.cs == 1.0, 0.0,
+                                  self.ss + (slope - self.ss) / self.one_minus_cs)
+        self.diff_loss = 1.0 - np.exp(-(c1 * diff_coeff + c2 * diff_coeff ** 2) / A_R)
+        self.refl_loss = 1.0 - np.exp(-(c1 * refl_coeff + c2 * refl_coeff ** 2) / A_R)
+
+
+def _drad_angle_loss(s0, bh, solar_alt, sin_alt, is_shadow, terms: _DiffuseTerms,
+                     cdh, g_norm_extra, solar_az, aspect, oriented):
+    """Diffuse (returned) + reflected (rr) irradiance on the slope, with -a angle losses."""
+    t = terms
+    fd = t.A1 + t.A2 * sin_alt + t.A3 * sin_alt * sin_alt
+    dh = cdh * g_norm_extra * fd * t.tn
     gh = bh + dh
 
     with np.errstate(divide="ignore", invalid="ignore"):
         kb = bh / (g_norm_extra * sin_alt)
-    r_sky = (1.0 + cs) / 2.0
     a_ln = _wrap_pi(solar_az - aspect)
-    fg = ss - slope * cs - math.pi * np.sin(slope / 2.0) ** 2
 
-    fx_shadow = r_sky + fg * 0.252271
-    fx_high = ((0.00263 - kb * (0.712 + 0.6883 * kb)) * fg + r_sky) * (1.0 - kb) \
+    fx_high = ((0.00263 - kb * (0.712 + 0.6883 * kb)) * t.fg + t.r_sky) * (1.0 - kb) \
         + kb * s0 / sin_alt
     with np.errstate(divide="ignore", invalid="ignore"):
-        fx_low = ((0.00263 - 0.712 * kb - 0.6883 * kb * kb) * fg + r_sky) * (1.0 - kb) \
-            + kb * ss * np.cos(a_ln) / (0.1 - 0.008 * solar_alt)
-    fx = np.where(is_shadow | (s0 <= 0.0), fx_shadow,
+        fx_low = ((0.00263 - 0.712 * kb - 0.6883 * kb * kb) * t.fg + t.r_sky) * (1.0 - kb) \
+            + kb * t.ss * np.cos(a_ln) / (0.1 - 0.008 * solar_alt)
+    fx = np.where(is_shadow | (s0 <= 0.0), t.fx_shadow,
                   np.where(solar_alt >= 0.1, fx_high, fx_low))
 
     dr = np.where(oriented, dh * fx, dh)
-    rr = np.where(oriented, albedo * gh * (1.0 - cs) / 2.0, 0.0)
-
-    c1 = 4.0 / (3.0 * math.pi)
-    c2 = -0.074
-    diff_coeff = ss + (math.pi - slope - ss) / (1.0 + cs)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        refl_coeff = np.where(cs == 1.0, 0.0, ss + (slope - ss) / (1.0 - cs))
-    dr = dr * (1.0 - np.exp(-(c1 * diff_coeff + c2 * diff_coeff ** 2) / A_R))
-    rr = rr * (1.0 - np.exp(-(c1 * refl_coeff + c2 * refl_coeff ** 2) / A_R))
-    return dr, rr
+    rr = np.where(oriented, t.albedo * gh * t.one_minus_cs / 2.0, 0.0)
+    return dr * t.diff_loss, rr * t.refl_loss

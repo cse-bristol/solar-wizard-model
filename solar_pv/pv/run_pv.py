@@ -12,6 +12,7 @@ and sums to a yearly total (the r.pv + wind/spectral + annual-sum steps of the P
 """
 import math
 import os
+from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List, Optional, Sequence, Tuple
 import logging
 
@@ -29,6 +30,7 @@ from solar_pv.pv.aggregate_pixel_results import aggregate_from_arrays
 from solar_pv.rasters import (create_elevation_override_raster,
                                 generate_aspect_override_raster,
                                 generate_slope_override_raster)
+from solar_pv.util import get_cpu_count
 
 gdal.UseExceptions()
 osr.UseExceptions()
@@ -43,6 +45,10 @@ MONTHLY_STEPS = [
     (4, 135, 5, 31), (5, 162, 6, 30), (6, 198, 7, 31), (7, 228, 8, 31),
     (8, 259, 9, 30), (9, 289, 10, 31), (10, 319, 11, 30), (11, 345, 12, 31),
 ]
+# Pixels per irradiation work unit: large enough that the GIL-holding Python between numpy
+# calls stays a small share at high thread counts, small enough that the many per-timestep
+# temporaries stay cache-sized.
+PV_CHUNK_SIZE = 32768
 
 
 def solar_declination(day: int) -> float:
@@ -112,27 +118,39 @@ def field_arrays(kwh_year: np.ndarray, monthly_wh: Sequence[np.ndarray],
 def compute_pv_flat(rows: np.ndarray, cols: np.ndarray,
                     slope_deg: np.ndarray, aspect_compass_deg: np.ndarray, elevation: np.ndarray,
                     horizon: np.ndarray, geotransform: GeoTransform, horizon_step_deg: float,
-                    met, coeffs: Sequence[float], albedo: float = 0.2
+                    met, coeffs: Sequence[float], albedo: float = 0.2,
+                    workers: Optional[int] = None
                     ) -> Tuple[List[np.ndarray], np.ndarray]:
     """
     r.pv-to-annual pipeline evaluated only at the given valid pixels (no full-grid arrays). All
     per-pixel inputs are flat (N,), except `horizon` which is (N, n_dir); `aspect_compass_deg`
     is compass (0 = N / flat). `rows`/`cols` are the pixels' grid indices, used to sample met
-    and lat/lon. Returns (monthly_wh, kwh_year) as flat (N,) arrays.
+    and lat/lon. Pixels are independent, so they are split into chunks computed on `workers`
+    threads (default: all available CPUs). Returns (monthly_wh, kwh_year) as flat (N,) arrays.
     """
     idx = (np.asarray(rows), np.asarray(cols))
     lat, lon = _latlon_at(geotransform, idx[0], idx[1])
+    n = idx[0].size
+    chunks = [slice(start, start + PV_CHUNK_SIZE) for start in range(0, n, PV_CHUNK_SIZE)]
+    workers = max(1, min(workers or get_cpu_count(), len(chunks)))
 
     monthly_hpv, monthly_wind, monthly_spectral = [], [], []
-    for _, day, month, _ in MONTHLY_STEPS:
-        m = met.for_month(month, idx)
-        monthly_hpv.append(ir.compute_daily_pv(
-            slope_deg, aspect_compass_deg, elevation, lat, lon,
-            horizon, horizon_step_deg,
-            m.linke, m.cbh, m.cdh, m.temps8, albedo,
-            day, solar_declination(day), coeffs))
-        monthly_wind.append(m.wind)
-        monthly_spectral.append(m.spectral)
+    with ThreadPoolExecutor(workers) as pool:
+        for _, day, month, _ in MONTHLY_STEPS:
+            m = met.for_month(month, idx)
+            declination = solar_declination(day)
+
+            def daily_pv(sl: slice) -> np.ndarray:
+                return ir.compute_daily_pv(
+                    slope_deg[sl], aspect_compass_deg[sl], elevation[sl], lat[sl], lon[sl],
+                    horizon[sl], horizon_step_deg,
+                    m.linke[sl], m.cbh[sl], m.cdh[sl], m.temps8[sl], albedo,
+                    day, declination, coeffs)
+
+            parts = list(pool.map(daily_pv, chunks))
+            monthly_hpv.append(np.concatenate(parts) if parts else np.empty(0))
+            monthly_wind.append(m.wind)
+            monthly_spectral.append(m.spectral)
 
     return monthly_wh_and_annual(monthly_hpv, monthly_wind, monthly_spectral)
 

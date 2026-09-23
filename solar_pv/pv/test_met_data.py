@@ -5,6 +5,7 @@ import unittest
 from os.path import join
 
 import numpy as np
+from osgeo import gdal
 
 from solar_pv.paths import PROJECT_ROOT
 from solar_pv.pv import met_data
@@ -19,7 +20,7 @@ class MetDataTest(unittest.TestCase):
     SHAPE = (10, 10)
 
     def _june(self):
-        return met_data.MetData(MET_TAR, self.GT, self.SHAPE, resample="near").for_month(6)
+        return met_data.MetData(MET_TAR, self.GT, self.SHAPE).for_month(6)
 
     def test_layers_present_and_plausible(self):
         m = self._june()
@@ -53,13 +54,28 @@ class MetDataTest(unittest.TestCase):
         # values at those pixels - the full grid is only ever materialised for validation:
         full = self._june()
         idx = (np.array([0, 3, 9, 5, 0]), np.array([0, 9, 1, 5, 9]))
-        flat = met_data.MetData(MET_TAR, self.GT, self.SHAPE, resample="near").for_month(6, idx)
+        flat = met_data.MetData(MET_TAR, self.GT, self.SHAPE).for_month(6, idx)
         np.testing.assert_array_equal(flat.linke, full.linke[idx])
         np.testing.assert_array_equal(flat.cbh, full.cbh[idx])
         np.testing.assert_array_equal(flat.cdh, full.cdh[idx])
         np.testing.assert_array_equal(flat.temps8, full.temps8[idx])
         self.assertEqual(flat.temps8.shape, (idx[0].size, 8))
 
+    def test_matches_warp_across_met_cells(self):
+        # a coarse grid spanning several ~1.6 x 2.5 km met cells, so many pixels sit near cell
+        # boundaries. Sampling must match a nearest-neighbour gdal.Warp onto the grid that treats
+        # the met grid as EPSG:27700 (its CRS is labelled as the Helmert approximation of it):
+        gt = (350000.0, 97.3, 0.0, 180000.0, 0.0, -97.3)
+        shape = (60, 70)
+        m = met_data.MetData(MET_TAR, gt, shape).for_month(6)
+        bounds = (gt[0], gt[3] + gt[5] * shape[0], gt[0] + gt[1] * shape[1], gt[3])
+        for name, got in (("kcb_06", m.cbh), ("t2m_avg_06_12", m.temps8[..., 4])):
+            ds = gdal.Warp("", f"/vsitar/{MET_TAR}/{name}.27700.tif", format="MEM",
+                           xRes=gt[1], yRes=-gt[5], outputBounds=bounds, srcSRS="EPSG:27700",
+                           dstSRS="EPSG:27700", resampleAlg="near")
+            expected = ds.GetRasterBand(1).ReadAsArray().astype(np.float64)
+            self.assertGreater(np.unique(expected).size, 1)  # really spans several cells
+            np.testing.assert_array_equal(got, expected)
 
 if __name__ == "__main__":
     unittest.main()
