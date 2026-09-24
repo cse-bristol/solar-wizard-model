@@ -6,12 +6,12 @@ from typing import Set, Tuple, List, Optional
 
 import numpy as np
 import math
+import shapely
 from shapely.geometry import Polygon, MultiPoint
 from shapely.strtree import STRtree
 from sklearn import metrics
 
 from skimage import measure, morphology
-from sklearn.linear_model import LinearRegression
 from sklearn.utils import check_array, check_random_state, check_consistent_length
 from sklearn.utils.random import sample_without_replacement
 from skimage.measure import perimeter_crofton
@@ -21,6 +21,7 @@ from solar_pv.constants import AZIMUTH_ALIGNMENT_THRESHOLD, \
     FLAT_ROOF_DEGREES_THRESHOLD
 from solar_pv.geos import simplify_by_angle, polygon_line_segments, azimuth_deg, slope_deg, \
     aspect_deg, aspect_rad, circular_mean_rad, circular_sd_rad, rad_diff, deg_diff
+from solar_pv.roof_detection.plane_fit import PlaneFit, mean_absolute_error
 
 
 _NEVER_INLIER = 9999
@@ -121,7 +122,7 @@ class RANSACRegressorForLIDAR:
         y = check_array(y, ensure_2d=False)
         check_consistent_length(X, y)
 
-        base_estimator = LinearRegression()
+        base_estimator = PlaneFit()
 
         # assume linear model by default:
         min_samples = X.shape[1] + 1
@@ -154,11 +155,14 @@ class RANSACRegressorForLIDAR:
         # number of data samples
         n_samples = X.shape[0]
         sample_idxs = np.arange(n_samples)
+        # mask is fixed for the duration of a fit, so the points available to sample are too:
+        sampleable_idxs = np.flatnonzero(mask)
 
         ctx = _FitContext(
             thresholds=_Thresholds.from_regressor(self), X=X, y=y, aspect=aspect,
             polygon=polygon, min_X=min_X, sample_idxs=sample_idxs,
             total_points_in_building=total_points_in_building,
+            face_index=_FaceIndex.of(polygon),
             aspect_fallback_to_circ_mean=False)
 
         self.n_trials_ = 0
@@ -167,7 +171,7 @@ class RANSACRegressorForLIDAR:
             self.n_trials_ += 1
 
             # choose random sample set
-            subset_idxs = _sample(n_samples, min_samples, random_state=random_state, mask=mask)
+            subset_idxs = _sample(sampleable_idxs, min_samples, random_state=random_state)
             if subset_idxs is None:
                 self.success = False
                 self.finished = True
@@ -335,17 +339,12 @@ def _exclude_unconnected(X, min_X, inlier_mask_best, res: float):
     return mask
 
 
-def _sample(n_samples, min_samples, random_state, mask):
-    sample_attempts = 0
-
-    while sample_attempts < 1000:
-        sample_attempts += 1
-        sample = sample_without_replacement(n_samples, min_samples, random_state=random_state)
-        masked = mask[sample]
-        if np.all(masked):
-            return sample
-
-    return None
+def _sample(sampleable_idxs: np.ndarray, min_samples: int, random_state) -> Optional[np.ndarray]:
+    """`min_samples` distinct indices drawn uniformly from `sampleable_idxs`, or None if
+    there aren't enough."""
+    if len(sampleable_idxs) < min_samples:
+        return None
+    return sampleable_idxs[sample_without_replacement(len(sampleable_idxs), min_samples, random_state=random_state)]
 
 
 def _pixel_groups(X_inlier_subset, min_X, res: float):
@@ -509,6 +508,7 @@ class _FitContext:
     # DETSAC falls back to the circular-mean pixel aspect when the plane aspect has no
     # nearby building face to align to; RANSAC doesn't.
     aspect_fallback_to_circ_mean: bool
+    face_index: Optional["_FaceIndex"] = None
 
 
 def _evaluate_candidate(ctx: _FitContext, y_pred, residuals_subset, inlier_mask_subset,
@@ -550,7 +550,7 @@ def _evaluate_candidate(ctx: _FitContext, y_pred, residuals_subset, inlier_mask_
     y_inlier_subset = ctx.y[inlier_idxs_subset]
     y_inlier_pred = y_pred[inlier_idxs_subset]
 
-    score_subset = metrics.mean_absolute_error(y_inlier_subset, y_inlier_pred)
+    score_subset = mean_absolute_error(y_inlier_subset, y_inlier_pred)
     sd = np.std(residuals_subset[inlier_mask_subset])
 
     # don't optimise for number of points fit to plane (Tarsha-Kurdi, 2007):
@@ -577,7 +577,7 @@ def _evaluate_candidate(ctx: _FitContext, y_pred, residuals_subset, inlier_mask_
     if thinness_ratio < _min_thinness_ratio(roof_plane_area):
         return "THINNESS_RATIO", None
 
-    azimuths = get_potential_aspects(X_inlier_subset, ctx.polygon)
+    azimuths = get_potential_aspects(X_inlier_subset, ctx.polygon, ctx.face_index)
     if len(azimuths) == 0:
         return "NO_NEARBY_FACE", None
 
@@ -638,19 +638,51 @@ def _min_thinness_ratio(area) -> float:
         return 0.07
 
 
-def get_potential_aspects(X_inlier_subset, polygon: Polygon) -> List[int]:
-    polygon = simplify_by_angle(polygon, tolerance_degrees=2.0)
-    line_segments = polygon_line_segments(polygon, min_length=1.0)
-    mp = MultiPoint(X_inlier_subset)
-    rp = mp.buffer(1.0)
-    rtree = STRtree(line_segments)
-    nearby = rtree.query(rp, predicate='intersects')
+@dataclass
+class _FaceIndex:
+    """The building's simplified faces, and a spatial index over them."""
+    line_segments: list
+    rtree: STRtree
+
+    @classmethod
+    def of(cls, polygon: Polygon) -> "_FaceIndex":
+        polygon = simplify_by_angle(polygon, tolerance_degrees=2.0)
+        line_segments = polygon_line_segments(polygon, min_length=1.0)
+        return cls(line_segments, STRtree(line_segments))
+
+    def faces_near(self, points: np.ndarray, points_tree: STRtree, distance: float) -> np.ndarray:
+        """
+        Indices of the faces that intersect `MultiPoint(points).buffer(distance)`, in
+        the order `self.rtree.query` would return them.
+
+        Buffering thousands of points into one polygon is expensive, so this finds the
+        faces within `distance` of any point, then tests each against the buffers of
+        just the points near it. Those buffers use `buffer()`'s default of 16 segments
+        per quarter circle - the faces between the polygonal and true circle are
+        excluded, as they would be by the MultiPoint buffer.
+        """
+        candidates = self.rtree.query(MultiPoint(points), predicate='dwithin', distance=distance)
+        keep = np.zeros(len(candidates), dtype=bool)
+        for i, face_idx in enumerate(candidates):
+            face = self.line_segments[face_idx]
+            near = points_tree.query(face, predicate='dwithin', distance=distance)
+            keep[i] = shapely.intersects(face, shapely.buffer(points[near], distance, quad_segs=16)).any()
+        return candidates[keep]
+
+
+def get_potential_aspects(X_inlier_subset, polygon: Polygon, face_index: _FaceIndex = None) -> List[int]:
+    """`face_index` is `_FaceIndex.of(polygon)`, which callers checking many candidates
+    against one building can build once and pass in."""
+    if face_index is None:
+        face_index = _FaceIndex.of(polygon)
+    line_segments = face_index.line_segments
+    points = shapely.points(X_inlier_subset)
+    points_tree = STRtree(points)
+    nearby = face_index.faces_near(points, points_tree, 1.0)
     if len(nearby) == 0:
-        rp = mp.buffer(3.0)
-        nearby = rtree.query(rp, predicate='intersects')
+        nearby = face_index.faces_near(points, points_tree, 3.0)
     if len(nearby) == 0:
-        rp = mp.buffer(10.0)
-        nearby = rtree.query(rp, predicate='intersects')
+        nearby = face_index.faces_near(points, points_tree, 10.0)
     if len(nearby) == 0:
         return []
 

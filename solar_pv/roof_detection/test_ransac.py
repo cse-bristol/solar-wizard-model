@@ -339,7 +339,7 @@ class SampleTest(unittest.TestCase):
         rng = np.random.RandomState(42)
         mask = np.ones(10, dtype=bool)
 
-        sample = _sample(10, 3, random_state=rng, mask=mask)
+        sample = _sample(np.flatnonzero(mask), 3, random_state=rng)
 
         self.assertEqual(len(sample), 3)
         self.assertEqual(len(set(sample.tolist())), 3)
@@ -351,7 +351,8 @@ class SampleTest(unittest.TestCase):
         mask[:5] = True
 
         for _ in range(50):
-            sample = _sample(10, 3, random_state=rng, mask=mask)
+            sample = _sample(np.flatnonzero(mask), 3, random_state=rng)
+            self.assertEqual(len(set(sample.tolist())), 3)
             self.assertTrue(all(mask[i] for i in sample))
 
     def test_returns_none_when_not_enough_masked_in_points(self):
@@ -359,7 +360,7 @@ class SampleTest(unittest.TestCase):
         mask = np.zeros(10, dtype=bool)
         mask[:2] = True  # only 2 valid, but 3 requested
 
-        self.assertIsNone(_sample(10, 3, random_state=rng, mask=mask))
+        self.assertIsNone(_sample(np.flatnonzero(mask), 3, random_state=rng))
 
 
 if __name__ == "__main__":

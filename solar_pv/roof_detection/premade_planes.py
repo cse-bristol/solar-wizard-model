@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from typing import List, Optional
 
@@ -7,7 +7,8 @@ from shapely.geometry import Polygon
 from skimage import measure
 from skimage import segmentation
 from skimage.graph import rag_mean_color, cut_threshold
-from sklearn.linear_model import LinearRegression
+
+from solar_pv.roof_detection.plane_fit import PlaneFit
 
 
 @dataclass
@@ -18,11 +19,14 @@ class Plane:
     sample_residual_threshold: float
     plane_type: str
     plane_id: str
+    _fitted: Optional[PlaneFit] = field(default=None, init=False, repr=False, compare=False)
 
-    def fit(self) -> LinearRegression:
-        lr = LinearRegression()
-        lr.fit(self.xy, self.z)
-        return lr
+    def fit(self) -> PlaneFit:
+        """The plane fit to this plane's points - cached, as DETSAC asks for it every
+        round. Callers must not re-fit the returned object."""
+        if self._fitted is None:
+            self._fitted = PlaneFit().fit(self.xy, self.z)
+        return self._fitted
 
 
 # TODO move somewhere else, gets used outside this file

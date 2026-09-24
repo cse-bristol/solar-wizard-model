@@ -9,7 +9,10 @@ from sklearn.linear_model import LinearRegression
 
 from solar_pv.geos import slope_deg, aspect_deg, circular_sd_rad
 from solar_pv.roof_detection.merge_adjacent import (
-    _edge_weight, _update_node_data, merge_adjacent, DO_MERGE, DO_NOT_MERGE)
+    _edge_weight, _update_node_data, _node_points, merge_adjacent, DO_MERGE, DO_NOT_MERGE)
+
+
+_ORIGIN = np.zeros(2)
 
 
 def _grid(x0, x1, y0, y1):
@@ -39,7 +42,7 @@ def _plane_node(xy, z, aspect=None, **extra):
     xy = np.asarray(xy, dtype=float)
     z = np.asarray(z, dtype=float)
     aspect = np.full(len(z), 180.0) if aspect is None else np.asarray(aspect, dtype=float)
-    node = _plane_attrs(xy, z, xy_subset=xy, z_subset=z, aspect_subset=aspect,
+    node = _plane_attrs(xy, z, **_node_points(xy, z, aspect, _ORIGIN),
                         outlier=False, res=1, labels=[0])
     node.update(extra)
     return node
@@ -48,7 +51,7 @@ def _plane_node(xy, z, aspect=None, **extra):
 def _outlier_node(xy, z):
     xy = np.asarray(xy, dtype=float)
     z = np.asarray(z, dtype=float)
-    return dict(xy_subset=xy, z_subset=z, aspect_subset=np.full(len(z), 180.0),
+    return dict(**_node_points(xy, z, np.full(len(z), 180.0), _ORIGIN),
                 outlier=True, res=1, labels=[0])
 
 

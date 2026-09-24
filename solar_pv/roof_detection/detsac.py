@@ -5,13 +5,13 @@ from typing import List, Set
 
 import numpy as np
 from shapely.geometry import Polygon
-from sklearn.linear_model import LinearRegression
 
 from solar_pv.constants import FLAT_ROOF_DEGREES_THRESHOLD
 from solar_pv.geos import slope_deg, aspect_deg
+from solar_pv.roof_detection.plane_fit import PlaneFit
 from solar_pv.roof_detection.premade_planes import Plane
 from solar_pv.roof_detection.ransac import _exclude_unconnected, _plane_metrics, \
-    _evaluate_candidate, _FitContext, _Thresholds, _SCORE_GATE_REASONS
+    _evaluate_candidate, _FitContext, _Thresholds, _SCORE_GATE_REASONS, _FaceIndex
 
 
 _NEVER_INLIER = 9999
@@ -61,8 +61,6 @@ class DETSACRegressorForLIDAR:
             mask: np.ndarray,
             total_points_in_building: int,
             debug: bool = False):
-        base_estimator = LinearRegression()
-
         residual_threshold = self.residual_threshold
 
         loss_function = lambda y_true, y_pred: np.abs(y_true - y_pred)
@@ -92,6 +90,7 @@ class DETSACRegressorForLIDAR:
             thresholds=_Thresholds.from_regressor(self), X=X, y=y, aspect=aspect,
             polygon=polygon, min_X=min_X, sample_idxs=sample_idxs,
             total_points_in_building=total_points_in_building,
+            face_index=_FaceIndex.of(polygon),
             aspect_fallback_to_circ_mean=True)
 
         if len(premade_planes) == len(skip_planes):
@@ -183,7 +182,7 @@ class DETSACRegressorForLIDAR:
             return self
 
         # estimate final model using all inliers
-        base_estimator.fit(X_inlier_best, y_inlier_best)
+        base_estimator = PlaneFit().fit(X_inlier_best, y_inlier_best)
 
         # RANSAC for LIDAR change:
         # Re-fit data to final model:

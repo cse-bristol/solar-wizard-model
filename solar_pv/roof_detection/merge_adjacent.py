@@ -6,7 +6,6 @@ from skimage import morphology
 from skimage.graph import RAG, merge_hierarchical
 from skimage.measure import perimeter_crofton
 from sklearn import metrics
-from sklearn.linear_model import LinearRegression
 
 from solar_pv.constants import ROOFDET_GOOD_SCORE, FLAT_ROOF_DEGREES_THRESHOLD, \
     AZIMUTH_ALIGNMENT_THRESHOLD, FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD
@@ -14,6 +13,7 @@ from solar_pv.datatypes import RoofPlane
 from solar_pv.roof_detection.premade_planes import _image
 from solar_pv.geos import slope_deg, aspect_deg, deg_diff, circular_mean_rad, circular_sd_rad
 from solar_pv.roof_detection.ransac import _group_areas
+from solar_pv.roof_detection.plane_fit import PlaneFit, PlaneSums, mean_absolute_error, r2_score
 
 DO_NOT_MERGE = 9999
 DO_MERGE = -9999
@@ -37,28 +37,25 @@ def _edge_weight(graph, src: int, dst: int) -> float:
         curr_mae = ((dst_node['mae'] * dst_inliers) +
                     (src_node['mae'] * src_inliers)) / (dst_inliers + src_inliers)
 
-        xy_subset = np.concatenate([dst_node['xy_subset'], src_node['xy_subset']])
-        z_subset = np.concatenate([dst_node['z_subset'], src_node['z_subset']])
-        lr = LinearRegression()
-        lr.fit(xy_subset, z_subset)
+        merged = _MergedFit(dst_node, src_node)
 
-        new_slope = slope_deg(lr.coef_[0], lr.coef_[1])
+        new_slope = slope_deg(merged.x_coef, merged.y_coef)
         if new_slope > FLAT_ROOF_DEGREES_THRESHOLD and \
                 dst_node['slope'] > FLAT_ROOF_DEGREES_THRESHOLD and \
                 src_node['slope'] > FLAT_ROOF_DEGREES_THRESHOLD:
             curr_r2 = ((dst_node['r2'] * dst_inliers) +
                        (src_node['r2'] * src_inliers)) / (dst_inliers + src_inliers)
-            new_r2 = lr.score(xy_subset, z_subset)
+            new_r2 = merged.r2()
             # If the new score is still good enough, don't require it to be better than before
             weight = curr_r2 - new_r2 if new_r2 < R2_GOOD else DO_MERGE
 
             # if new aspect is outside the range of adjusted aspects, do not merge:
-            new_aspect = aspect_deg(lr.coef_[0], lr.coef_[1])
+            new_aspect = aspect_deg(merged.x_coef, merged.y_coef)
             if deg_diff(new_aspect, src_node['aspect']) > AZIMUTH_ALIGNMENT_THRESHOLD \
                     and deg_diff(new_aspect, dst_node['aspect']) > AZIMUTH_ALIGNMENT_THRESHOLD:
                 weight = DO_NOT_MERGE
         else:
-            new_mae = metrics.mean_absolute_error(z_subset, lr.predict(xy_subset))
+            new_mae = merged.mae()
             # If the new score is still good enough, don't require it to be better than before
             weight = new_mae - curr_mae if new_mae > ROOFDET_GOOD_SCORE else DO_MERGE
 
@@ -66,15 +63,11 @@ def _edge_weight(graph, src: int, dst: int) -> float:
     else:
         curr_mae = dst_node.get('mae', src_node.get('mae'))
         curr_slope = dst_node.get('slope', src_node.get('slope'))
-        xy_subset = np.concatenate([dst_node['xy_subset'], src_node['xy_subset']])
-        z_subset = np.concatenate([dst_node['z_subset'], src_node['z_subset']])
-        lr = LinearRegression()
-        lr.fit(xy_subset, z_subset)
-        # new_score = lr.score(xy_subset, z_subset)
-        new_mae = metrics.mean_absolute_error(z_subset, lr.predict(xy_subset))
+        merged = _MergedFit(dst_node, src_node)
+        new_mae = merged.mae()
         weight = new_mae - curr_mae
 
-        slope = slope_deg(lr.coef_[0], lr.coef_[1])
+        slope = slope_deg(merged.x_coef, merged.y_coef)
         # if roof has changed from flat to non-flat, do not merge:
         if slope > FLAT_ROOF_DEGREES_THRESHOLD >= curr_slope:
             weight = DO_NOT_MERGE
@@ -83,12 +76,55 @@ def _edge_weight(graph, src: int, dst: int) -> float:
 
         # if new aspect is outside the range of the adjusted aspect, do not merge:
         if slope > FLAT_ROOF_DEGREES_THRESHOLD and weight < 0:
-            new_aspect = aspect_deg(lr.coef_[0], lr.coef_[1])
+            new_aspect = aspect_deg(merged.x_coef, merged.y_coef)
             aspect_adjusted = dst_node.get('aspect', src_node.get('aspect'))
             if deg_diff(new_aspect, aspect_adjusted) > AZIMUTH_ALIGNMENT_THRESHOLD:
                 weight = DO_NOT_MERGE
 
     return weight
+
+
+class _MergedFit:
+    """
+    The plane fit to the union of two nodes' points, for scoring the edge between them.
+
+    Edge weights are recomputed for every neighbour of a node each time it merges, so
+    for a large plane bordered by many outlier pixels, refitting it from its points for
+    each edge would be expensive. Instead the fit comes from the nodes' `PlaneSums`, 
+    in O(1). The metrics still need a single pass over the points' residuals.
+
+    Fits are in each node's local coordinates (`xy_local`); the merge itself
+    (`_update_node_data`) still refits the plane from its points with `PlaneFit`.
+    """
+
+    def __init__(self, dst_node: dict, src_node: dict):
+        self._nodes = (dst_node, src_node)
+        fit = (dst_node['plane_sums'] + src_node['plane_sums']).solve()
+        if fit is None:
+            lr = PlaneFit().fit(
+                np.concatenate([dst_node['xy_local'], src_node['xy_local']]),
+                np.concatenate([dst_node['z_subset'], src_node['z_subset']]))
+            fit = (lr.coef_[0], lr.coef_[1], lr.intercept_)
+        self.x_coef, self.y_coef, self._intercept = fit
+        self._residuals = [node['z_subset'] - (node['xy_local'] @ (self.x_coef, self.y_coef) + self._intercept)
+                           for node in self._nodes]
+        self._n = sum(len(r) for r in self._residuals)
+
+    def mae(self) -> float:
+        return sum(np.abs(r).sum() for r in self._residuals) / self._n
+
+    def r2(self) -> float:
+        """As `r2_score`, over both nodes' points."""
+        if self._n < 2:
+            return float("nan")
+        z_mean = sum(node['z_subset'].sum() for node in self._nodes) / self._n
+        numerator = sum(r @ r for r in self._residuals)
+        denominator = sum(((node['z_subset'] - z_mean) ** 2).sum() for node in self._nodes)
+        if numerator == 0:
+            return 1.0
+        if denominator == 0:
+            return 0.0
+        return float(1 - numerator / denominator)
 
 
 def _new_edge_weight(graph, src: int, dst: int, n: int):
@@ -126,11 +162,13 @@ def _update_node_data(graph, src: int, dst: int):
     xy_subset = np.concatenate([dst_node['xy_subset'], src_node['xy_subset']])
     z_subset = np.concatenate([dst_node['z_subset'], src_node['z_subset']])
     aspect_subset = np.concatenate([dst_node['aspect_subset'], src_node['aspect_subset']])
-    lr = LinearRegression()
+    dst_node['xy_local'] = np.concatenate([dst_node['xy_local'], src_node['xy_local']])
+    dst_node['plane_sums'] = dst_node['plane_sums'] + src_node['plane_sums']
+    lr = PlaneFit()
     lr.fit(xy_subset, z_subset)
     z_pred = lr.predict(xy_subset)
     # merged_score = lr.score(xy_subset, z_subset)
-    merged_score = metrics.mean_absolute_error(z_subset, z_pred)
+    merged_score = mean_absolute_error(z_subset, z_pred)
 
     dst_node['building_id'] = dst_node.get('building_id', src_node.get('building_id'))
     dst_node['xy_subset'] = xy_subset
@@ -155,7 +193,7 @@ def _update_node_data(graph, src: int, dst: int):
 
     dst_node['outlier'] = False
 
-    dst_node["r2"] = metrics.r2_score(z_subset, z_pred)
+    dst_node["r2"] = r2_score(z_subset, z_pred)
     dst_node["mae"] = merged_score
     dst_node["mse"] = metrics.mean_squared_error(z_subset, z_pred)
     dst_node["rmse"] = metrics.root_mean_squared_error(z_subset, z_pred)
@@ -209,9 +247,22 @@ def _hierarchical_merge(graph, labels, thresh: float = 0):
             del plane["z_subset"]
             del plane["aspect_subset"]
             del plane["labels"]
+            del plane["xy_local"]
+            del plane["plane_sums"]
             merged_planes[n] = plane
 
     return merged_planes, labels
+
+
+def _node_points(xy_subset: np.ndarray, z_subset: np.ndarray, aspect_subset: np.ndarray,
+                 origin: np.ndarray) -> dict:
+    """The attributes of a RAG node holding its pixels, including those `_MergedFit` needs."""
+    xy_local = xy_subset - origin
+    return {'xy_subset': xy_subset,
+            'z_subset': z_subset,
+            'aspect_subset': aspect_subset,
+            'xy_local': xy_local,
+            'plane_sums': PlaneSums.of(xy_local, z_subset)}
 
 
 def _rag_score(xy, z, aspect, labels, planes: Dict[int, RoofPlane], res: float, nodata: int, connectivity: int = 1):
@@ -226,14 +277,14 @@ def _rag_score(xy, z, aspect, labels, planes: Dict[int, RoofPlane], res: float, 
         for plane_idx in planes.keys():
             graph.add_node(plane_idx)
 
+    # `PlaneSums` need coordinates near 0:
+    origin = xy.min(axis=0)
     for n in graph:
         mask = label_image == n
         xy_subset = xy[idxs[mask]]
         z_subset = z[idxs[mask]]
         graph.nodes[n].update({'labels': [n],
-                               'xy_subset': xy_subset,
-                               'z_subset': z_subset,
-                               'aspect_subset': aspect[idxs[mask]],
+                               **_node_points(xy_subset, z_subset, aspect[idxs[mask]], origin),
                                'res': res,
                                'outlier': True})
         if n in planes:
