@@ -34,26 +34,24 @@ class SubScoreTest(unittest.TestCase):
         self.assertGreater(confidence._fit_score(0.1), confidence._fit_score(0.2))
 
     def test_aspect_score_flat_roof_is_full(self):
-        self.assertEqual(confidence._aspect_score(1.4, slope=0, is_flat=False), 1.0)
+        self.assertEqual(confidence._aspect_score(1.4, slope=0), 1.0)
         self.assertEqual(
-            confidence._aspect_score(1.4, slope=FLAT_ROOF_DEGREES_THRESHOLD, is_flat=False), 1.0)
-        # flat roofs carry the (steeper) panel tilt as their slope:
-        self.assertEqual(confidence._aspect_score(1.4, slope=10, is_flat=True), 1.0)
+            confidence._aspect_score(1.4, slope=FLAT_ROOF_DEGREES_THRESHOLD), 1.0)
 
     def test_aspect_score_bounds_at_full_strength(self):
         steep = CONFIDENCE_ASPECT_FULL_SLOPE + 10
-        self.assertEqual(confidence._aspect_score(0.0, slope=steep, is_flat=False), 1.0)
-        self.assertEqual(confidence._aspect_score(CONFIDENCE_MAX_ASPECT_CIRC_SD, slope=steep, is_flat=False), 0.0)
-        self.assertEqual(confidence._aspect_score(CONFIDENCE_MAX_ASPECT_CIRC_SD + 1, slope=steep, is_flat=False), 0.0)
+        self.assertEqual(confidence._aspect_score(0.0, slope=steep), 1.0)
+        self.assertEqual(confidence._aspect_score(CONFIDENCE_MAX_ASPECT_CIRC_SD, slope=steep), 0.0)
+        self.assertEqual(confidence._aspect_score(CONFIDENCE_MAX_ASPECT_CIRC_SD + 1, slope=steep), 0.0)
 
     def test_aspect_penalty_fades_in_with_slope(self):
         halfway = (FLAT_ROOF_DEGREES_THRESHOLD + CONFIDENCE_ASPECT_FULL_SLOPE) / 2
         self.assertAlmostEqual(
-            confidence._aspect_score(CONFIDENCE_MAX_ASPECT_CIRC_SD, slope=halfway, is_flat=False), 0.5)
+            confidence._aspect_score(CONFIDENCE_MAX_ASPECT_CIRC_SD, slope=halfway), 0.5)
         # continuous across the flat-roof threshold:
         just_sloped = FLAT_ROOF_DEGREES_THRESHOLD + 0.01
         self.assertGreater(
-            confidence._aspect_score(CONFIDENCE_MAX_ASPECT_CIRC_SD, slope=just_sloped, is_flat=False), 0.99)
+            confidence._aspect_score(CONFIDENCE_MAX_ASPECT_CIRC_SD, slope=just_sloped), 0.99)
 
     def test_shape_score_relative_to_area_minimum(self):
         for n_pixels in (15, 100, 400, 5000):
@@ -109,14 +107,14 @@ class RoofPlaneConfidenceTest(unittest.TestCase):
     def test_good_roof_scores_high(self):
         meta = {"score": 0.08, "aspect_circ_sd": 0.1, "thinness_ratio": 0.9}
         score, sub = confidence.roof_plane_confidence(
-            meta=meta, slope=35, is_flat=False, resolution=0.5, area_raw=95.0, area_grown=100.0)
+            meta=meta, slope=35, resolution=0.5, area_raw=95.0, area_grown=100.0)
         self.assertGreater(score, 0.85)
         self.assertEqual(set(sub), set(CONFIDENCE_WEIGHTS))
 
     def test_poor_roof_scores_low(self):
         meta = {"score": 0.9, "aspect_circ_sd": 1.4, "thinness_ratio": 0.2}
         score, _ = confidence.roof_plane_confidence(
-            meta=meta, slope=35, is_flat=False, resolution=2.0, area_raw=40.0, area_grown=100.0)
+            meta=meta, slope=35, resolution=2.0, area_raw=40.0, area_grown=100.0)
         self.assertLess(score, 0.3)
 
 

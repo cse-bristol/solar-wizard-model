@@ -22,7 +22,7 @@ from shapely import wkt, Polygon
 from shapely.geometry import MultiPolygon
 from shapely.strtree import STRtree
 
-from solar_pv.constants import INTERANNUAL_GHI_COV, Z_P90
+from solar_pv.constants import INTERANNUAL_GHI_COV, Z_P90, FLAT_ROOF_ROW_SPACING_SUN_ELEVATION_DEGREES
 from solar_pv.db_funcs import count, sql_command, connection
 from solar_pv.geos import square
 from solar_pv.pv.confidence import roof_plane_confidence
@@ -33,6 +33,25 @@ from solar_pv.util import get_cpu_count
 # Annual P90 derate: a poor-weather year still exceeded ~90% of the time, from
 # inter-annual GHI variation only. See solar_pv/constants.py.
 P90_DERATE = 1 - Z_P90 * INTERANNUAL_GHI_COV
+
+
+def flat_roof_ground_cover_ratio(panel_slope: float) -> float:
+    """Panel area per unit of flat roof, for south-facing rows tilted at `panel_slope`
+    and spaced so they don't shade each other above
+    FLAT_ROOF_ROW_SPACING_SUN_ELEVATION_DEGREES."""
+    tilt = math.radians(panel_slope)
+    sun = math.radians(FLAT_ROOF_ROW_SPACING_SUN_ELEVATION_DEGREES)
+    # row pitch per unit of panel length: its horizontal depth plus the shadow gap behind it
+    return 1 / (math.cos(tilt) + math.sin(tilt) / math.tan(sun))
+
+
+def roof_and_panel_area(footprint: float, slope: float, panel_slope: float, is_flat: bool) -> Tuple[float, float]:
+    """(area of the roof surface, area of panels on it), in m2, from the plane's planar
+    footprint. Panels on pitched roofs are flush-mounted, covering the whole surface."""
+    area = footprint / math.cos(math.radians(slope))
+    if is_flat:
+        return area, footprint * flat_roof_ground_cover_ratio(panel_slope)
+    return area, area
 
 
 def load_results_cpu_count():
@@ -210,7 +229,8 @@ def _aggregate_pixel_data(roof_planes,
 
         # Central (P50) estimate, computed over the raw geometry RANSAC actually
         # fit to the LiDAR points
-        area = geom_raw.area / math.cos(math.radians(roof_plane['slope']))
+        area, panel_area = roof_and_panel_area(
+            geom_raw.area, roof_plane['slope'], roof_plane['panel_slope'], roof_plane['is_flat'])
         kwh_years = []
         kwh_months = [[] for _ in wh_month_fields]
         weights = []
@@ -227,11 +247,12 @@ def _aggregate_pixel_data(roof_planes,
             weights.append(pixel.intersection(geom_raw).area / pixel.area)
 
         for i, kwh_month in enumerate(kwh_months):
-            roof_plane[_month_field(i)] = round(np.average(np.array(kwh_month) * area, weights=weights), 2)
+            roof_plane[_month_field(i)] = round(np.average(np.array(kwh_month) * panel_area, weights=weights), 2)
 
-        roof_plane['kwh_year'] = round(np.average(np.array(kwh_years) * area, weights=weights), 2)
-        roof_plane['kwp'] = round(area * peak_power_per_m2, 2)
+        roof_plane['kwh_year'] = round(np.average(np.array(kwh_years) * panel_area, weights=weights), 2)
+        roof_plane['kwp'] = round(panel_area * peak_power_per_m2, 2)
         roof_plane['area'] = round(area, 2)
+        roof_plane['panel_area'] = round(panel_area, 2)
 
         contributing_pixels = 0
         for idx in rtree.query(geom_grown, predicate='intersects'):
@@ -256,7 +277,6 @@ def _aggregate_pixel_data(roof_planes,
             confidence, sub_scores = roof_plane_confidence(
                 meta=roof_plane['meta'],
                 slope=roof_plane['slope'],
-                is_flat=roof_plane['is_flat'],
                 resolution=resolution,
                 area_raw=geom_raw.area,
                 area_grown=geom_grown.area)
@@ -297,11 +317,13 @@ def _write_results(pg_conn, job_id: int, roofs: List[dict]):
                     kwh_per_kwp,
                     horizon,
                     area,
+                    panel_area,
                     confidence,
                     x_coef,
                     y_coef,
                     intercept,
                     slope,
+                    panel_slope,
                     aspect,
                     is_flat,
                     meta
@@ -328,11 +350,13 @@ def _write_results(pg_conn, job_id: int, roofs: List[dict]):
                 %(kwh_per_kwp)s,
                 %(horizon)s,
                 %(area)s,
+                %(panel_area)s,
                 %(confidence)s,
                 %(x_coef)s,
                 %(y_coef)s,
                 %(intercept)s,
                 %(slope)s,
+                %(panel_slope)s,
                 %(aspect)s,
                 %(is_flat)s,
                 %(meta)s
@@ -363,6 +387,7 @@ def _load_roof_planes(pg_conn, job_id: int, page: int, page_size: int, building_
             ST_AsText(rp.roof_geom_raw_27700) AS roof_geom_raw_27700,
             rp.roof_plane_id,
             rp.slope,
+            rp.panel_slope,
             rp.aspect,
             rp.x_coef,
             rp.y_coef,

@@ -11,6 +11,7 @@ reads buildings from a vector file and LiDAR from rasters on disk, and writes th
 result tables out as layers of a GeoPackage:
 
 ```shell
+pip install solar_model[cli] # [cli] if you need an ephemeral postgres
 python -m solar_pv --buildings buildings.gpkg --lidar tiles/ --out results.gpkg
 ```
 
@@ -51,12 +52,14 @@ computed over the roof plane RANSAC fits to the LiDAR points.
 | `kwh_year` | Central (P50) annual generation for a typical met year. |
 | `kwh_year_p90` | Conservative annual generation (P90): a poor-weather year real generation would still exceed ~90% of the time, from inter-annual weather variation only (`kwh_year * (1 - Z_P90 * INTERANNUAL_GHI_COV)`). |
 | `kwh_jan` … `kwh_dec` | Central monthly generation (P50), typical met year. |
-| `kwp` | Installed peak power (kWp) for the usable roof area. |
+| `kwp` | Installed peak power (kWp) for `panel_area`. |
 | `kwh_per_kwp` | `kwh_year / kwp`. |
 | `area` | Usable roof-plane area (m², on the roof plane). |
+| `panel_area` | Area of panels (m²) the kWp and kWh figures are based on. Equal to `area` on pitched roofs, where panels are flush-mounted; smaller on flat roofs, allowing for the gaps between rows of panels tilted at `panel_slope`. |
 | `confidence` | Per-roof `[0,1]` score for how well the roof surface is known — plane fit, aspect consistency, shape, LiDAR resolution and raw-vs-grown geometry agreement, combined as a weighted geometric mean. The individual sub-scores are kept in `meta.confidence`. Higher is more trustworthy. |
 | `horizon` | Per-slice horizon profile (obstruction angles around the roof plane). |
-| `slope`, `aspect`, `is_flat` | Roof-plane orientation; `is_flat` marks near-horizontal planes. |
+| `slope`, `aspect`, `is_flat` | Roof-plane orientation; `is_flat` marks near-horizontal planes. `aspect` is aligned to a building edge, and on flat roofs is the edge closest to south that panel rows face. |
+| `panel_slope` | Tilt panels are modelled at: the `flat_roof_degrees` param on flat roofs, else `slope`. |
 | `x_coef`, `y_coef`, `intercept` | Coefficients of the fitted plane. |
 | `meta` | JSON of roof-detection diagnostics (fit residuals, aspect/shape stats) and the `confidence` sub-scores. |
 

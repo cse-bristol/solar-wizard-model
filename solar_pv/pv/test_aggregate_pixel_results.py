@@ -11,7 +11,8 @@ from solar_pv.paths import TEST_DATA
 from solar_pv import tables
 from solar_pv.constants import SYSTEM_LOSS
 from solar_pv.pv.pixels import PixelFields, pixels_for_geoms
-from solar_pv.pv.aggregate_pixel_results import _aggregate_page, _aggregate_pixel_data
+from solar_pv.pv.aggregate_pixel_results import _aggregate_page, _aggregate_pixel_data, \
+    flat_roof_ground_cover_ratio, roof_and_panel_area
 from solar_pv.test_utils.test_funcs import ParameterisedTestCase
 
 _PIXEL_DATA = join(TEST_DATA, "pixel_aggregation")
@@ -68,6 +69,36 @@ class PixelAggregateTestCase(ParameterisedTestCase):
             ('0001.json', 43989, 'kwh_m06', 398.89),
             ('0001.json', 43989, 'horizon', [0.06, 0.16, 0.24, 0.36, 0.37, 0.39, 0.49, 0.5, 0.49, 0.49, 0.5, 0.5, 0.41, 0.41, 0.38, 0.26, 0.25, 0.16, 0.08, 0.07, 0.06, 0.03, 0.06, 0.03, 0.02, 0.01, 0.0, 0.01, 0.0, 0.0, 0.01, 0.0, 0.0, 0.04, 0.05, 0.03]),
         ], _roof_field)
+
+    def test_panel_area_drives_kwp_and_kwh(self):
+        roofs = {r['roof_plane_id']: r for r in _aggregate('0001.json')}
+        pitched, flat = roofs[43989], roofs[43991]
+        self.assertEqual(pitched['panel_area'], pitched['area'])
+        self.assertLess(flat['panel_area'], flat['area'])
+        for roof in (pitched, flat):
+            self.assertAlmostEqual(roof['kwp'], roof['panel_area'] * 0.2, delta=0.01)
+        # the flat roof's measured slope is kept; only its panels are tilted:
+        self.assertLess(flat['slope'], 5)
+        self.assertEqual(flat['panel_slope'], 10)
+
+
+class PanelAreaTest(unittest.TestCase):
+
+    def test_ground_cover_ratio(self):
+        self.assertAlmostEqual(flat_roof_ground_cover_ratio(0), 1.0)
+        # 10° rows spaced for a 15° sun: 1 / (cos 10° + sin 10° / tan 15°)
+        self.assertAlmostEqual(flat_roof_ground_cover_ratio(10), 0.6124, places=4)
+        self.assertLess(flat_roof_ground_cover_ratio(30), flat_roof_ground_cover_ratio(10))
+
+    def test_pitched_roof_panels_cover_roof_surface(self):
+        area, panel_area = roof_and_panel_area(100, slope=60, panel_slope=60, is_flat=False)
+        self.assertAlmostEqual(area, 200)
+        self.assertAlmostEqual(panel_area, 200)
+
+    def test_flat_roof_panels_are_row_spaced(self):
+        area, panel_area = roof_and_panel_area(100, slope=0, panel_slope=10, is_flat=True)
+        self.assertAlmostEqual(area, 100)
+        self.assertAlmostEqual(panel_area, 100 * flat_roof_ground_cover_ratio(10))
 
 
 def _field_arrays_from_pixels(pixels, fields):

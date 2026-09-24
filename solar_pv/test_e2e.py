@@ -26,7 +26,7 @@ from tempfile import TemporaryDirectory
 from osgeo import ogr
 
 from solar_pv import cli
-from solar_pv.constants import CONFIDENCE_WEIGHTS
+from solar_pv.constants import CONFIDENCE_WEIGHTS, FLAT_ROOF_DEGREES_THRESHOLD
 from solar_pv.paths import TEST_DATA
 from solar_pv.pv.confidence import combine
 
@@ -88,6 +88,7 @@ class E2ETest(unittest.TestCase):
             # with the P90 below the central estimate and a confidence in [0,1]:
             plane = next(iter(pv_roof_plane))
             self.assertGreater(plane.GetField("area"), 0)
+            self.assertGreater(plane.GetField("panel_area"), 0)
             self.assertGreater(plane.GetField("kwh_year"), 0)
             self.assertLess(plane.GetField("kwh_year_p90"), plane.GetField("kwh_year"))
             self.assertGreaterEqual(plane.GetField("confidence"), 0)
@@ -120,3 +121,7 @@ class E2ETest(unittest.TestCase):
         # was never computed:
         if not plane.GetField("is_flat"):
             self.assertGreater(meta["aspect_circ_sd"], 0, f"roof plane {rp_id}: {meta['plane_type']}")
+            self.assertEqual(plane.GetField("panel_area"), plane.GetField("area"), f"roof plane {rp_id}")
+        else:
+            self.assertLess(plane.GetField("panel_area"), plane.GetField("area"), f"roof plane {rp_id}")
+            self.assertLessEqual(plane.GetField("slope"), FLAT_ROOF_DEGREES_THRESHOLD, f"roof plane {rp_id}")

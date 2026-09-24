@@ -67,10 +67,10 @@ def model_solar_pv(pg_uri: str,
     :param flat_roof_degrees: The angle at which panels are assumed to be mounted on
     flat roofs. 10° is normally recommended as it allows fitting more panels,
     despite the optimal angle for generation being closer to 30-40°, as 10° allows
-    the gaps between rows can be smaller. Ballast and frame costs will also be lower
-    (not modeled).
-    TODO this used to affect generation on flat roofs as gaps between panel rows were
-         modelled, this is not currently done though.
+    the gaps between rows to be smaller. Ballast and frame costs will also be lower
+    (not modeled). Rows are spaced so they don't shade each other above a sun
+    elevation of FLAT_ROOF_ROW_SPACING_SUN_ELEVATION_DEGREES, which sets the flat
+    roof's `panel_area` (and so its kWp and kWh).
     :param peak_power_per_m2: kW per m2 of panels
     :param pv_tech: either "crystSi" (crystalline silicon - a conventional solar cell),
     or "CdTe" (Cadmium telluride - a thin-film cell). PVMAPS uses different model parameters

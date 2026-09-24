@@ -7,9 +7,8 @@ onto the GDAL base rasters as numpy where-ops.
 gdaldem already produces compass aspect (0 = N clockwise, 0 also marking flat via
 -zero_for_flat), which is the convention the PV calculation consumes, so no aspect-convention
 conversion is needed. Slope/aspect themselves stay on GDAL (gdaldem, produced by
-generate_rasters); this only does the override merge. The flat-roof pitch is applied upstream —
-roof_polygons writes flat_roof_degrees into the plane slope the override raster is built from —
-so it is already baked into the overrides here.
+generate_rasters); this only does the override merge. The slope override is built from each
+plane's `panel_slope`, so the flat-roof panel tilt is already baked into it.
 """
 from typing import Tuple
 
@@ -26,7 +25,7 @@ def apply_correction(slope_deg: np.ndarray,
     :param aspect_compass_deg: GDAL compass aspect (degrees, 0 = N clockwise / flat).
     :param aspect_override_compass_deg: per-pixel roof-plane aspect (compass degrees), NaN
         outside usable planes.
-    :param slope_override_deg: per-pixel roof-plane slope (degrees), NaN outside usable planes.
+    :param slope_override_deg: per-pixel roof-plane panel slope (degrees), NaN outside usable planes.
     :return: (slope_adjusted_deg, aspect_adjusted_compass_deg).
     """
     slope = np.asarray(slope_deg, dtype=np.float64)

@@ -252,7 +252,7 @@ def generate_slope_override_raster(pg_uri: str,
 
     with connection(pg_uri) as pg_conn:
         mask_sql = SQL(
-            "SELECT ST_Force3D(roof_geom_27700, slope) FROM {roof_polygons} WHERE usable"
+            "SELECT ST_Force3D(roof_geom_27700, panel_slope) FROM {roof_polygons} WHERE usable"
         ).format(
             roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE)
         ).as_string(pg_conn)

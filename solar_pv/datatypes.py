@@ -49,5 +49,7 @@ class RoofPolygon(RoofPlane):
 
     roof_geom_raw_27700: Polygon
     roof_geom_27700: Polygon
+    # The tilt panels are modelled at: `flat_roof_degrees` on flat roofs, else `slope`
+    panel_slope: float
     usable: bool
     not_usable_reason: str

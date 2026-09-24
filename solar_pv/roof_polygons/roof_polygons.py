@@ -65,9 +65,7 @@ def _create_roof_polygons(building_geom: Polygon,
         plane_polys: List[RoofPolygon] = []
         for plane in planes:
             plane = cast(RoofPolygon, plane)
-            is_flat = plane['is_flat']
-            # TODO ideally store actual slope and panel_slope as separate things
-            plane['slope'] = flat_roof_degrees if is_flat else plane['slope']
+            plane['panel_slope'] = flat_roof_degrees if plane['is_flat'] else plane['slope']
 
             raw_roof_poly, roof_poly = _make_polygon(plane, building_geom, min_dist_to_edge_m, resolution_metres)
 
@@ -234,6 +232,10 @@ def _merge_touching(planes: List[RoofPolygon],
             if id(plane) in checked:
                 continue
             checked.add(id(plane))
+            if plane['is_flat']:
+                if _is_valid(plane):
+                    merged.append(plane)
+                continue
 
             slope = plane['slope']
             poly = plane['roof_geom_27700']

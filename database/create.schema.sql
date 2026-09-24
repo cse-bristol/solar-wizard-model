@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS {roof_polygons} (
     y_coef double precision NOT NULL,
     intercept double precision NOT NULL,
     slope double precision NOT NULL,
+    panel_slope double precision NOT NULL,
     aspect double precision NOT NULL,
     is_flat bool NOT NULL,
     usable bool NOT NULL,

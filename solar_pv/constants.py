@@ -14,6 +14,10 @@ AZIMUTH_ALIGNMENT_THRESHOLD = 15.5
 # Same as above, but for flat roofs:
 FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD = 46
 
+# Rows of tilted panels on flat roofs are spaced so the row in front doesn't shade the
+# one behind while the sun is above this elevation:
+FLAT_ROOF_ROW_SPACING_SUN_ELEVATION_DEGREES = 15
+
 # PVGIS recommend this factor is applied to cover losses due to cabling, inverter, and
 # degradation due to age.
 # See section 5.2.5 here:

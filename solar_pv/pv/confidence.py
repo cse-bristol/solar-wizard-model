@@ -37,12 +37,9 @@ def _fit_score(mae: float) -> float:
                   / math.log(ROOFDET_MAX_MAE / CONFIDENCE_FULL_FIT_MAE))
 
 
-def _aspect_score(aspect_circ_sd: float, slope: float, is_flat: bool) -> float:
+def _aspect_score(aspect_circ_sd: float, slope: float) -> float:
     """Spread of inlier-pixel aspects (radians), with the penalty faded in by slope:
-    aspect is meaningless for flat roofs and noisy for shallow ones. `is_flat` is
-    needed as well as `slope` since flat roofs carry the panel tilt as their slope."""
-    if is_flat:
-        return 1.0
+    aspect is meaningless for flat roofs and noisy for shallow ones."""
     raw = _clamp(1 - aspect_circ_sd / CONFIDENCE_MAX_ASPECT_CIRC_SD)
     strength = _clamp((slope - FLAT_ROOF_DEGREES_THRESHOLD)
                       / (CONFIDENCE_ASPECT_FULL_SLOPE - FLAT_ROOF_DEGREES_THRESHOLD))
@@ -76,7 +73,6 @@ def _geom_agreement_score(area_raw: float, area_grown: float) -> float:
 
 def confidence_sub_scores(meta: dict,
                           slope: float,
-                          is_flat: bool,
                           resolution: float,
                           area_raw: float,
                           area_grown: float) -> Dict[str, float]:
@@ -84,7 +80,7 @@ def confidence_sub_scores(meta: dict,
     planar area (m2) of the polygon RANSAC fitted."""
     return {
         "fit": _fit_score(meta["score"]),
-        "aspect": _aspect_score(meta["aspect_circ_sd"], slope, is_flat),
+        "aspect": _aspect_score(meta["aspect_circ_sd"], slope),
         "shape": _shape_score(meta["thinness_ratio"], area_raw / resolution ** 2),
         "resolution": _resolution_score(resolution),
         "geom_agreement": _geom_agreement_score(area_raw, area_grown),
@@ -102,10 +98,9 @@ def combine(sub_scores: Dict[str, float]) -> float:
 
 def roof_plane_confidence(meta: dict,
                           slope: float,
-                          is_flat: bool,
                           resolution: float,
                           area_raw: float,
                           area_grown: float):
     """Return (combined [0,1] confidence, sub-scores dict)."""
-    sub_scores = confidence_sub_scores(meta, slope, is_flat, resolution, area_raw, area_grown)
+    sub_scores = confidence_sub_scores(meta, slope, resolution, area_raw, area_grown)
     return combine(sub_scores), sub_scores
