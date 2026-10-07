@@ -79,6 +79,10 @@ _GOOD_ENOUGH_MERGE_COST = 1.0
 # Regions re-proposed from poorly explained pixels can be smaller than the first ones, as
 # the energy decides whether they're worth keeping (see `plane_moves`).
 _MIN_REPROPOSED_PIXELS = 4
+# Rounds of refitting a plane to its pixels within its residual scale, and the share of its
+# pixels that must be (else its least-squares fit is kept):
+_TRIM_ROUNDS = 3
+_MIN_TRIM_SHARE = 0.5
 # Max rounds of proposing new candidate planes from the pixels no plane explains well.
 _MAX_PROPOSAL_ROUNDS = 2
 
@@ -681,10 +685,29 @@ def _refine(xyz: np.ndarray,
     for plane_id, plane in planes.items():
         idxs = np.flatnonzero(labels == plane_id)
         set_plane_fit(plane, xyz[idxs, :2], xyz[idxs, 2], aspect[idxs], resolution_metres)
+        _trim_plane_coefficients(plane, xyz[idxs])
         snapped = _snapped_aspect(plane, face_index)
         if snapped is not None:
             plane['aspect'] = snapped
     return labels
+
+
+def _trim_plane_coefficients(plane: dict, xyz: np.ndarray) -> None:
+    """
+    Refit the plane's coefficients (and slope, aspect and flatness) to just its pixels
+    within its residual scale of it. Pixels up to about twice that from a plane are
+    assigned to it, and at 1m those are mostly mixed ridge, eave or gutter pixels, which
+    tilt a least-squares fit on a plane only a few pixels deep. The fit metrics are left as
+    they are, over all its pixels.
+    """
+    xy, z = xyz[:, :2], xyz[:, 2]
+    for _ in range(_TRIM_ROUNDS):
+        residual = z - (xy[:, 0] * plane['x_coef'] + xy[:, 1] * plane['y_coef'] + plane['intercept'])
+        inliers = np.abs(residual) <= _residual_scale(plane)
+        if np.count_nonzero(inliers) < max(3, _MIN_TRIM_SHARE * len(z)):
+            break
+        _set_plane_coefficients(plane, xy[inliers], z[inliers])
+    plane['inliers_xy'] = xy
 
 
 def _snapped_aspect(plane: RoofPlane, face_index: _FaceIndex) -> Optional[float]:

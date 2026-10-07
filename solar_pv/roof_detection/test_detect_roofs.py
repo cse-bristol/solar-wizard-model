@@ -11,7 +11,8 @@ from shapely import wkt, box
 
 from solar_pv.paths import TEST_DATA
 from solar_pv.roof_detection.detect_roofs import _detect_building_roof_planes, _create_adaptive_batches, _assign_and_merge, \
-    _set_skew
+    _set_skew, _trim_plane_coefficients
+from solar_pv.roof_detection.merge_adjacent import set_plane_fit
 from solar_pv.datatypes import RoofDetBuilding
 from solar_pv.test_utils.test_funcs import ParameterisedTestCase
 
@@ -195,3 +196,38 @@ class SetSkewTest(unittest.TestCase):
 
         self.assertEqual(polygon["skew"]["pixels"], 200)
         self.assertAlmostEqual(polygon["skew"]["tilt_err_deg"], 5, delta=0.1)
+
+
+class TrimPlaneCoefficientsTest(unittest.TestCase):
+
+    def test_ignores_mixed_eave_pixels(self):
+        # a 6-pixel-deep 30 degree roof, whose eave row is mixed with the gutter and wall
+        # below, 0.6m under the roof:
+        xs, ys = np.meshgrid(np.arange(10) + 0.5, np.arange(6) + 0.5)
+        xs, ys = xs.ravel(), ys.ravel()
+        y_coef = np.tan(np.radians(30))
+        zs = ys * y_coef + 5 - np.where(ys < 1, 0.6, 0.0)
+        xyz = np.column_stack([xs, ys, zs])
+        plane = {}
+        set_plane_fit(plane, xyz[:, :2], zs, np.zeros(len(zs)), 1.0)
+        self.assertGreater(abs(plane['slope'] - 30), 3)
+
+        _trim_plane_coefficients(plane, xyz)
+
+        self.assertAlmostEqual(plane['slope'], 30, delta=0.01)
+        self.assertAlmostEqual(plane['y_coef'], y_coef, delta=1e-6)
+        self.assertEqual(len(plane['inliers_xy']), 60)
+
+    def test_keeps_least_squares_fit_if_most_pixels_are_off_it(self):
+        xs, ys = np.meshgrid(np.arange(10) + 0.5, np.arange(6) + 0.5)
+        xs, ys = xs.ravel(), ys.ravel()
+        # ridges and furrows, which no plane fits:
+        zs = np.where(ys % 2 < 1, 5.0, 6.0)
+        xyz = np.column_stack([xs, ys, zs])
+        plane = {}
+        set_plane_fit(plane, xyz[:, :2], zs, np.zeros(len(zs)), 1.0)
+        before = dict(plane)
+
+        _trim_plane_coefficients(plane, xyz)
+
+        self.assertEqual(plane['y_coef'], before['y_coef'])
