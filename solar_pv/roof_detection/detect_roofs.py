@@ -178,7 +178,7 @@ def _handle_building_batch(pg_uri: str, job_id: int, building_ids: List[str], pa
 
         if len(found) > 0:
             building_polygons = create_roof_polygons(building_id, building['polygon'], found, **params,
-                                                     rejected=rejected)
+                                                     rejected=rejected, pixels_xyz=_pixels_xyz(building['pixels']))
             _set_skew(building_polygons, building['pixels'], params['resolution_metres'])
             polygons.extend(building_polygons)
 
@@ -852,6 +852,10 @@ def _create_adaptive_batches(buildings_with_areas: List[Tuple[str, float]]) -> L
         batches.append(current_batch)
     
     return batches
+
+
+def _pixels_xyz(pixels: List[dict]) -> np.ndarray:
+    return np.array([[pixel["x"], pixel["y"], pixel["elevation"]] for pixel in pixels])
 
 
 def _set_skew(polygons: List[RoofPolygon], pixels: List[dict], resolution_metres: float) -> None:

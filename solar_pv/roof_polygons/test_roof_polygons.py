@@ -160,3 +160,49 @@ class RoofPolygonTest(ParameterisedTestCase):
         # "mincut" leaves merging planes to roof detection
         planes, _ = _create_polygons_using_test_data("0007", method="legacy")
         assert len(planes) == 2
+
+
+def _flat_plane(xy: np.ndarray, z: float) -> dict:
+    return {"building_id": "b", "inliers_xy": xy, "x_coef": 0.0, "y_coef": 0.0, "intercept": z,
+            "slope": 0.0, "aspect": 180, "is_flat": True}
+
+
+def _pitched_plane(xy: np.ndarray, x_coef: float, intercept: float) -> dict:
+    return {"building_id": "b", "inliers_xy": xy, "x_coef": x_coef, "y_coef": 0.0, "intercept": intercept,
+            "slope": float(np.degrees(np.arctan(abs(x_coef)))), "aspect": 270 if x_coef > 0 else 90,
+            "is_flat": False}
+
+
+def _grid(x0: int, x1: int, y0: int, y1: int) -> np.ndarray:
+    xs, ys = np.meshgrid(np.arange(x0, x1) + 0.5, np.arange(y0, y1) + 0.5)
+    return np.column_stack([xs.ravel(), ys.ravel()])
+
+
+class LegacyCarveTest(ParameterisedTestCase):
+
+    def test_polygon_kept_off_pixels_off_its_plane(self):
+        # a flat roof at 10m with a 2x2 block of plant 1m above it, at its corner:
+        xy = _grid(0, 10, 0, 10)
+        z = np.where((xy[:, 0] > 8) & (xy[:, 1] > 8), 11.0, 10.0)
+        plant = z > 10.5
+        building = Polygon([(0, 0), (10, 0), (10, 10), (0, 10)])
+        polygons = _create_roof_polygons(
+            building, [_flat_plane(xy[~plant], 10.0)], max_roof_slope_degrees=80, min_roof_area_m=8,
+            min_roof_degrees_from_north=45, flat_roof_degrees=10, min_dist_to_edge_m=0.1,
+            resolution_metres=1.0, method="legacy", pixels_xyz=np.column_stack([xy, z]))
+        self.assertEqual(len(polygons), 1)
+        poly = polygons[0]['roof_geom_27700']
+        self.assertFalse(poly.contains(Polygon([(8.4, 8.4), (8.6, 8.4), (8.6, 8.6)]).centroid))
+        self.assertTrue(poly.contains(Polygon([(5, 5), (5.1, 5), (5.1, 5.1)]).centroid))
+
+    def test_parallel_planes_at_a_step_not_merged(self):
+        # two touching roof faces facing the same way at the same pitch, 1m apart in height:
+        xy1, xy2 = _grid(0, 10, 0, 5), _grid(0, 10, 5, 10)
+        z1, z2 = 0.5 * xy1[:, 0] + 10, 0.5 * xy2[:, 0] + 11
+        building = Polygon([(0, 0), (10, 0), (10, 10), (0, 10)])
+        pixels = np.column_stack([np.concatenate([xy1, xy2]), np.concatenate([z1, z2])])
+        polygons = _create_roof_polygons(
+            building, [_pitched_plane(xy1, 0.5, 10), _pitched_plane(xy2, 0.5, 11)], max_roof_slope_degrees=80,
+            min_roof_area_m=8, min_roof_degrees_from_north=45, flat_roof_degrees=10, min_dist_to_edge_m=0.1,
+            resolution_metres=1.0, method="legacy", pixels_xyz=pixels)
+        self.assertEqual(len(polygons), 2)
