@@ -206,3 +206,21 @@ Each roof plane is given a `confidence` score between 0 and 1, which is a measur
 These are combined with a weighted geometric mean.
 
 Each sub-score is floored at 0.05 before being combined, so that a single sub-score of zero puts a roof at the bottom of the ranking without discarding what the other sub-scores say about it.
+
+### skew
+
+Each roof plane's `meta` also has a `skew` entry, set by roof detection for every plane, usable or not: how far the plane's stored orientation is from the plane implied by the LiDAR pixels within its grown roof polygon (the polygon that is output, and that the horizon is averaged over). It isn't part of the confidence score yet.
+
+The residuals of those pixels from the stored plane are regressed on x and y. The slope terms are the tilt error, the constant is the height offset at the pixels' centroid, and what is left is roughness. This separates out what the MAE mixes together: a small plane can fit to within a few cm and still be several degrees out, and a cluttered roof can have a high MAE and the right orientation - and only the orientation affects kWh/kWp. The implied plane is a robust fit (least trimmed squares, then Tukey biweight), so it is the plane most of the pixels lie on rather than a compromise with pixels of a neighbouring face or of clutter. It must fit at least 3/4 of the pixels: on a plane only 3 or 4 pixels deep, a plane through half of them is just two rows, which can be fitted almost exactly at the wrong tilt, leaving out the mixed ridge or eave rows. So up to 1/4 of the pixels can be off the plane. Where more are, the polygon straddles two faces and there is no dominant plane (see `roughness_m`).
+
+* `tilt_err_deg`: the angle between the stored and implied planes.
+* `tilt_z`: the tilt error relative to its standard error. The standard error is a jackknife over one-pixel-wide bands, across and along the slope: how much the tilt moves when a band is left out. The residuals of a small plane aren't independent noise (a ridge or eave row is offset as a whole), so a standard error that assumes they are makes small planes' tilts look far more certain than they are. Null if the pixels are fewer than 3 bands deep across the slope.
+* `bands`: how many pixels deep across the slope the plane is.
+* `offset_m`: the height of the implied plane above the stored one, at the pixels' centroid.
+* `roughness_m`: the spread of the pixels about the implied plane. Where a polygon straddles two faces roughly equally there is no dominant plane, and the implied plane is an average of the two which fits neither: a high roughness shows this.
+* `contamination_deg`: the angle between the implied plane and a least-squares fit to all the pixels: how far pixels that aren't on the plane would pull it.
+* `outlier_share`: the share of pixels off the implied plane.
+* `implied_slope`, `implied_aspect`: the implied plane's orientation.
+* `pixels`: the number of pixels.
+
+`skew` is null where there are fewer than 10 pixels, or they don't span at least two pixels in x and in y.

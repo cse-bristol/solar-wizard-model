@@ -82,8 +82,11 @@ class E2ETest(unittest.TestCase):
 
             pv_building = results.GetLayerByName("pv_building")
             self.assertIsNotNone(pv_building, "pv_building layer missing")
-            # every input building gets a row (excluded ones carry an exclusion_reason):
+            # every input building gets a row (excluded ones carry an exclusion_reason),
+            # with its input geometry:
             self.assertEqual(pv_building.GetFeatureCount(), n_buildings_in)
+            for building in pv_building:
+                self.assertIsNotNone(building.GetGeometryRef(), building.GetField("building_id"))
 
             pv_roof_plane = results.GetLayerByName("pv_roof_plane")
             self.assertIsNotNone(pv_roof_plane, "pv_roof_plane layer missing")
@@ -92,7 +95,7 @@ class E2ETest(unittest.TestCase):
 
             # a detected roof plane should have positive area and annual generation,
             # with the P90 below the central estimate and a confidence in [0,1]:
-            plane = next(iter(pv_roof_plane))
+            plane = next(p for p in pv_roof_plane if p.GetField("usable"))
             self.assertGreater(plane.GetField("area"), 0)
             self.assertGreater(plane.GetField("panel_area"), 0)
             self.assertGreater(plane.GetField("kwh_year"), 0)
@@ -102,12 +105,24 @@ class E2ETest(unittest.TestCase):
 
             pv_roof_plane.ResetReading()
             n_merged = 0
+            n_unusable = 0
             for plane in pv_roof_plane:
+                if not plane.GetField("usable"):
+                    n_unusable += 1
+                    self.assertIsNotNone(plane.GetField("not_usable_reason"))
+                    self.assertIsNone(plane.GetField("kwh_year"))
+                    continue
                 self._check_confidence_meta(plane)
                 if "_MERGED_" in json.loads(plane.GetField("meta"))["plane_type"]:
                     n_merged += 1
             # make sure the merge path, which recomputes the aspect stats, was exercised:
             self.assertGreater(n_merged, 0, "no merged roof planes in the fixture")
+            self.assertGreater(n_unusable, 0, "no unusable roof planes in the output")
+
+            rejected = results.GetLayerByName("rejected_roof_plane")
+            self.assertIsNotNone(rejected, "rejected_roof_plane layer missing")
+            reasons = {r.GetField("rejection_reason") for r in rejected}
+            self.assertIn("HIGH_MAE", reasons)
 
     def _check_confidence_meta(self, plane):
         """The confidence sub-scores in `meta` survive to the GeoPackage, are

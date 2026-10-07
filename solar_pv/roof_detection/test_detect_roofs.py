@@ -7,10 +7,11 @@ from os.path import join
 from typing import List
 
 import numpy as np
-from shapely import wkt
+from shapely import wkt, box
 
 from solar_pv.paths import TEST_DATA
-from solar_pv.roof_detection.detect_roofs import _detect_building_roof_planes, _create_adaptive_batches, _assign_and_merge
+from solar_pv.roof_detection.detect_roofs import _detect_building_roof_planes, _create_adaptive_batches, _assign_and_merge, \
+    _set_skew
 from solar_pv.datatypes import RoofDetBuilding
 from solar_pv.test_utils.test_funcs import ParameterisedTestCase
 
@@ -36,7 +37,12 @@ def _roofdet(building_id: str, res: float, method: str = "legacy"):
 
 # With "mincut", an 8-pixel flat fragment at the bottom edge of the M-shaped roof is
 # kept as its own plane (it is too small to be usable once it's a polygon).
-_MINCUT_EXPECTED = {"0032": [82, 84, 168, 264, 264, 264]}
+# The Cotham school roofs are messy in aerial imagery, but only partly in the LiDAR: in
+# 0029, a small flat roof is found to be clean.
+_MINCUT_EXPECTED = {
+    "0032": [82, 84, 168, 264, 264, 264],
+    "0029": [149],
+}
 
 
 _ROOF_DETECTION_CASES = [
@@ -171,3 +177,21 @@ class AssignAndMergeTest(unittest.TestCase):
         found = _assign_and_merge(xyz, aspect, labels, planes, np.ones(100, dtype=bool), 1.0, -1)
 
         self.assertEqual(found, [])
+
+
+class SetSkewTest(unittest.TestCase):
+
+    def test_skew_over_pixels_in_polygon(self):
+        # a roof tilted 5 degrees more than its stored plane, beside pixels far off it that
+        # are outside its polygon:
+        xs, ys = np.meshgrid(np.arange(30) + 0.5, np.arange(10) + 0.5)
+        xs, ys = xs.ravel(), ys.ravel()
+        tilted_x_coef = np.tan(np.arctan(0.6) + np.radians(5))
+        zs = np.where(xs < 20, xs * tilted_x_coef + 5, 100.0)
+        pixels = [{"x": x, "y": y, "elevation": z} for x, y, z in zip(xs, ys, zs)]
+        polygon = {"roof_geom_27700": box(0, 0, 20, 10), "x_coef": 0.6, "y_coef": 0.0, "intercept": 5.0}
+
+        _set_skew([polygon], pixels, resolution_metres=1.0)
+
+        self.assertEqual(polygon["skew"]["pixels"], 200)
+        self.assertAlmostEqual(polygon["skew"]["tilt_err_deg"], 5, delta=0.1)

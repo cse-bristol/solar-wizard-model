@@ -8,6 +8,9 @@ LIDAR_PIXEL_TABLE = 'lidar_pixels'
 ROOF_POLYGON_TABLE = 'roof_polygons'
 """Table to store the polygons which represent planar areas of roof"""
 
+REJECTED_PLANE_TABLE = 'rejected_planes'
+"""Roof planes thrown away by roof detection or roof polygon creation, and why (for debugging)"""
+
 PANEL_POLYGON_TABLE = 'panel_polygons'
 """pixel data joined with polygons representing arrays of PV panels"""
 

@@ -5,25 +5,27 @@ Standalone command-line entrypoint for the solar PV model.
 
 Reads buildings from a vector file (any OGR format - GPKG, Shapefile, GeoJSON,
 ...) and elevation from LiDAR rasters on disk, runs the model, and writes the
-two result tables out as layers of a single GeoPackage. With no --pg-uri it
-spins up a throwaway PostGIS cluster for the run.
+results out as layers of a single GeoPackage (see `export_results`). With no
+--pg-uri it spins up a throwaway PostGIS cluster for the run.
 
     python -m solar_pv --buildings x.gpkg --lidar tiles/ --out results.gpkg
 """
 import argparse
 import logging
 import os
+import shutil
 import tempfile
 from typing import Iterable, Iterator, List, Optional
 
 from osgeo import ogr, osr
 from psycopg2.sql import SQL, Literal
 
+from solar_pv import tables
 from solar_pv.buildings import BuildingInput
 from solar_pv.db_funcs import command_to_gpkg, connection
 from solar_pv.ephemeral_postgres import ephemeral_postgres
 from solar_pv.lidar.lidar import LidarTile
-from solar_pv.model_solar_pv import model_solar_pv
+from solar_pv.model_solar_pv import model_solar_pv, drop_job_schema
 
 _LIDAR_EXTENSIONS = (".tif", ".tiff", ".vrt")
 
@@ -131,25 +133,95 @@ def discover_lidar(paths: List[str]) -> List[LidarTile]:
     return tiles
 
 
+# Columns of models.pv_roof_plane that only usable roof planes have values for, with
+# their types:
+_PV_ONLY_COLUMNS = {
+    **{f"kwh_{m}": "double precision" for m in
+       ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")},
+    "kwh_year": "double precision",
+    "kwh_year_p90": "double precision",
+    "kwp": "double precision",
+    "kwh_per_kwp": "double precision",
+    "horizon": "real[]",
+    "panel_area": "double precision",
+    "confidence": "real",
+}
+_PLANE_COLUMNS = ("x_coef", "y_coef", "intercept", "slope", "panel_slope", "aspect", "is_flat", "meta")
+
+
 def export_results(pg_uri: str, job_id: int, out: str) -> None:
-    """Write models.pv_building and models.pv_roof_plane for this job as two
-    layers of the GeoPackage at `out`."""
+    """
+    Write this job's results as layers of the GeoPackage at `out`:
+
+    * pv_building: models.pv_building, with the input building geometries and the
+      ground heights found for them (`solar_pv.evaluation` needs these).
+    * pv_roof_plane: models.pv_roof_plane, plus the roof planes that were found but
+      not usable (`usable` false, with a `not_usable_reason` and no PV outputs).
+    * rejected_roof_plane: roof planes that roof detection or roof polygon creation
+      threw away, with a `rejection_reason` (see `solar_pv.roof_detection.rejections`).
+
+    Needs the job's schema, so the model must have been run with debug_mode.
+    """
+    # Not Identifiers: command_to_gpkg can't take the double quotes those add. The
+    # names are safe, as tables.schema() formats an int.
+    schema = tables.schema(job_id)
+    buildings = SQL(f"{schema}.{tables.BUILDINGS_TABLE}")
+    roof_polygons = SQL(f"{schema}.{tables.ROOF_POLYGON_TABLE}")
+    rejected_planes = SQL(f"{schema}.{tables.REJECTED_PLANE_TABLE}")
+
+    pv_columns = SQL(", ").join(SQL(c) for c in _PV_ONLY_COLUMNS)
+    null_pv_columns = SQL(", ").join(SQL(f"NULL::{t} AS {c}") for c, t in _PV_ONLY_COLUMNS.items())
+    plane_columns = SQL(", ").join(SQL(c) for c in _PLANE_COLUMNS)
+
     with connection(pg_uri) as pg_conn:
         err = command_to_gpkg(
             pg_conn, pg_uri, out, "pv_building",
-            SQL("SELECT * FROM models.pv_building WHERE job_id = {job_id}"),
+            SQL("""
+                SELECT pb.*, b.min_ground_height, b.max_ground_height, b.geom_27700
+                FROM models.pv_building pb
+                LEFT JOIN {buildings} b USING (building_id)
+                WHERE pb.job_id = {job_id}
+            """),
             src_srs=27700, dst_srs=27700, overwrite=True,
-            job_id=Literal(job_id))
+            buildings=buildings, job_id=Literal(job_id))
         if err:
             raise RuntimeError(f"Failed to export pv_building: {err}")
 
+        # The transform matches the one used for models.pv_roof_plane (see
+        # aggregate_pixel_results), so usable and unusable planes line up:
         err = command_to_gpkg(
             pg_conn, pg_uri, out, "pv_roof_plane",
-            SQL("SELECT * FROM models.pv_roof_plane WHERE job_id = {job_id}"),
+            SQL("""
+                SELECT building_id, roof_plane_id, job_id, roof_geom_4326, {pv_columns},
+                       area, {plane_columns}, true AS usable, NULL::text AS not_usable_reason
+                FROM models.pv_roof_plane
+                WHERE job_id = {job_id}
+                UNION ALL
+                SELECT building_id, roof_plane_id, {job_id},
+                       ST_SetSrid(ST_Transform(
+                           roof_geom_27700,
+                           '+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 '
+                           '+y_0=-100000 +datum=OSGB36 +nadgrids=OSTN15_NTv2_OSGBtoETRS.gsb +units=m +no_defs',
+                           4326), 4326)::geometry(polygon, 4326),
+                       {null_pv_columns},
+                       ST_Area(roof_geom_raw_27700) / cos(radians(slope)),
+                       {plane_columns}, false, not_usable_reason
+                FROM {roof_polygons}
+                WHERE NOT usable
+            """),
             src_srs=4326, dst_srs=4326, append=True,
-            job_id=Literal(job_id))
+            pv_columns=pv_columns, null_pv_columns=null_pv_columns, plane_columns=plane_columns,
+            roof_polygons=roof_polygons, job_id=Literal(job_id))
         if err:
             raise RuntimeError(f"Failed to export pv_roof_plane: {err}")
+
+        err = command_to_gpkg(
+            pg_conn, pg_uri, out, "rejected_roof_plane",
+            SQL("SELECT * FROM {rejected_planes}"),
+            src_srs=27700, dst_srs=27700, append=True,
+            rejected_planes=rejected_planes)
+        if err:
+            raise RuntimeError(f"Failed to export rejected_roof_plane: {err}")
 
 
 def check_proj_datumgrid(pg_uri: str) -> None:
@@ -186,7 +258,8 @@ def _parse_args(argv: List[str]):
     parser.add_argument("--lidar", required=True, nargs="+",
                         help="LiDAR raster files (GeoTIFF/VRT) or directories of them")
     parser.add_argument("--out", required=True,
-                        help="Output GeoPackage path (two layers: pv_building, pv_roof_plane)")
+                        help="Output GeoPackage path (layers: pv_building, pv_roof_plane, "
+                             "rejected_roof_plane)")
 
     parser.add_argument("--pg-uri", dest="pg_uri", default=None,
                         help="postGIS connection URI; if omitted a throwaway "
@@ -222,20 +295,28 @@ def _run(pg_uri: str, args, buildings: Iterable[BuildingInput],
     tuning = {name: getattr(args, name) for name in _TUNING_OPTIONS
               if getattr(args, name) is not None}
 
+    # distinct subdirs: the model copies its generated rasters from root_solar_dir
+    # into lidar_dir before loading them, which is a no-op copy if they coincide.
+    solar_dir = os.path.join(args.work_dir, "solar")
+    lidar_dir = os.path.join(args.work_dir, "lidar")
+
+    # debug_mode, so the job schema is still there to export from; cleaned up below.
     model_solar_pv(
         pg_uri=pg_uri,
-        # distinct subdirs: the model copies its generated rasters from root_solar_dir
-        # into lidar_dir before loading them, which is a no-op copy if they coincide.
-        root_solar_dir=os.path.join(args.work_dir, "solar"),
-        lidar_dir=os.path.join(args.work_dir, "lidar"),
+        root_solar_dir=solar_dir,
+        lidar_dir=lidar_dir,
         job_id=args.job_id,
         buildings=buildings,
         lidar_tiles=lidar_tiles,
-        debug_mode=args.keep,
+        debug_mode=True,
         **tuning)
 
     export_results(pg_uri, args.job_id, args.out)
     logging.info(f"Wrote results to {args.out}")
+    if not args.keep:
+        drop_job_schema(pg_uri, args.job_id)
+        shutil.rmtree(solar_dir, ignore_errors=True)
+        shutil.rmtree(lidar_dir, ignore_errors=True)
 
 
 def main(argv: List[str] = None) -> None:

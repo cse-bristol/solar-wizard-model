@@ -1,4 +1,4 @@
-from typing import TypedDict, List
+from typing import TypedDict, List, Optional
 
 import numpy as np
 from shapely.geometry import Polygon, MultiPolygon
@@ -54,3 +54,5 @@ class RoofPolygon(RoofPlane):
     panel_slope: float
     usable: bool
     not_usable_reason: str
+    # see solar_pv.roof_detection.plane_skew
+    skew: Optional[dict]

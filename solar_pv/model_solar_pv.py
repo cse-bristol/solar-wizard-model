@@ -85,9 +85,13 @@ def model_solar_pv(pg_uri: str,
     :param roof_detection_method: how pixels left over after RANSAC, and adjacent planes,
     are merged: "legacy" (greedy region merging), or "mincut" (assign pixels to planes by
     multi-label min-cut on their elevation residuals, and only merge planes greedily -
-    see `solar_pv.roof_detection.detect_roofs._assign_and_merge`).
+    see `solar_pv.roof_detection.detect_roofs._assign_and_merge`), or "segment" (as
+    "mincut", but with candidate planes from region growing rather than RANSAC, refined
+    until stable - see `solar_pv.roof_detection.detect_roofs._segment_and_assign`).
     :param debug_mode: if True, don't delete temporary files or the postgres schema
-    for the job.
+    for the job, so the caller can read its intermediate tables (e.g. the input
+    buildings, unusable and rejected roof planes). Drop it afterwards with
+    `drop_job_schema`.
 
     The results are written to models.pv_building / models.pv_roof_plane, keyed on job_id;
     read them back from there (e.g. via `solar_pv.cli.export_results` for a GeoPackage).
@@ -107,7 +111,7 @@ def model_solar_pv(pg_uri: str,
     peak_power_per_m2 = _validate_float(peak_power_per_m2, "peak_power_per_m2", 0)
     min_dist_to_edge_m = _validate_float(min_dist_to_edge_m, "min_dist_to_edge_m", 0)
     roof_polygon_method = _validate_str(roof_polygon_method, "roof_polygon_method", allowed=["legacy", "mincut"])
-    roof_detection_method = _validate_str(roof_detection_method, "roof_detection_method", allowed=["legacy", "mincut"])
+    roof_detection_method = _validate_str(roof_detection_method, "roof_detection_method", allowed=["legacy", "mincut", "segment"])
 
     _validate_env_var("PVGIS_DATA_TAR_FILE_DIR")
 
@@ -189,7 +193,7 @@ def model_solar_pv(pg_uri: str,
         logging.info("Removing temp dir...")
         shutil.rmtree(solar_dir)
         logging.info("Dropping schema...")
-        _drop_schema(pg_uri, job_id)
+        drop_job_schema(pg_uri, job_id)
         logging.info("Removing job LiDAR dir...")
         shutil.rmtree(job_lidar_dir)
     else:
@@ -206,6 +210,7 @@ def _init_schema(pg_uri: str, job_id: int):
             bounds_27700=Identifier(tables.schema(job_id), tables.BOUNDS_TABLE),
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
             roof_polygons=Identifier(tables.schema(job_id), tables.ROOF_POLYGON_TABLE),
+            rejected_planes=Identifier(tables.schema(job_id), tables.REJECTED_PLANE_TABLE),
             panel_polygons=Identifier(tables.schema(job_id), tables.PANEL_POLYGON_TABLE),
             model_stage=Identifier(tables.schema(job_id), tables.STAGE_TABLE),
             elevation=Identifier(tables.schema(job_id), tables.ELEVATION),
@@ -215,7 +220,7 @@ def _init_schema(pg_uri: str, job_id: int):
         )
 
 
-def _drop_schema(pg_uri: str, job_id: int):
+def drop_job_schema(pg_uri: str, job_id: int):
     with connection(pg_uri) as pg_conn:
         sql_command(
             pg_conn,

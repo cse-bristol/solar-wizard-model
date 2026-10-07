@@ -7,8 +7,8 @@ The model is documented at [documents/pv_model.md](documents/pv_model.md).
 ## Running standalone (CLI)
 
 The quickest way to run the model over an area is the command-line interface, which
-reads buildings from a vector file and LiDAR from rasters on disk, and writes the two
-result tables out as layers of a GeoPackage:
+reads buildings from a vector file and LiDAR from rasters on disk, and writes the
+results out as layers of a GeoPackage:
 
 ```shell
 pip install solar_model[cli] # [cli] if you need an ephemeral postgres
@@ -21,7 +21,17 @@ python -m solar_pv --buildings buildings.gpkg --lidar tiles/ --out results.gpkg
 * `--lidar` takes one or more GeoTIFF/VRT files or directories of them. The job bounds are
   derived from the buildings, so the LiDAR only needs to cover that extent buffered by the
   horizon search radius.
-* `--out` is written as a GeoPackage with two layers, `pv_building` and `pv_roof_plane`.
+* `--out` is written as a GeoPackage with three layers:
+  * `pv_building`: `models.pv_building`, with the input building geometries.
+  * `pv_roof_plane`: `models.pv_roof_plane`, plus the roof planes that were found but not
+    usable (`usable` false, with a `not_usable_reason` - `SLOPE`, `ASPECT` or `AREA` - and
+    no PV outputs).
+  * `rejected_roof_plane`: for debugging, the roof planes that roof detection or roof polygon
+    creation threw away, with a `rejection_reason` and diagnostics in `meta`: `HIGH_MAE`
+    (a poor plane fit; its pixels may since have gone to other planes), `TOO_FEW_PIXELS`,
+    `CLUTTER`, `MESSY_FLAT_ROOF`, `MESSY_BUILDING` or `NO_POLYGON`; and, as `OBSTACLES`, the
+    pixels the mess check counted as obstacles. The mincut roof detection and polygon methods
+    record all of these; legacy only records the mess rejections and `HIGH_MAE`.
 * `--pg-uri` points at an existing postGIS database; if omitted, a throwaway PostGIS cluster
   is started for the run and thrown away afterwards. That convenience uses `testing.postgresql`,
   which is not a core dependency (the model and the `--pg-uri` path don't need it) - install it
@@ -38,7 +48,7 @@ project's nix-shell provides them, and the CLI checks for them at startup.
 
 The programmatic entrypoint of the model is the function `model_solar_pv` in module `solar_pv.model_solar_pv`. The docstring for that function has documentation for how to use it and the meaning of each parameter.
 
-Results are inserted into 2 postgres tables (also the two GeoPackage layers the CLI writes):
+Results are inserted into 2 postgres tables (also the first two GeoPackage layers the CLI writes):
 * `models.pv_building` contains LiDAR-derived building height, and a reason (if any) why the building has been skipped in PV modelling, which can be one of 4 things: `NO_LIDAR_COVERAGE`, `OUTDATED_LIDAR_COVERAGE`, `NO_ROOF_PLANES_DETECTED`, or `ALL_ROOF_PLANES_UNUSABLE`.
 * `models.pv_roof_plane` contains the geometry, slope and aspect of the roof plane, its predicted kWh output, and a horizon profile. A building can have 0 to many of these.
 

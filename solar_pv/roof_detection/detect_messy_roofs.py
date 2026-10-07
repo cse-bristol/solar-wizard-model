@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import numpy as np
 from networkx import Graph
@@ -6,6 +6,7 @@ from skimage import measure
 from skimage.graph import RAG
 
 from solar_pv.datatypes import RoofPlane
+from solar_pv.roof_detection import rejections
 from solar_pv.roof_detection.premade_planes import _image
 
 _EDGE_OF_BUILDING = -1
@@ -92,7 +93,8 @@ def _obstacle_group_count(graph: Graph, n: int) -> int:
     return sum(1 for _ in _obstacle_neighbours(graph, n))
 
 
-def detect_messy_roofs(planes: Dict[int, RoofPlane], labels, xy, res: float, debug: bool = False) -> List[RoofPlane]:
+def detect_messy_roofs(planes: Dict[int, RoofPlane], labels, xy, res: float, debug: bool = False,
+                       rejected: Optional[List[dict]] = None) -> List[RoofPlane]:
     """
     Try and detect flat roofs covered in obstacles (pipes, air con etc).
 
@@ -114,6 +116,8 @@ def detect_messy_roofs(planes: Dict[int, RoofPlane], labels, xy, res: float, deb
 
     If more than a threshold percentage of the pixels are either in an obstacle group
     or a flat roof that has been rejected for mess, reject the whole building.
+
+    Rejected planes are recorded in `rejected` (see `rejections`).
     """
     has_flat_roofs = any(p['is_flat'] for p in planes.values())
     if not has_flat_roofs:
@@ -152,6 +156,8 @@ def detect_messy_roofs(planes: Dict[int, RoofPlane], labels, xy, res: float, deb
                 planes.append(node)
             else:
                 mess_inliers += size
+                rejections.record(rejected, node, rejections.MESSY_FLAT_ROOF,
+                                  mess_score_pct=mess_score_pct, obstacle_groups=obstacle_group_count)
         else:
             planes.append(node)
 
@@ -161,6 +167,8 @@ def detect_messy_roofs(planes: Dict[int, RoofPlane], labels, xy, res: float, deb
     if total_mess_score >= _TOTAL_MESS_THRESHOLD_PCT:
         if debug:
             print(f"rejecting whole building due to total mess score: {total_mess_score}")
+        for plane in planes:
+            rejections.record(rejected, plane, rejections.MESSY_BUILDING, building_mess_share=total_mess_score)
         return []
 
     return planes

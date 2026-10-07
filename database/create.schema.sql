@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS {roof_polygons} (
     aspect double precision NOT NULL,
     is_flat bool NOT NULL,
     usable bool NOT NULL,
+    not_usable_reason text,
     inliers_xy real[][] NOT NULL,
     meta jsonb NOT NULL
 );
@@ -62,6 +63,23 @@ CREATE TABLE IF NOT EXISTS {roof_polygons} (
 CREATE INDEX ON {roof_polygons} (building_id);
 CREATE INDEX ON {roof_polygons} USING GIST (roof_geom_27700);
 CREATE INDEX ON {roof_polygons} USING GIST (roof_geom_raw_27700);
+
+--
+-- Roof planes thrown away by roof detection or roof polygon creation, and why. For
+-- debugging only (see solar_pv/roof_detection/rejections.py):
+--
+CREATE TABLE IF NOT EXISTS {rejected_planes} (
+    rejected_plane_id SERIAL PRIMARY KEY,
+    building_id text NOT NULL,
+    rejection_reason text NOT NULL,
+    geom_27700 geometry(multipolygon, 27700) NOT NULL,
+    slope double precision,
+    aspect double precision,
+    is_flat bool,
+    meta jsonb NOT NULL
+);
+
+CREATE INDEX ON {rejected_planes} (building_id);
 
 --
 -- Create the table for storing individual panel polygons:

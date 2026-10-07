@@ -20,6 +20,7 @@ from shapely.validation import make_valid
 from solar_pv.geos import square, largest_polygon, get_grid_cells, \
     de_zigzag
 from solar_pv.datatypes import RoofPlane, RoofPolygon
+from solar_pv.roof_detection import rejections
 from solar_pv.roof_polygons.occupancy import tile_polygon
 from solar_pv.roof_polygons.split_evenly import split_evenly
 
@@ -33,8 +34,12 @@ def create_roof_polygons(building_id: str,
                          flat_roof_degrees: int,
                          min_dist_to_edge_m: float,
                          resolution_metres: float,
-                         method: str = "legacy") -> List[RoofPolygon]:
-    """Add roof polygons and other related fields to the dicts in `planes`"""
+                         method: str = "legacy",
+                         rejected: Optional[List[dict]] = None) -> List[RoofPolygon]:
+    """
+    Add roof polygons and other related fields to the dicts in `planes`. Planes that end
+    up with no polygon are recorded in `rejected` (see `rejections`).
+    """
     t0 = time.time()
     polygons = _create_roof_polygons(
         building_geom,
@@ -45,7 +50,8 @@ def create_roof_polygons(building_id: str,
         flat_roof_degrees=flat_roof_degrees,
         min_dist_to_edge_m=min_dist_to_edge_m,
         resolution_metres=resolution_metres,
-        method=method)
+        method=method,
+        rejected=rejected)
     t1 = time.time()
     if t1 - t0 > 1200:
         print(f"very slow polygon creation: {building_id} took {round(t1 - t0, 2)} s")
@@ -62,7 +68,8 @@ def _create_roof_polygons(building_geom: Polygon,
                           min_dist_to_edge_m: float,
                           resolution_metres: float,
                           method: str = "legacy",
-                          debug: bool = False) -> List[RoofPolygon]:
+                          debug: bool = False,
+                          rejected: Optional[List[dict]] = None) -> List[RoofPolygon]:
 
     if len(planes) == 0:
         return []
@@ -75,21 +82,30 @@ def _create_roof_polygons(building_geom: Polygon,
         raise ValueError(f"Unknown roof polygon method {method}")
 
     try:
-        return make_polygons(building_geom,
-                             planes,
-                             max_roof_slope_degrees=max_roof_slope_degrees,
-                             min_roof_area_m=min_roof_area_m,
-                             min_roof_degrees_from_north=min_roof_degrees_from_north,
-                             flat_roof_degrees=flat_roof_degrees,
-                             min_dist_to_edge_m=min_dist_to_edge_m,
-                             resolution_metres=resolution_metres,
-                             debug=debug)
+        polygons = make_polygons(building_geom,
+                                 planes,
+                                 max_roof_slope_degrees=max_roof_slope_degrees,
+                                 min_roof_area_m=min_roof_area_m,
+                                 min_roof_degrees_from_north=min_roof_degrees_from_north,
+                                 flat_roof_degrees=flat_roof_degrees,
+                                 min_dist_to_edge_m=min_dist_to_edge_m,
+                                 resolution_metres=resolution_metres,
+                                 debug=debug)
     except Exception as e:
         building_id = planes[0]['building_id']
         print(f"Exception during roof polygon creation for building_id {building_id}:")
         traceback.print_exception(e)
         _write_test_data(_to_test_data(planes[0]['building_id'], planes, building_geom))
         raise e
+
+    # Legacy polygon creation merges planes, so a plane missing from its output may
+    # have been merged rather than lost:
+    if method == "mincut":
+        kept = {id(p) for p in polygons}
+        for plane in planes:
+            if id(plane) not in kept:
+                rejections.record(rejected, plane, rejections.NO_POLYGON)
+    return polygons
 
 
 def _create_roof_polygons_legacy(building_geom: Polygon,
@@ -133,7 +149,9 @@ def _create_roof_polygons_legacy(building_geom: Polygon,
         roof_poly = plane['roof_geom_27700']
         plane['roof_geom_raw_27700'] = largest_polygon(plane['roof_geom_raw_27700'].intersection(roof_poly))
 
-        _set_usability(plane, max_roof_slope_degrees, min_roof_area_m, min_roof_degrees_from_north)
+        # Arbitrarily use the area of roof_geom_27700 rather than roof_geom_raw_27700...
+        _set_usability(plane, plane['roof_geom_27700'],
+                       max_roof_slope_degrees, min_roof_area_m, min_roof_degrees_from_north)
 
     return [p for p in plane_polys if _is_valid(p)]
 
@@ -157,7 +175,7 @@ def _create_roof_polygons_mincut(building_geom: Polygon,
     Any remaining overlaps are split the same way, or else by nearest pixel.
 
     `roof_geom_raw_27700` is the plane's pixels, as squares, within its polygon: its area
-    is what the plane's area (and so its kWp and kWh) is based on.
+    is what the plane's area (and so its kWp, kWh and min-area check) is based on.
     """
     tile_m = resolution_metres
     building_shrunk = building_geom.buffer(
@@ -202,7 +220,8 @@ def _create_roof_polygons_mincut(building_geom: Polygon,
         if roof_poly is None or roof_poly.is_empty:
             continue
         plane['roof_geom_raw_27700'] = _polygonal(plane['roof_geom_raw_27700'].intersection(roof_poly))
-        _set_usability(plane, max_roof_slope_degrees, min_roof_area_m, min_roof_degrees_from_north)
+        _set_usability(plane, plane['roof_geom_raw_27700'],
+                       max_roof_slope_degrees, min_roof_area_m, min_roof_degrees_from_north)
 
     return [p for p in plane_polys if _is_valid(p)]
 
@@ -436,11 +455,11 @@ def _nearest_dist(pixels_xy: np.ndarray, geom) -> float:
 
 
 def _set_usability(plane: RoofPolygon,
+                   area_geom,
                    max_roof_slope_degrees: int,
                    min_roof_area_m: int,
                    min_roof_degrees_from_north: int) -> None:
-    # Arbitrarily use the area of roof_geom_27700 rather than roof_geom_raw_27700...
-    area = plane['roof_geom_27700'].area / math.cos(math.radians(plane['slope']))
+    area = area_geom.area / math.cos(math.radians(plane['slope']))
 
     if plane['slope'] > max_roof_slope_degrees:
         plane['usable'] = False
@@ -627,8 +646,8 @@ def _write_test_data(test_data):
     """Write test data for building in the format that the roof polygon tests expect"""
     debug_data_dir = os.environ.get("DEBUG_DATA_DIR")
     if debug_data_dir:
-        fname = join(debug_data_dir, f"roof_poly_{test_data['building_id']}.json", 'w')
-        with open(fname) as f:
+        fname = join(debug_data_dir, f"roof_poly_{test_data['building_id']}.json")
+        with open(fname, 'w') as f:
             json.dump(test_data, f, sort_keys=True, default=str)
         print(f"Wrote debug data to {fname}")
     else:
