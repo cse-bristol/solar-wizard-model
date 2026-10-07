@@ -18,6 +18,9 @@ from scipy.ndimage import distance_transform_edt
 from scipy.sparse.csgraph import breadth_first_order, maximum_flow
 
 NONE = -1
+RESIDUAL_CAP = 4.0
+NONE_COST = 2.0
+SMOOTHNESS_PER_M = 0.5
 # maximum_flow needs int32 capacities: energy is quantized to this many steps per unit.
 _ENERGY_SCALE = 1000
 
@@ -27,11 +30,12 @@ def assign_pixels(xyz: np.ndarray,
                   n_planes: int,
                   resolution_metres: float,
                   residual_scales: Optional[Sequence[float]] = None,
-                  residual_cap: float = 4.0,
-                  none_cost: float = 2.0,
-                  smoothness_per_m: float = 0.5,
+                  residual_cap: float = RESIDUAL_CAP,
+                  none_cost: float = NONE_COST,
+                  smoothness_per_m: float = SMOOTHNESS_PER_M,
                   max_dist_m: float = 3,
-                  max_cycles: int = 5) -> np.ndarray:
+                  max_cycles: int = 5,
+                  return_energy: bool = False):
     """
     Reassign `labels` (per pixel of `xyz`: a plane index in [0, n_planes), or NONE).
     `residual_scales` is per plane, 0.25m if not given.
@@ -44,6 +48,9 @@ def assign_pixels(xyz: np.ndarray,
     length, so per pixel edge the smoothness is `smoothness_per_m` scaled by 1/resolution:
     otherwise boundaries would cost relatively more at coarser resolutions, and small
     planes would lose out.
+
+    If `return_energy`, also returns the energy of the starting labels, with each plane
+    fitted to its starting pixels.
     """
     if residual_scales is None:
         residual_scales = [0.25] * n_planes
@@ -73,6 +80,7 @@ def assign_pixels(xyz: np.ndarray,
 
     lo, hi = _neighbour_pairs(grid)
     energy = _energy(current, data, lo, hi, smoothness)
+    start_energy = energy
     for _ in range(max_cycles):
         improved = False
         for alpha in range(n_planes + 1):
@@ -83,6 +91,8 @@ def assign_pixels(xyz: np.ndarray,
         if not improved:
             break
 
+    if return_energy:
+        return current - 1, start_energy
     return current - 1
 
 
