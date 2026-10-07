@@ -1,7 +1,7 @@
 from typing import TypedDict, List
 
 import numpy as np
-from shapely.geometry import Polygon
+from shapely.geometry import Polygon, MultiPolygon
 
 
 class RoofDetBuilding(TypedDict):
@@ -47,7 +47,8 @@ class RoofPlane(TypedDict):
 class RoofPolygon(RoofPlane):
     """Outputs from roof plane -> roof polygon algorithm"""
 
-    roof_geom_raw_27700: Polygon
+    # the plane's pixels (as squares) within roof_geom_27700: its area is the plane's area
+    roof_geom_raw_27700: MultiPolygon
     roof_geom_27700: Polygon
     # The tilt panels are modelled at: `flat_roof_degrees` on flat roofs, else `slope`
     panel_slope: float

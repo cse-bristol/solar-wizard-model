@@ -55,6 +55,12 @@ class E2ETest(unittest.TestCase):
             os.environ["PVGIS_DATA_TAR_FILE_DIR"] = self._prev_pvgis_dir
 
     def test_cli_runs_end_to_end(self):
+        self._run_and_check([])
+
+    def test_cli_runs_end_to_end_mincut(self):
+        self._run_and_check(["--roof-detection-method", "mincut", "--roof-polygon-method", "mincut"])
+
+    def _run_and_check(self, extra_args):
         with TemporaryDirectory(prefix="solar_pv_e2e_") as work_dir:
             out = join(work_dir, "results.gpkg")
             cli.main([
@@ -64,7 +70,7 @@ class E2ETest(unittest.TestCase):
                 "--id-field", "osm_id",
                 "--horizon-search-radius", "300",
                 "--work-dir", work_dir,
-            ])
+            ] + extra_args)
 
             self.assertTrue(exists(out), "CLI produced no output GeoPackage")
 

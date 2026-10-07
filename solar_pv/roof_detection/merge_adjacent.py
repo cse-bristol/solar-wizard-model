@@ -164,25 +164,11 @@ def _update_node_data(graph, src: int, dst: int):
     aspect_subset = np.concatenate([dst_node['aspect_subset'], src_node['aspect_subset']])
     dst_node['xy_local'] = np.concatenate([dst_node['xy_local'], src_node['xy_local']])
     dst_node['plane_sums'] = dst_node['plane_sums'] + src_node['plane_sums']
-    lr = PlaneFit()
-    lr.fit(xy_subset, z_subset)
-    z_pred = lr.predict(xy_subset)
-    # merged_score = lr.score(xy_subset, z_subset)
-    merged_score = mean_absolute_error(z_subset, z_pred)
 
     dst_node['building_id'] = dst_node.get('building_id', src_node.get('building_id'))
     dst_node['xy_subset'] = xy_subset
     dst_node['z_subset'] = z_subset
     dst_node['aspect_subset'] = aspect_subset
-    dst_node['score'] = merged_score
-
-    dst_node['x_coef'] = lr.coef_[0]
-    dst_node['y_coef'] = lr.coef_[1]
-    dst_node['intercept'] = lr.intercept_
-    dst_node['slope'] = slope_deg(lr.coef_[0], lr.coef_[1])
-    dst_node['is_flat'] = dst_node['slope'] <= FLAT_ROOF_DEGREES_THRESHOLD
-    dst_node['aspect_raw'] = aspect_deg(lr.coef_[0], lr.coef_[1])
-    dst_node['inliers_xy'] = xy_subset
 
     if dst_node['outlier'] is src_node['outlier'] is False:
         dst_node['plane_type'] = dst_node['plane_type'] + "_MERGED_" + src_node['plane_type']
@@ -193,32 +179,7 @@ def _update_node_data(graph, src: int, dst: int):
 
     dst_node['outlier'] = False
 
-    dst_node["r2"] = r2_score(z_subset, z_pred)
-    dst_node["mae"] = merged_score
-    dst_node["mse"] = metrics.mean_squared_error(z_subset, z_pred)
-    dst_node["rmse"] = metrics.root_mean_squared_error(z_subset, z_pred)
-    try:
-        dst_node["msle"] = metrics.mean_squared_log_error(z_subset, z_pred)
-    except ValueError:
-        dst_node["msle"] = None
-    dst_node["mape"] = metrics.mean_absolute_percentage_error(z_subset, z_pred)
-    dst_node["sd"] = np.std(np.abs(z_subset - z_pred))
-
-    z_image, idxs = _image(xy_subset, z_subset, nodata=-9999, res=dst_node['res'])
-    plane_mask = z_image != -9999
-    group_areas = _group_areas(plane_mask)
-    roof_plane_area = group_areas[1]
-    convex_hull = morphology.convex_hull_image(plane_mask)
-    convex_hull_area = np.count_nonzero(convex_hull)
-    dst_node["cv_hull_ratio"] = roof_plane_area / convex_hull_area
-
-    perimeter = perimeter_crofton(plane_mask, directions=4)
-    dst_node["thinness_ratio"] = (4 * np.pi * roof_plane_area) / (perimeter * perimeter)
-
-    # units match RoofPlane as built by RANSAC: mean in degrees, sd in radians
-    aspect_rads = np.radians(aspect_subset)
-    dst_node["aspect_circ_mean"] = math.degrees(circular_mean_rad(aspect_rads))
-    dst_node["aspect_circ_sd"] = circular_sd_rad(aspect_rads)
+    set_plane_fit(dst_node, xy_subset, z_subset, aspect_subset, dst_node['res'])
 
     if 'aspect' in src_node and 'aspect' in dst_node:
         a1 = dst_node["aspect"]
@@ -228,6 +189,54 @@ def _update_node_data(graph, src: int, dst: int):
         dst_node["aspect"] = a1 if a1_diff < a2_diff else a2
     elif 'aspect' in src_node:
         dst_node["aspect"] = src_node.get('aspect')
+
+
+def set_plane_fit(plane: dict, xy: np.ndarray, z: np.ndarray, aspect: np.ndarray, res: float) -> None:
+    """
+    Refit `plane` to the pixels `xy`/`z` (with per-pixel `aspect`), and recompute
+    everything on it that derives from its pixels: coefficients, slope, fit metrics,
+    shape ratios and aspect statistics. `inliers_xy` becomes `xy`.
+    """
+    lr = PlaneFit()
+    lr.fit(xy, z)
+    z_pred = lr.predict(xy)
+    score = mean_absolute_error(z, z_pred)
+
+    plane['score'] = score
+    plane['x_coef'] = lr.coef_[0]
+    plane['y_coef'] = lr.coef_[1]
+    plane['intercept'] = lr.intercept_
+    plane['slope'] = slope_deg(lr.coef_[0], lr.coef_[1])
+    plane['is_flat'] = plane['slope'] <= FLAT_ROOF_DEGREES_THRESHOLD
+    plane['aspect_raw'] = aspect_deg(lr.coef_[0], lr.coef_[1])
+    plane['inliers_xy'] = xy
+
+    plane["r2"] = r2_score(z, z_pred)
+    plane["mae"] = score
+    plane["mse"] = metrics.mean_squared_error(z, z_pred)
+    plane["rmse"] = metrics.root_mean_squared_error(z, z_pred)
+    try:
+        plane["msle"] = metrics.mean_squared_log_error(z, z_pred)
+    except ValueError:
+        plane["msle"] = None
+    plane["mape"] = metrics.mean_absolute_percentage_error(z, z_pred)
+    plane["sd"] = np.std(np.abs(z - z_pred))
+
+    z_image, idxs = _image(xy, z, nodata=-9999, res=res)
+    plane_mask = z_image != -9999
+    group_areas = _group_areas(plane_mask)
+    roof_plane_area = group_areas[1]
+    convex_hull = morphology.convex_hull_image(plane_mask)
+    convex_hull_area = np.count_nonzero(convex_hull)
+    plane["cv_hull_ratio"] = roof_plane_area / convex_hull_area
+
+    perimeter = perimeter_crofton(plane_mask, directions=4)
+    plane["thinness_ratio"] = (4 * np.pi * roof_plane_area) / (perimeter * perimeter)
+
+    # units match RoofPlane as built by RANSAC: mean in degrees, sd in radians
+    aspect_rads = np.radians(aspect)
+    plane["aspect_circ_mean"] = math.degrees(circular_mean_rad(aspect_rads))
+    plane["aspect_circ_sd"] = circular_sd_rad(aspect_rads)
 
 
 def _hierarchical_merge(graph, labels, thresh: float = 0):
@@ -271,10 +280,9 @@ def _rag_score(xy, z, aspect, labels, planes: Dict[int, RoofPlane], res: float, 
     if graph.has_node(nodata):
         graph.remove_node(nodata)
 
-    # RAGs are constructed using edges, so if there are no edges it will make
-    # an empty graph
-    if graph.number_of_nodes() == 0 and len(planes) == 1:
-        for plane_idx in planes.keys():
+    # RAGs are constructed using edges, so a plane touching no other region is missing
+    for plane_idx in planes.keys():
+        if not graph.has_node(plane_idx):
             graph.add_node(plane_idx)
 
     # `PlaneSums` need coordinates near 0:

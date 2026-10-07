@@ -40,6 +40,8 @@ _TUNING_OPTIONS = {
     "peak_power_per_m2": float,
     "pv_tech": str,
     "min_dist_to_edge_m": float,
+    "roof_polygon_method": str,
+    "roof_detection_method": str,
 }
 
 def read_buildings(path: str,

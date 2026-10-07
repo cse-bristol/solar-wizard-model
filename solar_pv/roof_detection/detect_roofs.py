@@ -10,6 +10,7 @@ from os.path import join
 import time
 import math
 import traceback
+import zlib
 from typing import List, Dict, Tuple
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -17,6 +18,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from psycopg2.extras import DictCursor, execute_values, Json
 from psycopg2.sql import SQL, Identifier
 import numpy as np
+import shapely
 from shapely import wkt
 
 from solar_pv.db_funcs import count, sql_command, connect, connection
@@ -26,8 +28,10 @@ from solar_pv.constants import RANSAC_LARGE_BUILDING, \
     RANSAC_LARGE_MAX_TRIALS, RANSAC_SMALL_MAX_TRIALS, RANSAC_SMALL_BUILDING, \
     RANSAC_MEDIUM_MAX_TRIALS, ROOFDET_MAX_MAE, ROOFDET_MAX_CPUS, ROOFDET_MAX_AREA
 from solar_pv.roof_detection.detect_messy_roofs import detect_messy_roofs
+from solar_pv.roof_detection.mess import reject_mess
 from solar_pv.roof_detection.detsac import DETSACRegressorForLIDAR
-from solar_pv.roof_detection.merge_adjacent import merge_adjacent
+from solar_pv.roof_detection.assign_pixels import assign_pixels, NONE
+from solar_pv.roof_detection.merge_adjacent import merge_adjacent, set_plane_fit
 from solar_pv.roof_detection.premade_planes import create_planes
 from solar_pv.roof_detection.ransac import RANSACRegressorForLIDAR
 from solar_pv.roof_polygons.roof_polygons import create_roof_polygons
@@ -37,6 +41,12 @@ from solar_pv.util import get_cpu_count
 _SEMAPHORE_TIMEOUT_S = 120
 _SEMAPHORE_MAX_CONN = 50
 _PG_CONN_SEMAPHORE = mp.Semaphore(_SEMAPHORE_MAX_CONN)
+
+
+# Max distance (m) of a pixel from a plane for it to count as an inlier. Also the unit of
+# elevation residual in `assign_pixels`, per plane.
+_RESIDUAL_THRESHOLD = 0.25
+_FLAT_ROOF_RESIDUAL_THRESHOLD = 0.1
 
 
 def _roof_det_cpu_count():
@@ -52,6 +62,8 @@ def detect_roofs(pg_uri: str,
                  flat_roof_degrees: int,
                  min_dist_to_edge_m: float,
                  resolution_metres: float,
+                 roof_polygon_method: str = "legacy",
+                 roof_detection_method: str = "legacy",
                  workers: int = _roof_det_cpu_count()) -> None:
 
     if stage.get_stage(pg_uri, job_id) >= stage.Stage.DETECT_ROOFS:
@@ -73,6 +85,7 @@ def detect_roofs(pg_uri: str,
         "flat_roof_degrees": flat_roof_degrees,
         "min_dist_to_edge_m": min_dist_to_edge_m,
         "resolution_metres": resolution_metres,
+        "method": roof_polygon_method,
     }
 
     work_queue = _create_adaptive_batches(buildings_with_areas)
@@ -82,7 +95,8 @@ def detect_roofs(pg_uri: str,
         futures = []
         for batch_building_ids in work_queue:
             futures.append(executor.submit(_handle_building_batch,
-                                           pg_uri, job_id, batch_building_ids, params))
+                                           pg_uri, job_id, batch_building_ids, params,
+                                           roof_detection_method))
 
         for future in as_completed(futures):
             try:
@@ -98,7 +112,8 @@ def detect_roofs(pg_uri: str,
     stage.set_stage(pg_uri, job_id, stage.Stage.DETECT_ROOFS)
 
 
-def _handle_building_batch(pg_uri: str, job_id: int, building_ids: List[str], params: dict):
+def _handle_building_batch(pg_uri: str, job_id: int, building_ids: List[str], params: dict,
+                           roof_detection_method: str = "legacy"):
     start_time = time.time()
     buildings = _load(pg_uri, job_id, building_ids)
 
@@ -106,7 +121,11 @@ def _handle_building_batch(pg_uri: str, job_id: int, building_ids: List[str], pa
     for building_id, building in buildings.items():
         try:
             t0 = time.time()
-            found = _detect_building_roof_planes(building, building_id, params['resolution_metres'])
+            # seeded per building so that runs are reproducible, and runs with different
+            # methods start from the same RANSAC planes:
+            random_state = np.random.RandomState(zlib.crc32(str(building_id).encode()))
+            found = _detect_building_roof_planes(building, building_id, params['resolution_metres'],
+                                                 method=roof_detection_method, random_state=random_state)
             t1 = time.time()
             if t1 - t0 > 7200:
                 print(f"very slow plane detection: {building_id} took {round(t1 - t0, 2)} s")
@@ -134,7 +153,17 @@ def _handle_building_batch(pg_uri: str, job_id: int, building_ids: List[str], pa
 def _detect_building_roof_planes(building: RoofDetBuilding,
                                  building_id: str,
                                  resolution_metres: float,
-                                 debug: bool = False) -> List[RoofPlane]:
+                                 debug: bool = False,
+                                 method: str = "legacy",
+                                 random_state: np.random.RandomState = None) -> List[RoofPlane]:
+    """
+    Find roof planes with DETSAC then RANSAC, then tidy up which pixels belong to which
+    plane. `method` "legacy" merges leftover pixels and planes greedily
+    (`merge_adjacent`); "mincut" assigns pixels to planes by multi-label min-cut on
+    their elevation residuals (`assign_pixels`), with `merge_adjacent` only merging planes.
+
+    `random_state` is for RANSAC; if None, numpy's global random state is used.
+    """
     pixels_in_building = building['pixels']
     polygon = building['polygon']
     max_ground_height = building['max_ground_height']
@@ -158,8 +187,8 @@ def _detect_building_roof_planes(building: RoofDetBuilding,
 
     plane_idx = 0
     while np.count_nonzero(mask) > min_points_per_plane:
-        detsac = DETSACRegressorForLIDAR(residual_threshold=0.25,
-                                         flat_roof_residual_threshold=0.1,
+        detsac = DETSACRegressorForLIDAR(residual_threshold=_RESIDUAL_THRESHOLD,
+                                         flat_roof_residual_threshold=_FLAT_ROOF_RESIDUAL_THRESHOLD,
                                          min_points_per_plane=min_points_per_plane,
                                          resolution_metres=resolution_metres)
         detsac.fit(xy, z,
@@ -199,9 +228,10 @@ def _detect_building_roof_planes(building: RoofDetBuilding,
     pixels_required_for_ransac = max(min_points_per_plane * 5, total_points_in_building // 4)
 
     while np.count_nonzero(mask) > pixels_required_for_ransac:
-        ransac = RANSACRegressorForLIDAR(residual_threshold=0.25,
-                                         flat_roof_residual_threshold=0.1,
+        ransac = RANSACRegressorForLIDAR(residual_threshold=_RESIDUAL_THRESHOLD,
+                                         flat_roof_residual_threshold=_FLAT_ROOF_RESIDUAL_THRESHOLD,
                                          max_trials=max_trials,
+                                         random_state=random_state,
                                          max_slope=75,
                                          min_slope=0,
                                          min_points_per_plane=min_points_per_plane,
@@ -236,6 +266,13 @@ def _detect_building_roof_planes(building: RoofDetBuilding,
     if debug:
         print("Finished detecting roofs")
 
+    if method == "mincut":
+        above_ground = z > max_ground_height if max_ground_height else np.ones(z.shape, dtype=bool)
+        return _assign_and_merge(
+            xyz, aspect, labels, planes, above_ground, resolution_metres, labels_nodata, debug=debug)
+    elif method != "legacy":
+        raise ValueError(f"Unknown roof detection method {method}")
+
     # label all the outlying pixels with individual IDs:
     outliers = np.count_nonzero(labels[mask == 1])
     labels[mask == 1] = range(plane_idx + 1, outliers + plane_idx + 1)
@@ -251,6 +288,72 @@ def _detect_building_roof_planes(building: RoofDetBuilding,
         print("Finished detecting mess")
 
     return non_messy_planes
+
+
+def _assign_and_merge(xyz: np.ndarray,
+                      aspect: np.ndarray,
+                      labels: np.ndarray,
+                      planes: Dict[int, RoofPlane],
+                      above_ground: np.ndarray,
+                      resolution_metres: float,
+                      labels_nodata: int,
+                      debug: bool = False) -> List[RoofPlane]:
+    """
+    Assign pixels to planes, merge planes, assign again with the merged planes, then
+    reject clutter and mess. Each time pixels are assigned, planes are refitted to (and
+    their metrics recomputed from) them.
+
+    Assigning first means planes separated only by unassigned pixels are adjacent when
+    `merge_adjacent` looks for planes to merge.
+    """
+    xy, z = xyz[:, :2], xyz[:, 2]
+    labels = _assign(xyz, aspect, labels, planes, above_ground, resolution_metres, labels_nodata)
+    if debug:
+        print(f"Assigned pixels to {len(planes)} planes")
+    # merge_adjacent fails if no pixel has a label
+    if len(planes) == 0:
+        return []
+
+    planes, labels = merge_adjacent(xy, z, aspect, labels, planes, resolution_metres, labels_nodata, debug=debug)
+    if debug:
+        print(f"Merged, now have {len(planes)} planes")
+
+    labels = _assign(xyz, aspect, labels, planes, above_ground, resolution_metres, labels_nodata)
+    if debug:
+        print(f"Reassigned pixels to {len(planes)} planes")
+
+    return reject_mess(planes, labels, xyz, resolution_metres, debug=debug)
+
+
+def _assign(xyz: np.ndarray,
+            aspect: np.ndarray,
+            labels: np.ndarray,
+            planes: Dict[int, RoofPlane],
+            above_ground: np.ndarray,
+            resolution_metres: float,
+            labels_nodata: int) -> np.ndarray:
+    """Reassign `labels` with `assign_pixels`, and refit `planes` to them (in place)."""
+    plane_ids = list(planes.keys())
+    idx_labels = np.full(np.count_nonzero(above_ground), NONE)
+    for k, plane_id in enumerate(plane_ids):
+        idx_labels[labels[above_ground] == plane_id] = k
+
+    residual_scales = [_FLAT_ROOF_RESIDUAL_THRESHOLD if planes[plane_id]['is_flat'] else _RESIDUAL_THRESHOLD
+                       for plane_id in plane_ids]
+    idx_labels = assign_pixels(xyz[above_ground], idx_labels, len(plane_ids), resolution_metres,
+                               residual_scales=residual_scales)
+
+    new_labels = np.full(labels.shape, labels_nodata)
+    candidate_idxs = np.flatnonzero(above_ground)
+    for k, plane_id in enumerate(plane_ids):
+        idxs = candidate_idxs[idx_labels == k]
+        if len(idxs) < 3:
+            del planes[plane_id]
+            continue
+        new_labels[idxs] = plane_id
+        planes[plane_id]['res'] = resolution_metres
+        set_plane_fit(planes[plane_id], xyz[idxs, :2], xyz[idxs, 2], aspect[idxs], resolution_metres)
+    return new_labels
 
 
 def _load(pg_uri: str,
@@ -374,7 +477,7 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[RoofPolygon]):
             "mape": plane["mape"],
         })
         plane['roof_geom_27700'] = plane['roof_geom_27700'].wkt
-        plane['roof_geom_raw_27700'] = plane['roof_geom_raw_27700'].wkt
+        plane['roof_geom_raw_27700'] = shapely.multipolygons(shapely.get_parts(plane['roof_geom_raw_27700'])).wkt
 
     with semaphore_connection(pg_uri) as pg_conn, pg_conn.cursor() as cursor:
         execute_values(cursor, SQL("""

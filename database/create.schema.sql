@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS {roof_polygons} (
     roof_plane_id SERIAL PRIMARY KEY,
     building_id text NOT NULL,
     roof_geom_27700 geometry(polygon, 27700) NOT NULL,
-    roof_geom_raw_27700 geometry(polygon, 27700) NOT NULL,
+    roof_geom_raw_27700 geometry(multipolygon, 27700) NOT NULL,
     x_coef double precision NOT NULL,
     y_coef double precision NOT NULL,
     intercept double precision NOT NULL,
