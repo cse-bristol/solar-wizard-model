@@ -48,8 +48,8 @@ def tile_polygon(region: Union[Polygon, MultiPolygon],
     straddling the legal edge is promoted if the region fills its legal part; the caller
     re-clips the result to `legal`. Returns None if no tile is occupied.
     """
-    rot = affinity.rotate(region, angle_deg, origin=origin)
-    rot_legal = affinity.rotate(legal, angle_deg, origin=origin)
+    rot = _rotate_valid(region, angle_deg, origin)
+    rot_legal = _rotate_valid(legal, angle_deg, origin)
     rot = rot.intersection(rot_legal)
     if rot.is_empty:
         return None
@@ -81,7 +81,18 @@ def tile_polygon(region: Union[Polygon, MultiPolygon],
                         x0 + (cols + 1) * tile_m, y0 - rows * tile_m)
     # union leaves a vertex at every tile corner along a straight edge
     tiled = shapely.union_all(tiles).simplify(0)
-    return affinity.rotate(tiled, -angle_deg, origin=origin)
+    return _rotate_valid(tiled, -angle_deg, origin)
+
+
+def _rotate_valid(geom, angle_deg: float, origin: Point):
+    """
+    Rotation moves vertices off-grid, which can turn a near-degenerate sliver (e.g. left
+    by clipping to a meeting line) into a self-intersection that breaks overlays.
+    """
+    rot = affinity.rotate(geom, angle_deg, origin=origin)
+    if rot.is_valid:
+        return rot
+    return shapely.make_valid(rot, method='structure', keep_collapsed=False)
 
 
 def _cell_fractions(geom, minx: float, maxy: float, fpix: float, nrow: int, ncol: int) -> np.ndarray:

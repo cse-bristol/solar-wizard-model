@@ -151,6 +151,7 @@ class RoofPolygonTest(ParameterisedTestCase):
                 ("0016", 0.1),
                 ("0017", 0.1),
                 ("0018", 0.1),
+                ("0019", 0.3),
             )
             for method in _METHODS
         ], _do_test)

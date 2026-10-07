@@ -239,7 +239,7 @@ class RANSACRegressorForLIDAR:
             n_inliers_best = cand.n_inliers
             sd_best = cand.sd
             score_best = cand.score
-            plane_properties_best = cand.plane_properties("RANSAC", f"RANSAC_{tuple(subset_idxs)}")
+            plane_properties_best = cand.plane_properties("RANSAC", f"RANSAC_{tuple(subset_idxs.tolist())}")
             inlier_mask_best = cand.inlier_mask
             X_inlier_best = cand.X_inlier
             y_inlier_best = cand.y_inlier
