@@ -68,6 +68,8 @@ _MAX_ASPECT_CIRCULAR_SD = 1.5
 # A pixel is locally planar if the best 3x3 window containing it fits a plane this well (m):
 _MAX_LOCAL_RMS = 0.1
 _MIN_SMALL_REGION_PLANAR_SHARE = 0.5
+# Regions at least this big that fit their plane closely skip the aspect checks (see `_implausible`):
+_MIN_UNGATED_ASPECT_PIXELS = 40
 # As `segment_planes`' default:
 _MAX_NORMAL_ANGLE_DEGREES = 12
 # The energy (in `assign_pixels`' units) a plane must save to be worth having.
@@ -630,19 +632,23 @@ def _implausible(plane: RoofPlane, face_index: _FaceIndex) -> Optional[str]:
 
     The shape checks only apply to regions that fit their plane poorly: a region that
     fits closely is planar whatever its shape, and clean flat roofs are often concave
-    (wrapping round a raised part of the building) or long and thin.
+    (wrapping round a raised part of the building) or long and thin. Nor do the aspect
+    checks apply to large regions that fit closely: the pixels' aspects come from 3x3
+    windows, which on faces only a few pixels wide (sawtooth and multi-ridge roofs) mostly
+    straddle a ridge or valley.
     """
     plane['aspect'] = _snapped_aspect(plane, face_index)
     if plane['aspect'] is None:
         return rejections.NO_CLOSE_ASPECT
     if plane['score'] >= ROOFDET_MAX_MAE:
         return rejections.HIGH_MAE
-    if plane['mae'] > _residual_scale(plane) / 2:
+    good_fit = plane['mae'] <= _residual_scale(plane) / 2
+    if not good_fit:
         if plane['cv_hull_ratio'] < _MIN_CONVEX_HULL_RATIO:
             return rejections.CONVEX_HULL_RATIO
         if plane['thinness_ratio'] < _min_thinness_ratio(len(plane['inliers_xy'])):
             return rejections.THINNESS_RATIO
-    if not plane['is_flat']:
+    if not plane['is_flat'] and not (good_fit and len(plane['inliers_xy']) >= _MIN_UNGATED_ASPECT_PIXELS):
         if deg_diff(plane['aspect_circ_mean'], plane['aspect_raw']) > _MAX_ASPECT_CIRCULAR_MEAN_DEGREES:
             return rejections.CIRCULAR_MEAN
         if plane['aspect_circ_sd'] > _MAX_ASPECT_CIRCULAR_SD:
