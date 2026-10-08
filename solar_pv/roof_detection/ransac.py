@@ -9,6 +9,7 @@ import math
 import shapely
 from shapely.geometry import Polygon, MultiPoint
 from shapely.strtree import STRtree
+from scipy.spatial import cKDTree
 from sklearn import metrics
 
 from skimage import measure, morphology
@@ -43,7 +44,8 @@ class RANSACRegressorForLIDAR:
                  max_aspect_circular_mean_degrees=90,
                  max_aspect_circular_sd=1.5,
                  resolution_metres=1,
-                 random_state=None):
+                 random_state=None,
+                 sample_radius_m=None):
         """
         RANSAC adapted for fitting roof planes to LIDAR (see fit() for the changes
         made to the standard algorithm). Only extracts one plane per fit() call, so
@@ -66,6 +68,7 @@ class RANSACRegressorForLIDAR:
         self.max_aspect_circular_sd = max_aspect_circular_sd
         self.resolution_metres = resolution_metres
         self.random_state = random_state
+        self.sample_radius_m = sample_radius_m
 
         self.sd = None
         self.plane_properties = {}
@@ -157,6 +160,7 @@ class RANSACRegressorForLIDAR:
         sample_idxs = np.arange(n_samples)
         # mask is fixed for the duration of a fit, so the points available to sample are too:
         sampleable_idxs = np.flatnonzero(mask)
+        sampler = _LocalSampler(X, sampleable_idxs, self.sample_radius_m) if self.sample_radius_m else None
 
         ctx = _FitContext(
             thresholds=_Thresholds.from_regressor(self), X=X, y=y, aspect=aspect,
@@ -171,7 +175,10 @@ class RANSACRegressorForLIDAR:
             self.n_trials_ += 1
 
             # choose random sample set
-            subset_idxs = _sample(sampleable_idxs, min_samples, random_state=random_state)
+            if sampler is not None:
+                subset_idxs = sampler.sample(min_samples, random_state)
+            else:
+                subset_idxs = _sample(sampleable_idxs, min_samples, random_state=random_state)
             if subset_idxs is None:
                 self.success = False
                 self.finished = True
@@ -345,6 +352,30 @@ def _sample(sampleable_idxs: np.ndarray, min_samples: int, random_state) -> Opti
     if len(sampleable_idxs) < min_samples:
         return None
     return sampleable_idxs[sample_without_replacement(len(sampleable_idxs), min_samples, random_state=random_state)]
+
+
+class _LocalSampler:
+    """
+    Samples a random point, then the rest from the points within `radius` of it. On a
+    building with many roof faces, three points drawn from all over it rarely lie on one
+    face; drawn from one neighbourhood they usually do.
+    """
+    def __init__(self, X: np.ndarray, sampleable_idxs: np.ndarray, radius: float):
+        self.idxs = sampleable_idxs
+        self.tree = cKDTree(X[sampleable_idxs]) if len(sampleable_idxs) > 0 else None
+        self.X = X
+        self.radius = radius
+
+    def sample(self, min_samples: int, random_state) -> Optional[np.ndarray]:
+        if len(self.idxs) < min_samples:
+            return None
+        first = random_state.randint(len(self.idxs))
+        near = np.asarray(self.tree.query_ball_point(self.X[self.idxs[first]], self.radius))
+        near = near[near != first]
+        if len(near) < min_samples - 1:
+            return _sample(self.idxs, min_samples, random_state)
+        rest = near[sample_without_replacement(len(near), min_samples - 1, random_state=random_state)]
+        return np.sort(self.idxs[np.append(rest, first)])
 
 
 def _pixel_groups(X_inlier_subset, min_X, res: float):

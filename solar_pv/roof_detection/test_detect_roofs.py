@@ -40,7 +40,10 @@ def _roofdet(building_id: str, res: float, method: str = "legacy"):
 # kept as its own plane (it is too small to be usable once it's a polygon).
 # The Cotham school roofs are messy in aerial imagery, but only partly in the LiDAR: in
 # 0029, a small flat roof is found to be clean.
+# In 0026, the 149-facing slope is two planes about 0.24m apart in height, which one plane
+# fits poorly (MAE 0.14m).
 _MINCUT_EXPECTED = {
+    "0026": [59, 59, 149, 149, 239, 329],
     "0032": [82, 84, 168, 264, 264, 264],
     "0029": [149],
 }

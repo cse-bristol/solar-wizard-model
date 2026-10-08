@@ -65,6 +65,8 @@ The following changes are made based on our own experimentation:
 
 * Constrain the selection of the initial sample of 3 points to points whose detected aspect is close, if this is possible.
 
+* Draw the initial sample's other 2 points from within 3m of the first. On a large building with many roof faces, 3 points drawn from anywhere rarely lie on the same face, so RANSAC would stop finding planes while whole faces were left.
+
 * Use a tighter `residual_threshold` (0.1m) for flat planes, as flat roofs are more likely to be covered in obstacles like HVAC units, pipes, and parapets.
 
 Planes that have too few pixels fit to them are also rejected.

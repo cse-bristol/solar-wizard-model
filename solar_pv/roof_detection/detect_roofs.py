@@ -57,6 +57,10 @@ _PG_CONN_SEMAPHORE = mp.Semaphore(_SEMAPHORE_MAX_CONN)
 # elevation residual in `assign_pixels`, per plane.
 _RESIDUAL_THRESHOLD = 0.25
 _FLAT_ROOF_RESIDUAL_THRESHOLD = 0.1
+# RANSAC samples each candidate's 3 points within this distance (m) of each other (see
+# `ransac._LocalSampler`): on a large building with many faces, 3 points from anywhere rarely
+# lie on one face, so RANSAC gave up with whole faces left.
+_RANSAC_SAMPLE_RADIUS_M = 3.0
 # Max rounds of refitting planes to their pixels and reassigning pixels to the planes.
 _MAX_REFINE_ROUNDS = 10
 # Refining stops once a round lowers the energy by less than this share.
@@ -295,7 +299,8 @@ def _detect_building_roof_planes(building: RoofDetBuilding,
                                          max_slope=75,
                                          min_slope=0,
                                          min_points_per_plane=min_points_per_plane,
-                                         resolution_metres=resolution_metres)
+                                         resolution_metres=resolution_metres,
+                                         sample_radius_m=_RANSAC_SAMPLE_RADIUS_M)
         ransac.fit(xy, z,
                    aspect=aspect,
                    mask=mask,

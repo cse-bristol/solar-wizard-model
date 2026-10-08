@@ -8,7 +8,7 @@ import numpy as np
 from sklearn.linear_model import LinearRegression
 
 from solar_pv.geos import square, slope_deg, aspect_deg
-from solar_pv.roof_detection.ransac import _group_areas, _pixel_groups, \
+from solar_pv.roof_detection.ransac import _group_areas, _pixel_groups, _LocalSampler, \
     _exclude_unconnected, _min_thinness_ratio, closest_azimuth, \
     get_potential_aspects, _sample, _convex_hull_ratio, _thinness_ratio, _aspect_stats, \
     _plane_metrics, _evaluate_candidate, _FitContext, _Thresholds, _Candidate
@@ -66,6 +66,30 @@ class ExcludeUnconnectedTest(unittest.TestCase):
         result = _exclude_unconnected(X, [0, 0], inlier_mask, res=1)
 
         self.assertEqual(result.tolist(), [False, True])
+
+
+class LocalSamplerTest(unittest.TestCase):
+
+    def test_samples_are_distinct_sampleable_and_close(self):
+        xs, ys = np.meshgrid(np.arange(50.0), np.arange(50.0))
+        X = np.column_stack([xs.ravel(), ys.ravel()])
+        sampleable = np.flatnonzero(X[:, 0] < 40)
+        sampler = _LocalSampler(X, sampleable, 3.0)
+        rs = np.random.RandomState(0)
+        for _ in range(100):
+            idxs = sampler.sample(3, rs)
+            self.assertEqual(len(set(idxs.tolist())), 3)
+            self.assertTrue(np.isin(idxs, sampleable).all())
+            self.assertLessEqual(np.ptp(X[idxs], axis=0).max(), 6.0)
+
+    def test_falls_back_to_uniform_when_isolated(self):
+        X = np.array([[0.0, 0.0], [100.0, 0.0], [200.0, 0.0]])
+        idxs = _LocalSampler(X, np.arange(3), 3.0).sample(3, np.random.RandomState(0))
+        self.assertEqual(sorted(idxs.tolist()), [0, 1, 2])
+
+    def test_none_when_too_few_points(self):
+        X = np.array([[0.0, 0.0], [1.0, 0.0]])
+        self.assertIsNone(_LocalSampler(X, np.arange(2), 3.0).sample(3, np.random.RandomState(0)))
 
 
 class MinThinnessRatioTest(unittest.TestCase):
