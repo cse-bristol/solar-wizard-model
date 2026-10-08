@@ -365,7 +365,8 @@ def _assign_and_merge(xyz: np.ndarray,
     """
     Assign pixels to planes, merge planes, assign again with the merged planes, then
     reject clutter and mess. Each time pixels are assigned, planes are refitted to (and
-    their metrics recomputed from) them.
+    their metrics recomputed from) them. The final orientations come from just the pixels
+    near each plane (see `_trim_plane_coefficients`).
 
     Assigning first means planes separated only by unassigned pixels are adjacent when
     `merge_adjacent` looks for planes to merge.
@@ -385,6 +386,8 @@ def _assign_and_merge(xyz: np.ndarray,
     labels = _assign(xyz, aspect, labels, planes, above_ground, resolution_metres, labels_nodata, rejected)
     if debug:
         print(f"Reassigned pixels to {len(planes)} planes")
+    for plane_id, plane in planes.items():
+        _trim_plane_coefficients(plane, xyz[labels == plane_id])
 
     return reject_mess(planes, labels, xyz, resolution_metres, above_ground=above_ground, debug=debug,
                        rejected=rejected)
