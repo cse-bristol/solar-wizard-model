@@ -40,6 +40,10 @@ The measures:
   rejection explains.
 * **skew**: per plane, how far its stored orientation is from the plane implied by its own
   pixels (see `solar_pv/roof_detection/plane_skew.py` and the skew section of `documents/pv_model.md`).
+* **oversplit pairs**: adjacent planes that look like one face split in two. Their own fits are
+  within 5° of each other, and one plane fitted to both is within 2cm on MAE and explains under 5
+  percentage points fewer of their pixels. The other measures reward splitting, so this checks for
+  it. It was added after the runs below, so it isn't in their tables.
 
 None of this is ground truth: these measures reward explaining the LiDAR, which the mess
 checks deliberately don't do. Segment minimises much the same energy, so it has some home
@@ -51,6 +55,25 @@ the horizon is averaged over. kWh and area come from each plane's raw geometry: 
 pixels clipped to the polygon. That geometry isn't exported, and it is close to the pixels the
 plane was fitted to. So a polygon that spills over a neighbouring surface affects the outline
 and horizon more than it affects kWh.
+
+### Fast loop for tuning
+
+A CLI run and evaluation of a sample takes about 15 minutes. `solar_pv/evaluation/fast_roof_detection.py`
+does the same scoring in about 2 minutes on a 2,000-building sample, with no database or PV. It
+dumps each building's detection input once, then runs detection and polygons in-process:
+
+```shell
+python -m solar_pv.evaluation.fast_roof_detection dump --buildings sample.gpkg --lidar ~/git/uk-buildings/data/dsm/ \
+    --out sample.pkl
+python -m solar_pv.evaluation.fast_roof_detection score sample.pkl --method mincut --out base.pkl
+python -m solar_pv.evaluation.fast_roof_detection score sample.pkl --method mincut --out notrim.pkl \
+    --set solar_pv.roof_detection.detect_roofs._TRIM_ROUNDS=0
+python -m solar_pv.evaluation.fast_roof_detection compare base=base.pkl notrim=notrim.pkl --buildings 15507,13754
+```
+
+`--set` overrides a module constant in each worker, so a change can be tried without editing the
+code. Scores match the full evaluation's, except that there's no kWh (usable area is computed as PV
+computes it). Confirm a kept change with a full CLI run and evaluation, and on the full tile.
 
 ## Results
 

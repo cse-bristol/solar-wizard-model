@@ -27,6 +27,8 @@ Per building and method:
                         same energy, it has some home advantage
   missed_planar_m2      planar patches (MAE < 0.08m, >= 10 px) in pixels no plane covers, and
                         that no mess rejection (MESS_REASONS) explains
+  oversplit_pairs       adjacent planes that one plane would fit nearly as well (see
+                        `_oversplit_pairs`): the measures above reward splitting, this doesn't
 Per plane, the skew against its pixels (`solar_pv.roof_detection.plane_skew`).
 
 Neither set of numbers is ground truth: they reward explaining the LiDAR, which mess
@@ -70,7 +72,7 @@ MESS_REASONS = {"MESSY_FLAT_ROOF", "CLUTTER", "SURROUNDED_BY_MESS", "MESSY_BUILD
 PRE_DETECTION_EXCLUSIONS = {"OUTDATED_LIDAR_COVERAGE", "NO_LIDAR_COVERAGE", "TOO_SMALL"}
 SIZES = [("<50m2", 0, 50), ("50-200m2", 50, 200), ("200-1000m2", 200, 1000), (">1000m2", 1000, np.inf)]
 METRICS = ["planes", "usable_planes", "coverage", "explained", "mae", "energy", "missed_planar_m2",
-           "usable_area", "kwp", "kwh"]
+           "oversplit_pairs", "usable_area", "kwp", "kwh"]
 
 
 def _scale(is_flat: bool) -> float:
@@ -232,6 +234,105 @@ def _missed_planar(xyz, free, mess, local, res):
     return missed * res * res, missed_mess * res * res
 
 
+def _lstsq_plane(xyz: np.ndarray):
+    """Least-squares plane (x_coef, y_coef, intercept about the centroid) and residuals."""
+    A = np.column_stack([xyz[:, :2] - xyz[:, :2].mean(0), np.ones(len(xyz))])
+    coef, *_ = np.linalg.lstsq(A, xyz[:, 2], rcond=None)
+    return coef, xyz[:, 2] - A @ coef
+
+
+def _oversplit_pairs(xyz: np.ndarray, labels: np.ndarray, planes: List[dict], lo: np.ndarray, hi: np.ndarray) -> int:
+    """
+    Adjacent planes that look like one face split in two: their own least-squares fits are
+    within 5° of each other, and one plane fitted to both pixel sets is within 2cm on MAE and
+    explains under 5 percentage points fewer of their pixels. The measures above reward
+    splitting (it lowers residuals for only `LABEL_COST` a plane), so this checks for it.
+    """
+    a, b = labels[lo], labels[hi]
+    touching = (a >= 0) & (b >= 0) & (a != b)
+    pairs = set(zip(np.minimum(a[touching], b[touching]).tolist(), np.maximum(a[touching], b[touching]).tolist()))
+    count = 0
+    for p, q in pairs:
+        in_p, in_q = labels == p, labels == q
+        if in_p.sum() < 3 or in_q.sum() < 3:
+            continue
+        cp, rp = _lstsq_plane(xyz[in_p])
+        cq, rq = _lstsq_plane(xyz[in_q])
+        _, ru = _lstsq_plane(xyz[in_p | in_q])
+        n = (in_p | in_q).sum()
+        angle = np.degrees(np.arccos(np.clip(abs(_normal(*cp[:2]) @ _normal(*cq[:2])), 0, 1)))
+        separate_mae = (np.abs(rp).sum() + np.abs(rq).sum()) / n
+        scale = _scale(planes[p]["is_flat"] and planes[q]["is_flat"])
+        explained_loss = ((np.abs(rp) <= scale).sum() + (np.abs(rq) <= scale).sum() - (np.abs(ru) <= scale).sum()) / n
+        if angle < 5 and np.abs(ru).mean() - separate_mae < 0.02 and explained_loss < 0.05:
+            count += 1
+    return count
+
+
+def building_context(xyz: np.ndarray, above: np.ndarray, res: float) -> dict:
+    """What scoring needs about a building's pixels, whatever the planes."""
+    grid, _, _ = grid_index(xyz[:, :2], res)
+    lo, hi = _neighbour_pairs(grid)
+    return {"lo": lo, "hi": hi, "both_above": above[lo] & above[hi],
+            "local": local_fits(xyz, res) if above.sum() >= 8 else None}
+
+
+def score_planes(xyz: np.ndarray, above: np.ndarray, res: float, planes: List[dict], mess_geoms: list,
+                 ctx: dict):
+    """
+    One method's metrics for a building, and its pixel labels and residuals (see `_label`).
+    `planes` are dicts with geom (the output polygon), coef, is_flat, usable, area, kwh and kwp;
+    `mess_geoms` are its mess rejections' geometries.
+    """
+    lo, hi = ctx["lo"], ctx["hi"]
+    n_above = int(above.sum())
+    labels, residual = _label(xyz, planes)
+    covered = labels >= 0
+    scale = np.array([_scale(p["is_flat"]) for p in planes] + [1.0])[labels]
+    cost = np.where(above, NONE_COST, 0.0)
+    cost[covered] = np.minimum(np.abs(residual[covered]) / scale[covered], RESIDUAL_CAP)
+    explained = covered & (np.abs(np.nan_to_num(residual, nan=np.inf)) <= scale)
+    planes_on_pixels = len(set(labels[covered].tolist()))
+    smooth = SMOOTHNESS_PER_M / res * np.count_nonzero((labels[lo] != labels[hi]) & ctx["both_above"])
+
+    mess = np.zeros(len(xyz), bool)
+    for g in mess_geoms:
+        mess |= shapely.contains_xy(g, xyz[:, 0], xyz[:, 1])
+    missed, missed_mess = _missed_planar(xyz, above & ~covered, mess, ctx["local"], res)
+
+    usable = [p for p in planes if p["usable"]]
+    usable_area = sum(p["area"] for p in usable)
+    metrics = {
+        "planes": len(planes),
+        "usable_planes": len(usable),
+        "coverage": float((covered & above).sum() / n_above),
+        "explained": float((explained & above).sum() / n_above),
+        "mae": float(np.nanmean(np.abs(residual[covered]))) if covered.any() else float("nan"),
+        "covered_px": int(covered.sum()),
+        "data_cost": float(cost.sum()),
+        "smooth_cost": float(smooth),
+        "energy": float(cost.sum()) + float(smooth) + LABEL_COST * planes_on_pixels,
+        "missed_planar_m2": missed,
+        "missed_mess_m2": missed_mess,
+        "oversplit_pairs": _oversplit_pairs(xyz, np.where(above, labels, -1), planes, lo, hi),
+        "usable_area": float(usable_area),
+        "kwh": float(sum(p["kwh"] for p in usable)),
+        "kwp": float(sum(p["kwp"] for p in usable)),
+        "flat_share": float(sum(p["area"] for p in usable if p["is_flat"]) / max(usable_area, 1e-9)),
+    }
+    return metrics, labels, residual
+
+
+def plane_skews(xyz: np.ndarray, above: np.ndarray, labels: np.ndarray, planes: List[dict], res: float):
+    """(plane index, `plane_skew` dict) for each plane its skew can be determined for."""
+    out = []
+    for k, p in enumerate(planes):
+        skew = plane_skew(xyz[(labels == k) & above], p["coef"], res)
+        if skew is not None:
+            out.append((k, skew))
+    return out
+
+
 def evaluate_building(job) -> dict:
     """Metrics for one building under each method; with `keep`, also its pixels and labels."""
     elevation_path, building_id, footprint, ground, by_method, mess_by_method, keep = job
@@ -245,56 +346,20 @@ def evaluate_building(job) -> dict:
     if n_above == 0:
         return out
     out["n_above"] = n_above
-    grid, _, _ = grid_index(xyz[:, :2], res)
-    lo, hi = _neighbour_pairs(grid)
-    both_above = above[lo] & above[hi]
-    local = local_fits(xyz, res) if n_above >= 8 else None
-    smoothness = SMOOTHNESS_PER_M / res
+    ctx = building_context(xyz, above, res)
+    lo, hi = ctx["lo"], ctx["hi"]
 
     labels_by, normals_by = {}, {}
     for m, planes in by_method.items():
-        labels, residual = _label(xyz, planes)
+        out["methods"][m], labels, _ = score_planes(xyz, above, res, planes, mess_by_method.get(m, []), ctx)
         labels_by[m] = labels
-        covered = labels >= 0
-        scale = np.array([_scale(p["is_flat"]) for p in planes] + [1.0])[labels]
-        cost = np.where(above, NONE_COST, 0.0)
-        cost[covered] = np.minimum(np.abs(residual[covered]) / scale[covered], RESIDUAL_CAP)
-        explained = covered & (np.abs(np.nan_to_num(residual, nan=np.inf)) <= scale)
-        planes_on_pixels = len(set(labels[covered].tolist()))
-        smooth = smoothness * np.count_nonzero((labels[lo] != labels[hi]) & both_above)
         normals_by[m] = np.array([_normal(*p["coef"][:2]) for p in planes] + [[np.nan] * 3])[labels]
-
-        mess = np.zeros(len(xyz), bool)
-        for g in mess_by_method.get(m, []):
-            mess |= shapely.contains_xy(g, xyz[:, 0], xyz[:, 1])
-        missed, missed_mess = _missed_planar(xyz, above & ~covered, mess, local, res)
-
-        usable = [p for p in planes if p["usable"]]
-        usable_area = sum(p["area"] for p in usable)
-        out["methods"][m] = {
-            "planes": len(planes),
-            "usable_planes": len(usable),
-            "coverage": float((covered & above).sum() / n_above),
-            "explained": float((explained & above).sum() / n_above),
-            "mae": float(np.nanmean(np.abs(residual[covered]))) if covered.any() else float("nan"),
-            "covered_px": int(covered.sum()),
-            "data_cost": float(cost.sum()),
-            "smooth_cost": float(smooth),
-            "energy": float(cost.sum()) + float(smooth) + LABEL_COST * planes_on_pixels,
-            "missed_planar_m2": missed,
-            "missed_mess_m2": missed_mess,
-            "usable_area": float(usable_area),
-            "kwh": float(sum(p["kwh"] for p in usable)),
-            "kwp": float(sum(p["kwp"] for p in usable)),
-            "flat_share": float(sum(p["area"] for p in usable if p["is_flat"]) / max(usable_area, 1e-9)),
-        }
-        for k, p in enumerate(planes):
-            skew = plane_skew(xyz[(labels == k) & above], p["coef"], res)
-            if skew is not None:
-                out["skew"].append(dict(skew, building_id=building_id, method=m, plane=k, roof_plane_id=p["id"],
-                                        is_flat=int(p["is_flat"]), usable=int(p["usable"]), kwh=p["kwh"],
-                                        stored_slope=p["slope"], stored_aspect=p["aspect"],
-                                        footprint_m2=footprint.area))
+        for k, skew in plane_skews(xyz, above, labels, planes, res):
+            p = planes[k]
+            out["skew"].append(dict(skew, building_id=building_id, method=m, plane=k, roof_plane_id=p["id"],
+                                    is_flat=int(p["is_flat"]), usable=int(p["usable"]), kwh=p["kwh"],
+                                    stored_slope=p["slope"], stored_aspect=p["aspect"],
+                                    footprint_m2=footprint.area))
 
     methods = list(by_method)
     out["pairs"] = {}
@@ -340,6 +405,7 @@ def summarise(rs: List[dict], methods: List[str], label: str) -> List[dict]:
             "smooth_px": col("smooth_cost").sum() / n_above.sum(),
             "missed_planar_m2": col("missed_planar_m2").sum(),
             "missed_in_mess_m2": col("missed_mess_m2").sum(),
+            "oversplit_pairs": int(col("oversplit_pairs").sum()),
             "usable_area_m2": col("usable_area").sum(),
             "kwp": col("kwp").sum(), "mwh": col("kwh").sum() / 1000,
             "flat_area_share": (col("flat_share") * col("usable_area")).sum() / max(col("usable_area").sum(), 1),

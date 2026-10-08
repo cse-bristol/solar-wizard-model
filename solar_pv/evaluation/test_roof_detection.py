@@ -5,7 +5,9 @@ import unittest
 import numpy as np
 from shapely import box
 
-from solar_pv.evaluation.roof_detection import _agreement, _label, _coef_from_slope_aspect, _pixel_weighted_quantile
+from solar_pv.evaluation.roof_detection import _agreement, _label, _coef_from_slope_aspect, _pixel_weighted_quantile, \
+    _oversplit_pairs
+from solar_pv.roof_detection.assign_pixels import grid_index, _neighbour_pairs
 from solar_pv.geos import slope_deg, aspect_deg
 
 
@@ -31,6 +33,18 @@ class RoofDetectionEvalTest(unittest.TestCase):
         self.assertAlmostEqual(_agreement(a, b, mask), 5 / 6)
         self.assertEqual(_agreement(a, a, mask), 1.0)
         self.assertEqual(_agreement(a, np.full(len(a), -1), mask), 1 / 6)
+
+    def test_oversplit_pairs_counts_one_face_split_but_not_a_ridge(self):
+        xs, ys = np.meshgrid(np.arange(10) + 0.5, np.arange(6) + 0.5)
+        x, y = xs.ravel(), ys.ravel()
+        halves = (x > 5).astype(int)
+        lo, hi = _neighbour_pairs(grid_index(np.column_stack([x, y]), 1.0)[0])
+        planes = [{"is_flat": False}, {"is_flat": False}]
+
+        one_face = np.column_stack([x, y, 0.5 * y])
+        self.assertEqual(_oversplit_pairs(one_face, halves, planes, lo, hi), 1)
+        ridge = np.column_stack([x, y, 5 - 0.6 * np.abs(x - 5)])
+        self.assertEqual(_oversplit_pairs(ridge, halves, planes, lo, hi), 0)
 
     def test_coef_from_slope_aspect_inverts_slope_and_aspect(self):
         for a, b in [(0.6, 0.0), (-0.2, 0.5), (0.1, -0.4)]:
