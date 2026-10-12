@@ -61,8 +61,6 @@ class DETSACRegressorForLIDAR:
             mask: np.ndarray,
             total_points_in_building: int,
             debug: bool = False):
-        residual_threshold = self.residual_threshold
-
         loss_function = lambda y_true, y_pred: np.abs(y_true - y_pred)
 
         # RANSAC for LIDAR additions:
@@ -114,6 +112,8 @@ class DETSACRegressorForLIDAR:
             slope = slope_deg(base_estimator.coef_[0], base_estimator.coef_[1])
             if slope <= FLAT_ROOF_DEGREES_THRESHOLD:
                 residual_threshold = self.flat_roof_residual_threshold
+            else:
+                residual_threshold = self.residual_threshold
 
             # DETSAC change: allow the initial sample points to be further from the plane
             m1 = residuals_subset < plane.sample_residual_threshold
@@ -153,6 +153,7 @@ class DETSACRegressorForLIDAR:
             y_inlier_best = cand.y_inlier
             inlier_best_idxs_subset = cand.inlier_idxs
             sample_residual_threshold_best = plane.sample_residual_threshold
+            residual_threshold_best = residual_threshold
 
             # RANSAC for LiDAR addition:
             # I've disabled the dynamic max_trials thing as it's based on proportion of
@@ -197,7 +198,7 @@ class DETSACRegressorForLIDAR:
         residuals_subset[(m1 & m2) == 1] = 0
         residuals_subset[mask == 0] = _NEVER_INLIER
 
-        inlier_mask_best = residuals_subset < residual_threshold
+        inlier_mask_best = residuals_subset < residual_threshold_best
         mask_without_excluded = _exclude_unconnected(X, min_X, inlier_mask_best, res=self.resolution_metres)
 
         if np.sum(mask_without_excluded) < self.min_points_per_plane:

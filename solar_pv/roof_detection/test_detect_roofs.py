@@ -39,13 +39,14 @@ def _roofdet(building_id: str, res: float, method: str = "legacy"):
 # With "mincut", an 8-pixel flat fragment at the bottom edge of the M-shaped roof is
 # kept as its own plane (it is too small to be usable once it's a polygon).
 # The Cotham school roofs are messy in aerial imagery, but only partly in the LiDAR: in
-# 0029, a small flat roof is found to be clean.
+# 0029, a small flat roof is found to be clean. Imagery says 0029 is [149], but mincut
+# also keeps 141 and 321.
 # In 0026, the 149-facing slope is two planes about 0.24m apart in height, which one plane
 # fits poorly (MAE 0.14m).
 _MINCUT_EXPECTED = {
     "0026": [59, 59, 149, 149, 239, 329],
-    "0032": [82, 84, 168, 264, 264, 264],
-    "0029": [149],
+    "0032": [82, 84, 168, 264, 264],
+    "0029": [141, 149, 321],
     "0028": [],
 }
 
@@ -77,19 +78,18 @@ _ROOF_DETECTION_CASES = [
 
     # Messy roofs - should find nothing
     # ("0015", 1.0, []),  # Totterdown pub - very messy non-flat roof - currently fails due to mess
-    # Cotham school - messy flat roofs. Imagery says 0029 is [149] and 0028 is [] (as mincut
-    # finds), but legacy's merge_adjacent absorbs messy pixels into planes before the mess
-    # check sees them.
-    ("0029", 1.0, [149, 321]),
-    ("0028", 1.0, [162, 254]),
+    # Cotham school - messy flat roofs. Imagery says 0029 is [149] and 0028 is [], but
+    # legacy's merge_adjacent absorbs messy pixels into planes before the mess check sees them.
+    ("0029", 1.0, [141, 149, 321]),
+    ("0028", 1.0, [63, 164, 254]),
     ("0033", 1.0, []),  # Cotham school - messy flat roof
 
     # Flat roofs:
     ("0023", 1.0, [138]),
-    ("0017", 1.0, [141, 226]),
+    ("0017", 1.0, [141, 226, 226]),
 
     # warehouses etc:
-    ("0022", 1.0, [10, 46, 155, 190, 226, 335]),  # Motorbike shop
+    ("0022", 1.0, [10, 46, 100, 155, 190, 226, 335]),  # Motorbike shop
     ("0020", 1.0, [144, 144, 324, 324]),
 
     # Various tricky buildings in Croyde

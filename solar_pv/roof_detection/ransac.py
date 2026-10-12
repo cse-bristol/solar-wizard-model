@@ -133,8 +133,6 @@ class RANSACRegressorForLIDAR:
             raise ValueError("`min_samples` may not be larger than number "
                              "of samples: n_samples = %d." % (X.shape[0]))
 
-        residual_threshold = self.residual_threshold
-
         loss_function = lambda y_true, y_pred: np.abs(y_true - y_pred)
 
         random_state = check_random_state(self.random_state)
@@ -214,6 +212,8 @@ class RANSACRegressorForLIDAR:
             # roofs, as they are more likely to be covered with obstacles, HVAC, pipes etc
             if slope <= FLAT_ROOF_DEGREES_THRESHOLD:
                 residual_threshold = self.flat_roof_residual_threshold
+            else:
+                residual_threshold = self.residual_threshold
 
             # residuals of all data for current random sample model
             y_pred = base_estimator.predict(X)
@@ -252,6 +252,7 @@ class RANSACRegressorForLIDAR:
             y_inlier_best = cand.y_inlier
             inlier_best_idxs_subset = cand.inlier_idxs
             best_subset_idxs = subset_idxs
+            residual_threshold_best = residual_threshold
 
             # RANSAC for LiDAR addition:
             # I've disabled the dynamic max_trials thing as it's based on proportion of
@@ -289,7 +290,7 @@ class RANSACRegressorForLIDAR:
         residuals_subset = loss_function(y, y_pred)
         # don't allow plane to be fit to points already on a different plane:
         residuals_subset[mask == 0] = _NEVER_INLIER
-        inlier_mask_best = residuals_subset < residual_threshold
+        inlier_mask_best = residuals_subset < residual_threshold_best
         mask_without_excluded = _exclude_unconnected(X, min_X, inlier_mask_best, res=self.resolution_metres)
 
         if np.sum(mask_without_excluded) < self.min_points_per_plane:
