@@ -1,5 +1,7 @@
 # This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
+import copy
+import itertools
 import json
 from os.path import join
 from typing import Tuple, List
@@ -155,6 +157,23 @@ class RoofPolygonTest(ParameterisedTestCase):
             )
             for method in _METHODS
         ], _do_test)
+
+    def test_mincut_independent_of_plane_order(self):
+        # flat, west and east faces; the meeting line between the faces nearly coincides
+        # with their shared edge, which polygonizing once merged into the east face
+        planes, building_geom = _load_test_data("0020")
+        areas = []
+        for order in itertools.permutations(range(len(planes))):
+            polygons = _create_roof_polygons(
+                building_geom, [copy.deepcopy(planes[i]) for i in order], max_roof_slope_degrees=80,
+                min_roof_area_m=8, min_roof_degrees_from_north=45, flat_roof_degrees=10, min_dist_to_edge_m=0.3,
+                resolution_metres=1.0, method="mincut")
+            areas.append({p['plane_id']: p['roof_geom_27700'].area for p in polygons})
+        for a in areas[1:]:
+            self.assertEqual(a.keys(), areas[0].keys())
+            for plane_id in a:
+                self.assertAlmostEqual(a[plane_id], areas[0][plane_id], places=3)
+        self.assertGreater(areas[0]["segmented_1"], 40)
 
     def test_merge(self):
         # "mincut" leaves merging planes to roof detection

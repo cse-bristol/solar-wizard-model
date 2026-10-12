@@ -25,6 +25,11 @@ from solar_pv.roof_detection import rejections
 from solar_pv.roof_polygons.occupancy import tile_polygon
 from solar_pv.roof_polygons.split_evenly import split_evenly
 
+# Noding nearly coincident lines (a meeting line along the edge two polygons share) in
+# floating point can leave a gap in a ring, so that polygonizing merges the faces either
+# side of it.
+_NODING_GRID_M = 1e-6
+
 
 def create_roof_polygons(building_id: str,
                          building_geom: Polygon,
@@ -282,10 +287,16 @@ def _meeting_lines(gradients: List[np.ndarray], owned_xy: List[np.ndarray], regi
                 continue
             shared = np.concatenate([shared_i, shared_j])
 
-            line = _fit_meeting_line(gradients[i], gradients[j], owned_xy[i], owned_xy[j], shared, tile_m)
+            # fit the pair the same way round whatever order the planes are in, as ties
+            # in the fit are broken by which plane is first
+            first, second = (i, j) if _order_key(owned_xy[i]) <= _order_key(owned_xy[j]) else (j, i)
+            line = _fit_meeting_line(gradients[first], gradients[second], owned_xy[first], owned_xy[second],
+                                     shared, tile_m)
             if line is None:
                 continue
             centre, normal, offset, direction = line
+            if first != i:
+                direction = -direction
             along = (shared - centre) @ np.array([-normal[1], normal[0]])
             dist = np.abs((shared - centre) @ normal - offset)
             if along.max() - along.min() < (min_shared_tiles - 1) * tile_m \
@@ -296,6 +307,12 @@ def _meeting_lines(gradients: List[np.ndarray], owned_xy: List[np.ndarray], regi
                 zone_tiles * tile_m, cap_style=CAP_STYLE.square, join_style=JOIN_STYLE.mitre)
             lines[(i, j)] = _MeetingLine(side_1=_half_plane(centre, normal, offset, direction, zone), zone=zone)
     return lines
+
+
+def _order_key(pixels_xy: np.ndarray) -> Tuple[float, float, int]:
+    """An order for planes that doesn't depend on the order they're listed in."""
+    x, y = pixels_xy.mean(axis=0)
+    return float(x), float(y), len(pixels_xy)
 
 
 def _exclusions(lines: Dict[Tuple[int, int], _MeetingLine], regions: list, tile_m: float) -> Tuple[List[list], List[list]]:
@@ -365,7 +382,7 @@ def _split_overlaps(planes: List[RoofPolygon], lines: Dict[Tuple[int, int], _Mee
     if not overlapping:
         return
 
-    faces = shapely.get_parts(shapely.polygonize(shapely.get_parts(shapely.union_all(edges))))
+    faces = shapely.get_parts(shapely.polygonize(shapely.get_parts(shapely.union_all(edges, grid_size=_NODING_GRID_M))))
     points = shapely.point_on_surface(faces)
     covered_by = shapely.STRtree(points).query(polys, predicate='contains')
 
@@ -375,6 +392,8 @@ def _split_overlaps(planes: List[RoofPolygon], lines: Dict[Tuple[int, int], _Mee
 
     owned_faces = [[] for _ in planes]
     for face_idx, owners in face_owners.items():
+        # the pairwise rule isn't transitive, so the order of comparison matters
+        owners = sorted(owners, key=lambda k: _order_key(owned_xy[k]))
         owner = owners[0]
         for other in owners[1:]:
             owner = _overlap_owner(min(owner, other), max(owner, other), lines, points[face_idx], owned_xy)
@@ -389,7 +408,11 @@ def _overlap_owner(i: int, j: int, lines: Dict[Tuple[int, int], _MeetingLine], p
     line = lines.get((i, j))
     if line is not None and line.zone.contains(point):
         return i if line.side_1.contains(point) else j
-    return i if _nearest_dist(owned_xy[i], point) <= _nearest_dist(owned_xy[j], point) else j
+    d_i, d_j = _nearest_dist(owned_xy[i], point), _nearest_dist(owned_xy[j], point)
+    if math.isclose(d_i, d_j):
+        # on a pixel grid, ties are common
+        return i if _order_key(owned_xy[i]) <= _order_key(owned_xy[j]) else j
+    return i if d_i < d_j else j
 
 
 def _polygonal(geom) -> MultiPolygon:
