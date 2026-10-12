@@ -64,17 +64,17 @@ _RANSAC_SAMPLE_RADIUS_M = 3.0
 _MAX_REFINE_ROUNDS = 10
 # Refining stops once a round lowers the energy by less than this share.
 _MIN_REFINE_ENERGY_FALL = 0.01
-# RANSAC's defaults for its shape and aspect checks:
+# RANSAC's default for its shape check:
 _MIN_CONVEX_HULL_RATIO = 0.65
-_MAX_ASPECT_CIRCULAR_MEAN_DEGREES = 90
-_MAX_ASPECT_CIRCULAR_SD = 1.5
 # A pixel is locally planar if the best 3x3 window containing it fits a plane this well (m):
 _MAX_LOCAL_RMS = 0.1
 _MIN_SMALL_REGION_PLANAR_SHARE = 0.5
-# Regions at least this big that fit their plane closely skip the aspect checks (see `_implausible`):
-_MIN_UNGATED_ASPECT_PIXELS = 40
 # As `segment_planes`' default:
 _MAX_NORMAL_ANGLE_DEGREES = 12
+# A pitched region is implausible if fewer than this share of its locally planar pixels
+# face the same way as it, if it has at least `_MIN_FACING_PIXELS` of them (see `_facing_share`):
+_MIN_FACING_SHARE = 0.5
+_MIN_FACING_PIXELS = 3
 # The energy (in `assign_pixels`' units) a plane must save to be worth having.
 _LABEL_COST = 8.0
 # Planes facing the same way are merged if the merged plane's energy per pixel is at most
@@ -556,7 +556,7 @@ def _propose(xyz: np.ndarray,
         plane = {"building_id": building_id, "plane_type": "segmented", "plane_id": f"segmented_{plane_id}",
                  "res": resolution_metres}
         set_plane_fit(plane, xyz[idxs, :2], xyz[idxs, 2], aspect[idxs], resolution_metres)
-        reason = _implausible(plane, face_index)
+        reason = _implausible(plane, face_index, normals[idxs][locally_planar[idxs]])
         if not reason and len(idxs) < small_pixels and locally_planar[idxs].mean() < _MIN_SMALL_REGION_PLANAR_SHARE:
             reason = rejections.SMALL_POOR_FIT
         if reason:
@@ -623,18 +623,20 @@ def _merge_and_remove(xyz: np.ndarray,
     return bool(merges or removed)
 
 
-def _implausible(plane: RoofPlane, face_index: _FaceIndex) -> Optional[str]:
+def _implausible(plane: RoofPlane, face_index: _FaceIndex, reliable_normals: np.ndarray) -> Optional[str]:
     """
-    Why RANSAC wouldn't accept `plane` as a candidate - not aligned with the building,
-    a poor fit, a poor shape, or (if pitched) its pixels' aspects disagree with it - or
-    None if it would. Sets the plane's `aspect`.
+    Why `plane` isn't plausible as a candidate - not aligned with the building, a poor
+    fit, a poor shape, or (if pitched) its locally planar pixels, whose normals are in
+    `reliable_normals`, mostly face another way - or None if it is. Sets the plane's `aspect`.
 
     The shape checks only apply to regions that fit their plane poorly: a region that
     fits closely is planar whatever its shape, and clean flat roofs are often concave
-    (wrapping round a raised part of the building) or long and thin. Nor do the aspect
-    checks apply to large regions that fit closely: the pixels' aspects come from 3x3
-    windows, which on faces only a few pixels wide (sawtooth and multi-ridge roofs) mostly
-    straddle a ridge or valley.
+    (wrapping round a raised part of the building) or long and thin.
+
+    RANSAC checks the spread of its pixels' aspects instead of their normals. Those come
+    from the 3x3 window centred on each pixel, which at 1m, on faces only a few pixels
+    deep, mostly straddles a ridge, eave or valley; a locally planar pixel's normal comes
+    from a window wholly on one face.
     """
     plane['aspect'] = _snapped_aspect(plane, face_index)
     if plane['aspect'] is None:
@@ -647,12 +649,21 @@ def _implausible(plane: RoofPlane, face_index: _FaceIndex) -> Optional[str]:
             return rejections.CONVEX_HULL_RATIO
         if plane['thinness_ratio'] < _min_thinness_ratio(len(plane['inliers_xy'])):
             return rejections.THINNESS_RATIO
-    if not plane['is_flat'] and not (good_fit and len(plane['inliers_xy']) >= _MIN_UNGATED_ASPECT_PIXELS):
-        if deg_diff(plane['aspect_circ_mean'], plane['aspect_raw']) > _MAX_ASPECT_CIRCULAR_MEAN_DEGREES:
-            return rejections.CIRCULAR_MEAN
-        if plane['aspect_circ_sd'] > _MAX_ASPECT_CIRCULAR_SD:
-            return rejections.CIRCULAR_SD
+    if not plane['is_flat'] and _facing_share(plane, reliable_normals) < _MIN_FACING_SHARE:
+        return rejections.NORMALS_DISAGREE
     return None
+
+
+def _facing_share(plane: RoofPlane, reliable_normals: np.ndarray) -> float:
+    """
+    The share of the plane's locally planar pixels whose own normal is within
+    `_MAX_NORMAL_ANGLE_DEGREES` of the plane's, or 1 if too few are locally planar to say.
+    """
+    if len(reliable_normals) < _MIN_FACING_PIXELS:
+        return 1.0
+    a, b = plane['x_coef'], plane['y_coef']
+    unit = np.array([-a, -b, 1.0]) / np.sqrt(a * a + b * b + 1)
+    return float(np.mean(reliable_normals @ unit >= np.cos(np.radians(_MAX_NORMAL_ANGLE_DEGREES))))
 
 
 def _residual_scale(plane: RoofPlane) -> float:

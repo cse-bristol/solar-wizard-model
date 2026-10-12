@@ -11,8 +11,9 @@ from shapely import wkt, box
 
 from solar_pv.paths import TEST_DATA
 from solar_pv.roof_detection.detect_roofs import _detect_building_roof_planes, _create_adaptive_batches, _assign_and_merge, \
-    _set_skew, _trim_plane_coefficients
+    _set_skew, _trim_plane_coefficients, _facing_share
 from solar_pv.roof_detection.merge_adjacent import set_plane_fit
+from solar_pv.roof_detection.segment_planes import local_fits
 from solar_pv.datatypes import RoofDetBuilding
 from solar_pv.test_utils.test_funcs import ParameterisedTestCase
 
@@ -238,3 +239,31 @@ class TrimPlaneCoefficientsTest(unittest.TestCase):
         _trim_plane_coefficients(plane, xyz)
 
         self.assertEqual(plane['y_coef'], before['y_coef'])
+
+
+class FacingShareTest(unittest.TestCase):
+
+    def _gable(self):
+        # 30 degree faces either side of a ridge along y = 6, each 6 pixels deep:
+        xs, ys = np.meshgrid(np.arange(10) + 0.5, np.arange(12) + 0.5)
+        xs, ys = xs.ravel(), ys.ravel()
+        zs = 10 - np.abs(ys - 6) * np.tan(np.radians(30))
+        xyz = np.column_stack([xs, ys, zs])
+        normals, rms = local_fits(xyz, 1.0)
+        south = ys < 6
+        plane = {}
+        set_plane_fit(plane, xyz[south, :2], zs[south], np.zeros(np.count_nonzero(south)), 1.0)
+        return plane, normals[rms <= 0.1], south[rms <= 0.1]
+
+    def test_pixels_of_the_plane_face_it(self):
+        plane, normals, south = self._gable()
+        self.assertEqual(_facing_share(plane, normals[south]), 1.0)
+
+    def test_pixels_of_another_face_do_not(self):
+        plane, normals, south = self._gable()
+        self.assertEqual(_facing_share(plane, normals[~south]), 0.0)
+
+    def test_too_few_locally_planar_pixels_to_say(self):
+        plane, normals, south = self._gable()
+        self.assertEqual(_facing_share(plane, normals[~south][:2]), 1.0)
+

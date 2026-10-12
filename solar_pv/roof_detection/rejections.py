@@ -18,6 +18,8 @@ CONVEX_HULL_RATIO = "CONVEX_HULL_RATIO"
 THINNESS_RATIO = "THINNESS_RATIO"
 CIRCULAR_MEAN = "CIRCULAR_MEAN"
 CIRCULAR_SD = "CIRCULAR_SD"
+# A pitched plane most of whose locally planar pixels face another way
+NORMALS_DISAGREE = "NORMALS_DISAGREE"
 # A small region that fits its plane poorly
 SMALL_POOR_FIT = "SMALL_POOR_FIT"
 # Not worth a plane: its pixels are explained nearly as well without it
