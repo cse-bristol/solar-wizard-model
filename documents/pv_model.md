@@ -93,7 +93,13 @@ Planes with a mean absolute error of 1m or more are discarded, and their points 
 
 After detection, adjacent planes are merged, and so are planes and the adjacent points that were not fit to any plane. This is done using a region adjacency graph where each node is either a plane or a single unfitted point. Two nodes are merged if a plane fitted to the points of both is still a good fit.
 
-Flat roofs are often covered in obstacles like HVAC units and pipes, which can lead to roof planes that don't reflect the space actually available for panels. To detect these, groups of unfitted points that do not touch the edge of the building are treated as obstacles. A flat plane is rejected as messy if the obstacles it touches make up a large proportion of its size, or if it touches many separate obstacles. If too much of the building is either obstacles or messy flat planes, the whole building is rejected.
+Flat roofs are often covered in obstacles like HVAC units and pipes, which can lead to roof planes that don't reflect the space actually available for panels. These are found from the points' heights once they have been assigned to planes (`roof_detection/mess.py`):
+
+* Clutter: a small pitched plane within a flat roof is an obstacle (plant, vents, rooflights) that a plane has been fitted to, not a roof.
+* Obstacles on a flat plane are clutter standing on it; groups of unfitted points clearly above it (plant) or below it (rooflights, lightwells) and mostly surrounded by it; and groups of its own points a little above or below the rest of it (low plant, pipes, vents). Groups touching the edge of the building aren't counted, as they are usually parapets or taller parts of the building.
+* A flat plane is rejected as messy if obstacles cover a large share of it, or if it has many separate obstacles (at least 5, or 0.02 per m² on a large roof).
+* A small pitched plane whose surroundings within the building are mostly mess is rejected too: it is usually a plane fitted to part of the mess.
+* If most of the building is clutter, messy flat planes and obstacles, the whole building is rejected.
 
 Any buildings where no roof planes were detected that passed the above tests are now marked as excluded.
 

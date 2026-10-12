@@ -32,7 +32,6 @@ from solar_pv.constants import RANSAC_LARGE_BUILDING, \
     RANSAC_MEDIUM_MAX_TRIALS, ROOFDET_MAX_MAE, ROOFDET_MAX_CPUS, ROOFDET_MAX_AREA, \
     AZIMUTH_ALIGNMENT_THRESHOLD, FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD, FLAT_ROOF_DEGREES_THRESHOLD
 from solar_pv.roof_detection import rejections
-from solar_pv.roof_detection.detect_messy_roofs import detect_messy_roofs
 from solar_pv.roof_detection.mess import reject_mess
 from solar_pv.roof_detection.detsac import DETSACRegressorForLIDAR
 from solar_pv.roof_detection.assign_pixels import assign_pixels, grid_index, NONE
@@ -334,8 +333,8 @@ def _detect_building_roof_planes(building: RoofDetBuilding,
     if debug:
         print("Finished detecting roofs")
 
+    above_ground = z > max_ground_height if max_ground_height else np.ones(z.shape, dtype=bool)
     if method == "mincut":
-        above_ground = z > max_ground_height if max_ground_height else np.ones(z.shape, dtype=bool)
         return _assign_and_merge(
             xyz, aspect, labels, planes, above_ground, resolution_metres, labels_nodata, debug=debug,
             rejected=rejected)
@@ -351,13 +350,8 @@ def _detect_building_roof_planes(building: RoofDetBuilding,
     if debug:
         print("Merged planes and outliers")
 
-    non_messy_planes = detect_messy_roofs(merged_planes, new_labels, xy, resolution_metres, debug=debug,
-                                          rejected=rejected)
-
-    if debug:
-        print("Finished detecting mess")
-
-    return non_messy_planes
+    return reject_mess(merged_planes, new_labels, xyz, resolution_metres, above_ground=above_ground, debug=debug,
+                       rejected=rejected)
 
 
 def _assign_and_merge(xyz: np.ndarray,

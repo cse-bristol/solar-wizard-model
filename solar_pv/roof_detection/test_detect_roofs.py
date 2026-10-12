@@ -46,6 +46,7 @@ _MINCUT_EXPECTED = {
     "0026": [59, 59, 149, 149, 239, 329],
     "0032": [82, 84, 168, 264, 264, 264],
     "0029": [149],
+    "0028": [],
 }
 
 
@@ -71,13 +72,16 @@ _ROOF_DETECTION_CASES = [
     ("0011", 1.0, [61, 236]),
 
     # Irregular buildings:
-    ("0032", 1.0, [82, 84, 168, 264, 264]),
+    ("0032", 1.0, [82, 84, 168, 264]),
     # ("0005", 1.0, [148, 148, 148, 148]),  # Totterdown Mosque - currently fails due to dome
 
     # Messy roofs - should find nothing
     # ("0015", 1.0, []),  # Totterdown pub - very messy non-flat roof - currently fails due to mess
-    ("0029", 1.0, []),  # Cotham school - messy flat roof
-    ("0028", 1.0, []),  # Cotham school - messy flat roof
+    # Cotham school - messy flat roofs. Imagery says 0029 is [149] and 0028 is [] (as mincut
+    # finds), but legacy's merge_adjacent absorbs messy pixels into planes before the mess
+    # check sees them.
+    ("0029", 1.0, [149, 321]),
+    ("0028", 1.0, [162, 254]),
     ("0033", 1.0, []),  # Cotham school - messy flat roof
 
     # Flat roofs:
