@@ -209,6 +209,51 @@ planes.
 
 **Limits:** one tile, of one (urban, mixed) area, at 1m resolution. 50cm and 2m data are untested.
 
+## Known problem: segment's refine loop drops the parts of planes that others cut off
+
+Segment alternates refining (reassigning pixels to planes and refitting them) with merging and
+removing planes, and ends on a refine. Each refine keeps only the largest 4-connected part of
+each plane's pixels (`_assign(largest_component=True)`). When one plane grows across another and
+cuts it in two, the smaller part is left unassigned. Re-proposal then finds those pixels and
+merging rejoins them, but the next refine cuts them off again. The loop oscillates rather than
+settling, and whether a building ends up whole depends on which state it stops in.
+
+Building 12375 (4,149 m², two flat roofs) shows it, when a 5.3° region inside the flat roof is
+accepted as a plane. After merging, 3,570 pixels are assigned, and one flat plane has 1,871 of them.
+In the next refine the shallow plane grows from 220 to 315 pixels and cuts that flat plane, which
+keeps only 823. Assigned pixels fall to 2,611. The same cut-and-rejoin cycle happens without that
+region, in the middle round (3,321 to 2,735 assigned), but there it happens to recover in the last
+round.
+
+`plane_moves` can't repair this. `_mergeable` never pairs a flat plane with a pitched one. Even if
+it did, the shallow region is a real tilt: one plane over it and the flat plane costs 0.7–2.4 per
+pixel, against about 0.3 for the two apart. And merging only joins adjacent planes, while the
+cut-off parts aren't adjacent to their parent.
+
+At present the off-footprint limits in `_implausible` (`_MIN_OFF_FOOTPRINT_SLOPE`,
+`_MIN_OFF_FOOTPRINT_PIXELS`) keep the shallow and small regions that most often trigger this from
+being proposed. That treats the symptom.
+
+Tried and reverted (October 2026, dev sample, each with the off-footprint limits):
+
+| | explained | MAE (m) | missed planar (m²) | oversplit pairs |
+|---|---|---|---|---|
+| neither | 0.639 | 0.112 | 14.0k | 30 |
+| each cut-off part ≥ 3 pixels becomes its own plane | 0.643 | 0.111 | 11.7k | 69 |
+| ... then merge and remove once more at the end | 0.620 | 0.139 | 12.7k | 23 |
+| ... then also reassign pixels once more (keeping all parts) | 0.625 | 0.115 | 21.2k | 27 |
+
+Splitting recovers the cut-off pixels but leaves coplanar pieces apart. A final merge rejoins them,
+but the merged planes keep pixels they no longer fit. Reassigning after that loses too many. All
+three made 20757 and 12255 worse. Split parts are also refitted to their own pixels without going
+through `_implausible`, so a part can become a plane that would have been rejected as a candidate.
+
+Ideas not yet tried:
+
+* Let merging consider planes that are coplanar but not adjacent, or that were split from the same plane.
+* End the loop in a state that is checked to be stable, rather than after a fixed number of rounds.
+* Gate split parts as candidates are gated.
+
 ## Next steps
 
 * Imagery review of the top of `divergent_buildings.csv` (`review.gpkg`), particularly segment's
@@ -218,4 +263,6 @@ planes.
 * Check the remaining significantly skewed small planes against imagery, to see whether the
   metric's threshold is right.
 * Once these have been reviewed, consider adding skew to `confidence`.
+* Fix segment's refine loop dropping the parts of planes that other planes cut off (see above), then
+  revisit the off-footprint limits.
 * Retire legacy detection and polygons.
