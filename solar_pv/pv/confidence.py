@@ -8,7 +8,7 @@ The individual sub-scores are stored raw in the roof plane's `meta`, and combine
 into the `confidence` column as a weighted geometric mean.
 """
 import math
-from typing import Dict
+from typing import Dict, Optional
 
 from solar_pv.constants import (
     ROOFDET_MAX_MAE,
@@ -20,6 +20,8 @@ from solar_pv.constants import (
     CONFIDENCE_RESOLUTION_SCORES,
     CONFIDENCE_WEIGHTS,
     CONFIDENCE_SUB_SCORE_FLOOR,
+    CONFIDENCE_MAX_FOOTPRINT_ASPECT_GAP,
+    AZIMUTH_ALIGNMENT_THRESHOLD,
 )
 from solar_pv.roof_detection.ransac import _min_thinness_ratio
 
@@ -41,6 +43,21 @@ def _aspect_score(aspect_circ_sd: float, slope: float) -> float:
     """Spread of inlier-pixel aspects (radians), with the penalty faded in by slope:
     aspect is meaningless for flat roofs and noisy for shallow ones."""
     raw = _clamp(1 - aspect_circ_sd / CONFIDENCE_MAX_ASPECT_CIRC_SD)
+    strength = _clamp((slope - FLAT_ROOF_DEGREES_THRESHOLD)
+                      / (CONFIDENCE_ASPECT_FULL_SLOPE - FLAT_ROOF_DEGREES_THRESHOLD))
+    return 1 - (1 - raw) * strength
+
+
+def _footprint_score(footprint_aspect_gap: Optional[float], slope: float) -> float:
+    """How far the plane's aspect is from the building's face azimuths (degrees, see
+    `detect_roofs._set_footprint_aspect_gap`), faded in by slope as `_aspect_score` is.
+    Roof detection keeps planes the footprint disagrees with if their pixels corroborate
+    them, as footprints derived from LiDAR follow roof edges only roughly; this is what
+    the disagreement costs. 1 if not known (flat, or from before it was recorded)."""
+    if footprint_aspect_gap is None:
+        return 1.0
+    raw = _clamp(1 - (footprint_aspect_gap - AZIMUTH_ALIGNMENT_THRESHOLD)
+                 / (CONFIDENCE_MAX_FOOTPRINT_ASPECT_GAP - AZIMUTH_ALIGNMENT_THRESHOLD))
     strength = _clamp((slope - FLAT_ROOF_DEGREES_THRESHOLD)
                       / (CONFIDENCE_ASPECT_FULL_SLOPE - FLAT_ROOF_DEGREES_THRESHOLD))
     return 1 - (1 - raw) * strength
@@ -84,6 +101,7 @@ def confidence_sub_scores(meta: dict,
         "shape": _shape_score(meta["thinness_ratio"], area_raw / resolution ** 2),
         "resolution": _resolution_score(resolution),
         "geom_agreement": _geom_agreement_score(area_raw, area_grown),
+        "footprint": _footprint_score(meta.get("footprint_aspect_gap"), slope),
     }
 
 

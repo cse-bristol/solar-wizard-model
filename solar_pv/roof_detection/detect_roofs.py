@@ -75,6 +75,16 @@ _MAX_NORMAL_ANGLE_DEGREES = 12
 # face the same way as it, if it has at least `_MIN_FACING_PIXELS` of them (see `_facing_share`):
 _MIN_FACING_SHARE = 0.5
 _MIN_FACING_PIXELS = 3
+# As `_snapped_aspect`'s widest search for faces:
+_FOOTPRINT_SEARCH_M = 10.0
+# A pitched region not aligned with any of the building's faces is kept only if it's at
+# least this steep and big, and its locally planar pixels corroborate it (see `_implausible`).
+# Its pixels' normals are within `_MAX_NORMAL_ANGLE_DEGREES` of its own, which a flat
+# surface's pixels also are if it's not much steeper than that; shallow regions accepted
+# within large flat roofs cut them in two when refining, which keeps only each plane's
+# largest part; and many smaller regions are clutter:
+_MIN_OFF_FOOTPRINT_SLOPE = 15.0
+_MIN_OFF_FOOTPRINT_PIXELS = 12
 # The energy (in `assign_pixels`' units) a plane must save to be worth having.
 _LABEL_COST = 8.0
 # Planes facing the same way are merged if the merged plane's energy per pixel is at most
@@ -185,6 +195,7 @@ def _handle_building_batch(pg_uri: str, job_id: int, building_ids: List[str], pa
             building_polygons = create_roof_polygons(building_id, building['polygon'], found, **params,
                                                      rejected=rejected, pixels_xyz=_pixels_xyz(building['pixels']))
             _set_skew(building_polygons, building['pixels'], params['resolution_metres'])
+            _set_footprint_aspect_gap(building_polygons, building['polygon'])
             polygons.extend(building_polygons)
 
     try:
@@ -514,7 +525,6 @@ def _segment_and_assign(xyz: np.ndarray,
             break
     if len(planes) == 0:
         return []
-
     return reject_mess(planes, labels, xyz, resolution_metres, above_ground=above_ground, debug=debug,
                        rejected=rejected)
 
@@ -629,6 +639,11 @@ def _implausible(plane: RoofPlane, face_index: _FaceIndex, reliable_normals: np.
     fit, a poor shape, or (if pitched) its locally planar pixels, whose normals are in
     `reliable_normals`, mostly face another way - or None if it is. Sets the plane's `aspect`.
 
+    A plane not aligned with any of the building's faces keeps its own aspect if it's steep
+    and big enough, and enough of its pixels are locally planar to corroborate it (see
+    `_facing_share`): building footprints derived from LiDAR follow the roof's edges only
+    roughly. Otherwise disagreeing with the footprint is still taken as a sign of clutter.
+
     The shape checks only apply to regions that fit their plane poorly: a region that
     fits closely is planar whatever its shape, and clean flat roofs are often concave
     (wrapping round a raised part of the building) or long and thin.
@@ -640,7 +655,10 @@ def _implausible(plane: RoofPlane, face_index: _FaceIndex, reliable_normals: np.
     """
     plane['aspect'] = _snapped_aspect(plane, face_index)
     if plane['aspect'] is None:
-        return rejections.NO_CLOSE_ASPECT
+        if plane['slope'] < _MIN_OFF_FOOTPRINT_SLOPE or len(plane['inliers_xy']) < _MIN_OFF_FOOTPRINT_PIXELS \
+                or len(reliable_normals) < _MIN_FACING_PIXELS:
+            return rejections.NO_CLOSE_ASPECT
+        plane['aspect'] = plane['aspect_raw']
     if plane['score'] >= ROOFDET_MAX_MAE:
         return rejections.HIGH_MAE
     good_fit = plane['mae'] <= _residual_scale(plane) / 2
@@ -683,8 +701,8 @@ def _refine(xyz: np.ndarray,
             rejected: Optional[List[dict]] = None) -> np.ndarray:
     """
     Reassign pixels and refit `planes` (in place) until the labels stop changing or the
-    energy stops falling, then re-snap each plane's aspect to the building's faces
-    (keeping its old one if no face is close now).
+    energy stops falling, then re-snap each plane's aspect to the building's faces, or if
+    no face is close now, use its own (or for a flat plane, keep its old one).
 
     Refitting is by least squares, not the energy `assign_pixels` minimises, so it can
     raise the energy and the rounds can cycle rather than converge.
@@ -708,6 +726,8 @@ def _refine(xyz: np.ndarray,
         snapped = _snapped_aspect(plane, face_index)
         if snapped is not None:
             plane['aspect'] = snapped
+        elif not plane['is_flat']:
+            plane['aspect'] = plane['aspect_raw']
     return labels
 
 
@@ -890,6 +910,25 @@ def _set_skew(polygons: List[RoofPolygon], pixels: List[dict], resolution_metres
                                      resolution_metres)
 
 
+def _set_footprint_aspect_gap(planes: List[RoofPlane], polygon) -> None:
+    """
+    Each pitched plane's `footprint_aspect_gap`: the angle (degrees) between the aspect of
+    its plane fit and the nearest of the building's face azimuths and their right angles,
+    over the faces within `_FOOTPRINT_SEARCH_M` of its pixels (None if there are none).
+    It's None for flat planes, whose aspect means little.
+    """
+    face_index = _FaceIndex.of(polygon)
+    for plane in planes:
+        plane['footprint_aspect_gap'] = None
+        if plane['is_flat'] or len(plane['inliers_xy']) == 0:
+            continue
+        points = shapely.points(plane['inliers_xy'])
+        nearby = face_index.faces_near(points, STRtree(points), _FOOTPRINT_SEARCH_M)
+        if len(nearby) > 0:
+            fitted = aspect_deg(plane['x_coef'], plane['y_coef'])
+            plane['footprint_aspect_gap'] = min(deg_diff(fitted, az) for az in _right_angles(face_index, nearby))
+
+
 def _save_planes(pg_uri: str, job_id: int, planes: List[RoofPolygon]):
     if len(planes) == 0:
         return
@@ -914,6 +953,7 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[RoofPolygon]):
             "msle": plane["msle"],
             "mape": plane["mape"],
             "skew": plane.get("skew"),
+            "footprint_aspect_gap": plane.get("footprint_aspect_gap"),
         })
         plane['roof_geom_27700'] = plane['roof_geom_27700'].wkt
         plane['roof_geom_raw_27700'] = shapely.multipolygons(shapely.get_parts(plane['roof_geom_raw_27700'])).wkt

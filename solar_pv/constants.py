@@ -90,11 +90,17 @@ CONFIDENCE_RESOLUTION_SCORES = {0.5: 1.0, 1.0: 0.8, 2.0: 0.2}
 # roof bottom without discarding what the others say about it:
 CONFIDENCE_SUB_SCORE_FLOOR = 0.05
 
+# The footprint sub-score is 1 for a plane whose aspect is within AZIMUTH_ALIGNMENT_THRESHOLD
+# of the building's face azimuths (or their right angles), falling to 0 at this gap -
+# 45 degrees being the most it can be:
+CONFIDENCE_MAX_FOOTPRINT_ASPECT_GAP = 45.0
+
 # Weights for the geometric mean; must sum to 1:
 CONFIDENCE_WEIGHTS = {
     "fit": 0.30,
-    "resolution": 0.25,
+    "resolution": 0.20,
     "geom_agreement": 0.20,
-    "aspect": 0.15,
+    "aspect": 0.10,
     "shape": 0.10,
+    "footprint": 0.10,
 }

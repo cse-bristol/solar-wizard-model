@@ -11,6 +11,8 @@ from solar_pv.constants import (
     CONFIDENCE_SHAPE_SPAN,
     CONFIDENCE_WEIGHTS,
     CONFIDENCE_SUB_SCORE_FLOOR,
+    CONFIDENCE_MAX_FOOTPRINT_ASPECT_GAP,
+    AZIMUTH_ALIGNMENT_THRESHOLD,
     Z_P90,
     INTERANNUAL_GHI_COV,
 )
@@ -77,6 +79,16 @@ class SubScoreTest(unittest.TestCase):
         self.assertEqual(confidence._geom_agreement_score(10.0, 10.0), 1.0)
         self.assertEqual(confidence._geom_agreement_score(5.0, 10.0), 0.5)
         self.assertEqual(confidence._geom_agreement_score(10.0, 0.0), 0.0)
+
+    def test_footprint_score(self):
+        steep = CONFIDENCE_ASPECT_FULL_SLOPE + 10
+        self.assertEqual(confidence._footprint_score(None, slope=steep), 1.0)
+        self.assertEqual(confidence._footprint_score(AZIMUTH_ALIGNMENT_THRESHOLD, slope=steep), 1.0)
+        self.assertEqual(confidence._footprint_score(CONFIDENCE_MAX_FOOTPRINT_ASPECT_GAP, slope=steep), 0.0)
+        halfway = (AZIMUTH_ALIGNMENT_THRESHOLD + CONFIDENCE_MAX_FOOTPRINT_ASPECT_GAP) / 2
+        self.assertAlmostEqual(confidence._footprint_score(halfway, slope=steep), 0.5)
+        # aspect means little on shallow roofs:
+        self.assertEqual(confidence._footprint_score(CONFIDENCE_MAX_FOOTPRINT_ASPECT_GAP, slope=0), 1.0)
 
 
 class CombineTest(unittest.TestCase):
