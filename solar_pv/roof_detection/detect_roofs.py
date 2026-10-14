@@ -416,14 +416,17 @@ def _assign(xyz: np.ndarray,
             min_pixels: int = 3,
             largest_component: bool = False,
             return_energy: bool = False,
-            full_fit: bool = True):
+            full_fit: bool = True,
+            plane_coefs: bool = False):
     """
     Reassign `labels` with `assign_pixels`, and refit `planes` to them (in place). Planes
     left with fewer than `min_pixels` are removed, and recorded in `rejected`. If
     `largest_component`, planes keep only their largest 4-connected group of pixels. If
     `return_energy`, also returns `assign_pixels`' energy for the starting labels. If not
     `full_fit`, only the planes' coefficients and what derives from them are refitted
-    (see `_set_plane_coefficients`).
+    (see `_set_plane_coefficients`). If `plane_coefs`, pixels are assigned to the planes'
+    own coefficients, not least-squares fits to their pixels, and the planes are refitted
+    to just their pixels near them (see `_trim_plane_coefficients`).
     """
     plane_ids = list(planes.keys())
     idx_labels = np.full(np.count_nonzero(above_ground), NONE)
@@ -432,8 +435,10 @@ def _assign(xyz: np.ndarray,
 
     residual_scales = [_FLAT_ROOF_RESIDUAL_THRESHOLD if planes[plane_id]['is_flat'] else _RESIDUAL_THRESHOLD
                        for plane_id in plane_ids]
+    coefs = [(planes[plane_id]['x_coef'], planes[plane_id]['y_coef'], planes[plane_id]['intercept'])
+             for plane_id in plane_ids] if plane_coefs else None
     idx_labels, energy = assign_pixels(xyz[above_ground], idx_labels, len(plane_ids), resolution_metres,
-                                       residual_scales=residual_scales, return_energy=True)
+                                       residual_scales=residual_scales, return_energy=True, coefs=coefs)
 
     new_labels = np.full(labels.shape, labels_nodata)
     candidate_idxs = np.flatnonzero(above_ground)
@@ -457,6 +462,8 @@ def _assign(xyz: np.ndarray,
             set_plane_fit(planes[plane_id], xyz[idxs, :2], xyz[idxs, 2], aspect[idxs], resolution_metres)
         else:
             _set_plane_coefficients(planes[plane_id], xyz[idxs, :2], xyz[idxs, 2])
+        if plane_coefs:
+            _trim_plane_coefficients(planes[plane_id], xyz[idxs])
     if return_energy:
         return new_labels, energy
     return new_labels
@@ -711,7 +718,7 @@ def _refine(xyz: np.ndarray,
     for round_ in range(_MAX_REFINE_ROUNDS):
         new_labels, energy = _assign(xyz, aspect, labels, planes, above_ground, resolution_metres, labels_nodata,
                                      rejected, min_pixels=min_pixels, largest_component=True, return_energy=True,
-                                     full_fit=False)
+                                     full_fit=False, plane_coefs=True)
         changed = np.count_nonzero(new_labels != labels)
         labels = new_labels
         if debug:

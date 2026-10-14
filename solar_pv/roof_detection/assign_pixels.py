@@ -35,7 +35,8 @@ def assign_pixels(xyz: np.ndarray,
                   smoothness_per_m: float = SMOOTHNESS_PER_M,
                   max_dist_m: float = 3,
                   max_cycles: int = 5,
-                  return_energy: bool = False):
+                  return_energy: bool = False,
+                  coefs: Optional[Sequence[Tuple[float, float, float]]] = None):
     """
     Reassign `labels` (per pixel of `xyz`: a plane index in [0, n_planes), or NONE).
     `residual_scales` is per plane, 0.25m if not given.
@@ -49,8 +50,10 @@ def assign_pixels(xyz: np.ndarray,
     otherwise boundaries would cost relatively more at coarser resolutions, and small
     planes would lose out.
 
-    If `return_energy`, also returns the energy of the starting labels, with each plane
-    fitted to its starting pixels.
+    If `coefs` is given, plane k is z = a x + b y + c for (a, b, c) = coefs[k], rather than
+    a least-squares fit to its starting pixels.
+
+    If `return_energy`, also returns the energy of the starting labels.
     """
     if residual_scales is None:
         residual_scales = [0.25] * n_planes
@@ -70,8 +73,12 @@ def assign_pixels(xyz: np.ndarray,
         if len(idxs) < 3:
             current[idxs] = 0
             continue
-        predict = _fit_plane(xy[idxs], z[idxs])
-        data[:, k] = np.minimum(np.abs(z - predict(xy)) / residual_scales[k - 1], residual_cap)
+        if coefs is None:
+            predicted = _fit_plane(xy[idxs], z[idxs])(xy)
+        else:
+            a, b, c = coefs[k - 1]
+            predicted = xy[:, 0] * a + xy[:, 1] * b + c
+        data[:, k] = np.minimum(np.abs(z - predicted) / residual_scales[k - 1], residual_cap)
 
         start_image = np.zeros(grid.shape, dtype=bool)
         start_image[rows[idxs], cols[idxs]] = True
