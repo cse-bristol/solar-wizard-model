@@ -81,7 +81,7 @@ _FOOTPRINT_SEARCH_M = 10.0
 # least this steep and big, and its locally planar pixels corroborate it (see `_implausible`).
 # Its pixels' normals are within `_MAX_NORMAL_ANGLE_DEGREES` of its own, which a flat
 # surface's pixels also are if it's not much steeper than that; shallow regions accepted
-# within large flat roofs cut them in two when refining, which keeps only each plane's
+# within large flat roofs can cut them in two when refining, and a plane keeps only its
 # largest part; and many smaller regions are clutter:
 _MIN_OFF_FOOTPRINT_SLOPE = 15.0
 _MIN_OFF_FOOTPRINT_PIXELS = 12
@@ -421,7 +421,8 @@ def _assign(xyz: np.ndarray,
     """
     Reassign `labels` with `assign_pixels`, and refit `planes` to them (in place). Planes
     left with fewer than `min_pixels` are removed, and recorded in `rejected`. If
-    `largest_component`, planes keep only their largest 4-connected group of pixels. If
+    `largest_component`, planes keep only their largest 4-connected group of pixels, and
+    `assign_pixels` only cuts a plane in two if that's worth losing the smaller part. If
     `return_energy`, also returns `assign_pixels`' energy for the starting labels. If not
     `full_fit`, only the planes' coefficients and what derives from them are refitted
     (see `_set_plane_coefficients`). If `plane_coefs`, pixels are assigned to the planes'
@@ -438,7 +439,8 @@ def _assign(xyz: np.ndarray,
     coefs = [(planes[plane_id]['x_coef'], planes[plane_id]['y_coef'], planes[plane_id]['intercept'])
              for plane_id in plane_ids] if plane_coefs else None
     idx_labels, energy = assign_pixels(xyz[above_ground], idx_labels, len(plane_ids), resolution_metres,
-                                       residual_scales=residual_scales, return_energy=True, coefs=coefs)
+                                       residual_scales=residual_scales, return_energy=True, coefs=coefs,
+                                       connected=largest_component)
 
     new_labels = np.full(labels.shape, labels_nodata)
     candidate_idxs = np.flatnonzero(above_ground)

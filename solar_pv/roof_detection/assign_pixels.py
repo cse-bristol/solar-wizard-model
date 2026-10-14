@@ -14,6 +14,7 @@ from typing import Optional, Sequence, Tuple
 
 import numpy as np
 import scipy.sparse as sp
+from scipy import ndimage
 from scipy.ndimage import distance_transform_edt
 from scipy.sparse.csgraph import breadth_first_order, maximum_flow
 
@@ -36,7 +37,8 @@ def assign_pixels(xyz: np.ndarray,
                   max_dist_m: float = 3,
                   max_cycles: int = 5,
                   return_energy: bool = False,
-                  coefs: Optional[Sequence[Tuple[float, float, float]]] = None):
+                  coefs: Optional[Sequence[Tuple[float, float, float]]] = None,
+                  connected: bool = False):
     """
     Reassign `labels` (per pixel of `xyz`: a plane index in [0, n_planes), or NONE).
     `residual_scales` is per plane, 0.25m if not given.
@@ -52,6 +54,11 @@ def assign_pixels(xyz: np.ndarray,
 
     If `coefs` is given, plane k is z = a x + b y + c for (a, b, c) = coefs[k], rather than
     a least-squares fit to its starting pixels.
+
+    If `connected`, each plane keeps only its largest 4-connected group of pixels, the
+    others being unassigned, and a move is only made if it lowers the energy after that:
+    so a plane is only cut in two (losing the smaller part) if that's worth its cost. A move
+    that would cut a plane is retried without taking any of that plane's pixels.
 
     If `return_energy`, also returns the energy of the starting labels.
     """
@@ -88,10 +95,19 @@ def assign_pixels(xyz: np.ndarray,
     lo, hi = _neighbour_pairs(grid)
     energy = _energy(current, data, lo, hi, smoothness)
     start_energy = energy
+    if connected:
+        current, _ = _largest_components(current, np.unique(current), grid, rows, cols)
+        energy = _energy(current, data, lo, hi, smoothness)
     for _ in range(max_cycles):
         improved = False
         for alpha in range(n_planes + 1):
             candidate = _expand(alpha, current, data, allowed[:, alpha], lo, hi, smoothness)
+            if connected:
+                candidate, cut = _connected_move(alpha, current, candidate, grid, rows, cols)
+                if cut.size and _energy(candidate, data, lo, hi, smoothness) >= energy - 1e-9:
+                    retry = _expand(alpha, current, data, allowed[:, alpha] & ~np.isin(current, cut), lo, hi,
+                                    smoothness)
+                    candidate, _ = _connected_move(alpha, current, retry, grid, rows, cols)
             candidate_energy = _energy(candidate, data, lo, hi, smoothness)
             if candidate_energy < energy - 1e-9:
                 current, energy, improved = candidate, candidate_energy, True
@@ -101,6 +117,42 @@ def assign_pixels(xyz: np.ndarray,
     if return_energy:
         return current - 1, start_energy
     return current - 1
+
+
+def _connected_move(alpha: int, current: np.ndarray, candidate: np.ndarray, grid: np.ndarray, rows: np.ndarray,
+                    cols: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """`candidate`, an expansion of `alpha` from `current`, with each plane it changed
+    keeping only its largest group of pixels; and the planes other than `alpha` that lost
+    pixels by that."""
+    changed = candidate != current
+    affected = np.unique(np.concatenate([current[changed], [alpha]]))
+    return _largest_components(candidate, affected[affected != alpha], grid, rows, cols, alpha)
+
+
+def _largest_components(labels: np.ndarray, planes: np.ndarray, grid: np.ndarray, rows: np.ndarray,
+                        cols: np.ndarray, extra: int = 0) -> Tuple[np.ndarray, np.ndarray]:
+    """`labels` with each of `planes` (and `extra`) keeping only its largest 4-connected
+    group of pixels, the rest being none; and those of `planes` that lost pixels."""
+    labels = labels.copy()
+    cut = []
+    for k in np.concatenate([planes, [extra]]):
+        if k == 0:
+            continue
+        idxs = np.flatnonzero(labels == k)
+        if len(idxs) < 2:
+            continue
+        r, c = rows[idxs], cols[idxs]
+        r0, c0 = r.min(), c.min()
+        image = np.zeros((r.max() - r0 + 1, c.max() - c0 + 1), dtype=bool)
+        image[r - r0, c - c0] = True
+        groups, n = ndimage.label(image)
+        if n < 2:
+            continue
+        group = groups[r - r0, c - c0]
+        labels[idxs[group != np.argmax(np.bincount(group)[1:]) + 1]] = 0
+        if k != extra:
+            cut.append(k)
+    return labels, np.array(cut, dtype=int)
 
 
 def grid_index(xy: np.ndarray, resolution_metres: float):

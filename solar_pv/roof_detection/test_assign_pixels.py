@@ -61,3 +61,22 @@ class AssignPixelsTest(unittest.TestCase):
         assigned = assign_pixels(xyz, labels, 2, 1.0)
 
         assert not np.any(assigned == 0)
+
+    def test_connected_only_cuts_a_plane_if_worth_it(self):
+        # a flat roof with a slightly raised strip across it, which a second plane has
+        # started on: taking the whole strip would cut the roof in two
+        xs, ys = np.meshgrid(np.arange(20) + 0.5, np.arange(8) + 0.5)
+        xs, ys = xs.ravel(), ys.ravel()
+        strip = (xs > 9) & (xs < 11)
+        xyz = np.column_stack([xs, ys, np.where(strip, 10.12, 10.0)])
+        labels = np.where(strip & (ys < 4), 1, 0)
+        coefs = [(0, 0, 10.0), (0, 0, 10.12)]
+
+        def assign(**kwargs):
+            return assign_pixels(xyz, labels, 2, 1.0, residual_scales=[0.1, 0.1], max_dist_m=5, coefs=coefs,
+                                 **kwargs)
+
+        assert np.all(assign()[strip] == 1)
+        assigned = assign(connected=True)
+        assert np.all(assigned[~strip] == 0)
+        assert np.all(assigned[strip & (ys < 4)] == 1)
