@@ -512,7 +512,7 @@ def _segment_and_assign(xyz: np.ndarray,
         if len(planes) == 0:
             return []
         labels = refine()
-        if _merge_and_remove(xyz, labels, planes, above_ground, resolution_metres, labels_nodata, rejected, debug):
+        if _merge_and_remove(xyz, labels, planes, resolution_metres, labels_nodata, rejected, debug):
             labels = refine()
         if round_ == _MAX_PROPOSAL_ROUNDS:
             break
@@ -565,11 +565,12 @@ def _propose(xyz: np.ndarray,
     for region in np.unique(regions[regions >= 0]):
         idxs = candidate_idxs[regions == region]
         plane = {"building_id": building_id, "plane_type": "segmented", "plane_id": f"segmented_{plane_id}",
-                 "res": resolution_metres}
-        set_plane_fit(plane, xyz[idxs, :2], xyz[idxs, 2], aspect[idxs], resolution_metres)
-        reason = _implausible(plane, face_index, normals[idxs][locally_planar[idxs]])
-        if not reason and len(idxs) < small_pixels and locally_planar[idxs].mean() < _MIN_SMALL_REGION_PLANAR_SHARE:
+                 "res": resolution_metres, "inliers_xy": xyz[idxs, :2]}
+        if len(idxs) < small_pixels and locally_planar[idxs].mean() < _MIN_SMALL_REGION_PLANAR_SHARE:
             reason = rejections.SMALL_POOR_FIT
+        else:
+            set_plane_fit(plane, xyz[idxs, :2], xyz[idxs, 2], aspect[idxs], resolution_metres)
+            reason = _implausible(plane, face_index, normals[idxs][locally_planar[idxs]])
         if reason:
             rejections.record(rejected, plane, reason)
             continue
@@ -613,7 +614,6 @@ def _mergeable(p: RoofPlane, q: RoofPlane) -> bool:
 def _merge_and_remove(xyz: np.ndarray,
                       labels: np.ndarray,
                       planes: Dict[int, RoofPlane],
-                      above_ground: np.ndarray,
                       resolution_metres: float,
                       labels_nodata: int,
                       rejected: Optional[List[dict]] = None,
@@ -621,8 +621,6 @@ def _merge_and_remove(xyz: np.ndarray,
     """Merge, then remove, planes (in place) where that lowers the energy including
     `_LABEL_COST` per plane. Returns whether anything changed."""
     scale = lambda is_flat: _FLAT_ROOF_RESIDUAL_THRESHOLD if is_flat else _RESIDUAL_THRESHOLD
-    ground = ~above_ground
-    labels[ground] = labels_nodata
     merges = merge_by_energy(xyz, labels, planes, resolution_metres, _LABEL_COST, scale, _mergeable,
                              good_enough_cost=_GOOD_ENOUGH_MERGE_COST)
     kept = {plane_id: dict(plane) for plane_id, plane in planes.items()}
@@ -637,7 +635,7 @@ def _merge_and_remove(xyz: np.ndarray,
 def _implausible(plane: RoofPlane, face_index: _FaceIndex, reliable_normals: np.ndarray) -> Optional[str]:
     """
     Why `plane` isn't plausible as a candidate - not aligned with the building, a poor
-    fit, a poor shape, or (if pitched) its locally planar pixels, whose normals are in
+    shape, or (if pitched) its locally planar pixels, whose normals are in
     `reliable_normals`, mostly face another way - or None if it is. Sets the plane's `aspect`.
 
     A plane not aligned with any of the building's faces keeps its own aspect if it's steep
@@ -647,7 +645,9 @@ def _implausible(plane: RoofPlane, face_index: _FaceIndex, reliable_normals: np.
 
     The shape checks only apply to regions that fit their plane poorly: a region that
     fits closely is planar whatever its shape, and clean flat roofs are often concave
-    (wrapping round a raised part of the building) or long and thin.
+    (wrapping round a raised part of the building) or long and thin. Unlike RANSAC's
+    candidates, regions don't need a check of the fit itself (`ROOFDET_MAX_MAE`): they only
+    grow within `segment_planes`' `max_distance` of their plane.
 
     RANSAC checks the spread of its pixels' aspects instead of their normals. Those come
     from the 3x3 window centred on each pixel, which at 1m, on faces only a few pixels
@@ -660,8 +660,6 @@ def _implausible(plane: RoofPlane, face_index: _FaceIndex, reliable_normals: np.
                 or len(reliable_normals) < _MIN_FACING_PIXELS:
             return rejections.NO_CLOSE_ASPECT
         plane['aspect'] = plane['aspect_raw']
-    if plane['score'] >= ROOFDET_MAX_MAE:
-        return rejections.HIGH_MAE
     good_fit = plane['mae'] <= _residual_scale(plane) / 2
     if not good_fit:
         if plane['cv_hull_ratio'] < _MIN_CONVEX_HULL_RATIO:
