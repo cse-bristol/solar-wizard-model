@@ -11,7 +11,7 @@ from shapely import wkt, box
 
 from solar_pv.paths import TEST_DATA
 from solar_pv.roof_detection.detect_roofs import _detect_building_roof_planes, _create_adaptive_batches, _assign_and_merge, \
-    _set_skew, _trim_plane_coefficients, _facing_share, _implausible, _set_footprint_aspect_gap
+    _set_skew, _trim_plane_coefficients, _facing_share, _implausible, _set_footprint_aspect_gap, _finalise
 from solar_pv.roof_detection.merge_adjacent import set_plane_fit
 from solar_pv.roof_detection.segment_planes import local_fits
 from solar_pv.roof_detection.ransac import _FaceIndex
@@ -310,3 +310,27 @@ class FootprintAspectTest(unittest.TestCase):
         plane['is_flat'] = False
         _set_footprint_aspect_gap([plane], footprint)
         self.assertAlmostEqual(plane['footprint_aspect_gap'], 30, delta=1)
+
+
+class FinaliseTest(unittest.TestCase):
+
+    def _finalise(self, xs, ys, zs, footprint) -> dict:
+        xyz = np.column_stack([xs.ravel(), ys.ravel(), zs.ravel()])
+        planes = {0: {'aspect': 63}}
+        _finalise(xyz, np.full(len(xyz), 180.0), np.zeros(len(xyz), dtype=int), planes, _FaceIndex.of(footprint),
+                  1.0)
+        return planes[0]
+
+    def test_pitched_plane_with_no_face_close_keeps_its_own_aspect(self):
+        from shapely import affinity
+        xs, ys = np.meshgrid(np.arange(10) + 0.5, np.arange(6) + 0.5)
+        plane = self._finalise(xs, ys, ys * np.tan(np.radians(30)) + 5,
+                               affinity.rotate(box(0, 0, 10, 6), 30, origin=(5, 3)))
+        self.assertAlmostEqual(plane['aspect'], 180, delta=0.01)
+
+    def test_flat_plane_with_no_face_near_faces_south(self):
+        # in the middle of a large footprint, more than 10m from all its faces:
+        xs, ys = np.meshgrid(np.arange(15, 25) + 0.5, np.arange(15, 25) + 0.5)
+        plane = self._finalise(xs, ys, np.full(xs.shape, 10.0), box(0, 0, 40, 40))
+        self.assertTrue(plane['is_flat'])
+        self.assertEqual(plane['aspect'], 180)

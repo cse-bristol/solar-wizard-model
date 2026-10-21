@@ -486,7 +486,8 @@ def _segment_and_assign(xyz: np.ndarray,
     alternately refit the planes to their pixels and reassign pixels to the planes
     (`_refine`), merging and removing planes when that lowers the energy of the assignment
     plus `_LABEL_COST` per plane (`plane_moves`), and proposing new candidates from the
-    pixels no plane explains well - then reject clutter and mess.
+    pixels no plane explains well - then finish the planes (`_finalise`) and reject clutter
+    and mess.
 
     Candidates are the regions of `segment_planes` that RANSAC would accept as candidate
     planes (see `_propose`). The regions over-segment: a region only has to be good enough
@@ -512,7 +513,7 @@ def _segment_and_assign(xyz: np.ndarray,
     # for `_merge_and_remove` to judge
     def refine():
         return _refine(xyz, aspect, labels, planes, above_ground, resolution_metres, labels_nodata,
-                       3, face_index, debug=debug, rejected=rejected)
+                       3, debug=debug, rejected=rejected)
 
     next_id = propose(above_ground, 0, min_pixels)
     if debug:
@@ -534,6 +535,7 @@ def _segment_and_assign(xyz: np.ndarray,
             break
     if len(planes) == 0:
         return []
+    _finalise(xyz, aspect, labels, planes, face_index, resolution_metres)
     return reject_mess(planes, labels, xyz, resolution_metres, above_ground=above_ground, debug=debug,
                        rejected=rejected)
 
@@ -705,13 +707,12 @@ def _refine(xyz: np.ndarray,
             resolution_metres: float,
             labels_nodata: int,
             min_pixels: int,
-            face_index: _FaceIndex,
             debug: bool = False,
             rejected: Optional[List[dict]] = None) -> np.ndarray:
     """
     Reassign pixels and refit `planes` (in place) until the labels stop changing or the
-    energy stops falling, then re-snap each plane's aspect to the building's faces, or if
-    no face is close now, use its own (or for a flat plane, keep its old one).
+    energy stops falling. Only what assigning pixels and the plane moves use is refitted:
+    the rest is for `_finalise`.
 
     Refitting is by least squares, not the energy `assign_pixels` minimises, so it can
     raise the energy and the rounds can cycle rather than converge.
@@ -728,6 +729,21 @@ def _refine(xyz: np.ndarray,
         if changed == 0 or len(planes) == 0 or energy > last_energy * (1 - _MIN_REFINE_ENERGY_FALL):
             break
         last_energy = energy
+    return labels
+
+
+def _finalise(xyz: np.ndarray,
+              aspect: np.ndarray,
+              labels: np.ndarray,
+              planes: Dict[int, RoofPlane],
+              face_index: _FaceIndex,
+              resolution_metres: float) -> None:
+    """
+    Refit each of `planes` (in place) to its pixels, with everything that derives from them
+    (see `set_plane_fit`) but its orientation from just its pixels near it (see
+    `_trim_plane_coefficients`), and snap its aspect to the building's faces. A pitched
+    plane with no face close keeps its own aspect, and a flat one faces south.
+    """
     for plane_id, plane in planes.items():
         idxs = np.flatnonzero(labels == plane_id)
         set_plane_fit(plane, xyz[idxs, :2], xyz[idxs, 2], aspect[idxs], resolution_metres)
@@ -735,9 +751,8 @@ def _refine(xyz: np.ndarray,
         snapped = _snapped_aspect(plane, face_index)
         if snapped is not None:
             plane['aspect'] = snapped
-        elif not plane['is_flat']:
-            plane['aspect'] = plane['aspect_raw']
-    return labels
+        else:
+            plane['aspect'] = 180 if plane['is_flat'] else plane['aspect_raw']
 
 
 def _trim_plane_coefficients(plane: dict, xyz: np.ndarray) -> None:
