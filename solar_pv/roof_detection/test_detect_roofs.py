@@ -329,6 +329,24 @@ class FootprintAspectTest(unittest.TestCase):
         self.assertAlmostEqual(plane['footprint_aspect_gap'], 30, delta=1)
 
 
+class SegmentReproposalTest(unittest.TestCase):
+
+    def test_no_plane_is_removed_twice(self):
+        # Proposing from the pixels of a plane just removed grows much the same plane, to be
+        # removed again. These buildings each have planes removed while refining:
+        for building_id in ("0015", "0032"):
+            with self.subTest(building_id=building_id):
+                rejected = []
+                _detect_building_roof_planes(_load_data(join(_ROOFDET_DATA, f"{building_id}.json")), building_id,
+                                             1.0, method="segment", rejected=rejected)
+                removed = [set(map(tuple, np.round(r['inliers_xy'], 3).tolist())) for r in rejected
+                           if r['rejection_reason'] in (rejections.UNPROFITABLE, rejections.TOO_FEW_PIXELS)]
+                self.assertGreater(len(removed), 0)
+                for i, pixels in enumerate(removed):
+                    for earlier in removed[:i]:
+                        self.assertLess(len(pixels & earlier), len(pixels) / 2)
+
+
 class FinaliseTest(unittest.TestCase):
 
     def _finalise(self, xs, ys, zs, footprint) -> dict:

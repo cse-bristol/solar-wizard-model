@@ -479,6 +479,10 @@ def _segment_and_assign(xyz: np.ndarray,
     pixels no plane explains well - then finish the planes (`_finalise`) and reject clutter
     and mess.
 
+    New candidates don't come from the pixels of planes removed since the last proposal (as
+    unprofitable, or left with too few pixels): their pixels are poorly explained, but a
+    region grown from them is mostly removed again.
+
     Candidates are the regions of `segment_planes` that RANSAC would accept as candidate
     planes (see `_propose`). The regions over-segment: a region only has to be good enough
     to start from, as refining lets a plane grow into pixels its region missed (by up to
@@ -501,9 +505,13 @@ def _segment_and_assign(xyz: np.ndarray,
 
     # planes may shrink below `min_pixels` while refining: whether they're worth keeping is
     # for `_merge_and_remove` to judge
-    def refine():
-        return _refine(xyz, aspect, labels, planes, above_ground, resolution_metres, labels_nodata,
-                       3, debug=debug, rejected=rejected)
+    def refine(removed: np.ndarray) -> np.ndarray:
+        """`_refine`, marking in `removed` the pixels of the planes it drops for having too few."""
+        start, plane_ids = labels, set(planes)
+        new_labels = _refine(xyz, aspect, labels, planes, above_ground, resolution_metres, labels_nodata,
+                             3, debug=debug, rejected=rejected)
+        removed[np.isin(start, list(plane_ids - set(planes)))] = True
+        return new_labels
 
     next_id = propose(above_ground, 0, min_pixels)
     if debug:
@@ -511,14 +519,18 @@ def _segment_and_assign(xyz: np.ndarray,
     for round_ in range(_MAX_PROPOSAL_ROUNDS + 1):
         if len(planes) == 0:
             return []
-        labels = refine()
+        removed = np.zeros(len(xyz), dtype=bool)
+        labels = refine(removed)
+        assigned = labels != labels_nodata
         if _merge_and_remove(xyz, labels, planes, resolution_metres, labels_nodata, rejected, debug):
-            labels = refine()
+            # merging only relabels pixels, so those it unassigned were removed planes':
+            removed |= assigned & (labels == labels_nodata)
+            labels = refine(removed)
         if round_ == _MAX_PROPOSAL_ROUNDS:
             break
-        poorly_explained = above_ground & ~_explained(xyz, labels, planes, normals, locally_planar)
+        candidates = above_ground & ~removed & ~_explained(xyz, labels, planes, normals, locally_planar)
         before = next_id
-        next_id = propose(poorly_explained, next_id, _MIN_REPROPOSED_PIXELS)
+        next_id = propose(candidates, next_id, _MIN_REPROPOSED_PIXELS)
         if debug:
             print(f"Proposal round {round_}: {next_id - before} new candidates")
         if next_id == before:
