@@ -7,11 +7,12 @@ from os.path import join
 from typing import List
 
 import numpy as np
-from shapely import wkt, box
+from shapely import wkt, box, LineString, STRtree
 
 from solar_pv.paths import TEST_DATA
 from solar_pv.roof_detection.detect_roofs import _detect_building_roof_planes, _create_adaptive_batches, _assign_and_merge, \
-    _set_skew, _trim_plane_coefficients, _facing_share, _implausible, _set_footprint_aspect_gap, _finalise
+    _set_skew, _trim_plane_coefficients, _facing_share, _implausible, _set_footprint_aspect_gap, _finalise, \
+    _snapped_aspect
 from solar_pv.roof_detection.merge_adjacent import set_plane_fit
 from solar_pv.roof_detection.segment_planes import local_fits
 from solar_pv.roof_detection.ransac import _FaceIndex
@@ -270,16 +271,17 @@ class FacingShareTest(unittest.TestCase):
         self.assertEqual(_facing_share(plane, normals[~south][:2]), 1.0)
 
 
-def _south_face(rotation_degrees: float, slope_degrees: float = 30):
+def _south_face(rotation_degrees: float, slope_degrees: float = 30, pixel_aspect: float = 180.0):
     """A roof facing south, on a footprint rotated anticlockwise by `rotation_degrees` from
-    it, and its pixels' local fits."""
+    it, and its pixels' local fits. `pixel_aspect` is every pixel's aspect from the aspect
+    raster."""
     from shapely import affinity
     xs, ys = np.meshgrid(np.arange(10) + 0.5, np.arange(6) + 0.5)
     xs, ys = xs.ravel(), ys.ravel()
     zs = ys * np.tan(np.radians(slope_degrees)) + 5
     xyz = np.column_stack([xs, ys, zs])
     plane = {}
-    set_plane_fit(plane, xyz[:, :2], zs, np.full(len(zs), 180.0), 1.0)
+    set_plane_fit(plane, xyz[:, :2], zs, np.full(len(zs), pixel_aspect), 1.0)
     footprint = affinity.rotate(box(0, 0, 10, 6), rotation_degrees, origin=(5, 3))
     normals, rms = local_fits(xyz, 1.0)
     return plane, footprint, normals[rms <= 0.1]
@@ -304,6 +306,21 @@ class FootprintAspectTest(unittest.TestCase):
     def test_shallow_plane_off_footprint_rejected(self):
         plane, footprint, normals = _south_face(30, slope_degrees=8)
         self.assertEqual(_implausible(plane, _FaceIndex.of(footprint), normals), rejections.NO_CLOSE_ASPECT)
+
+    def test_plane_aligned_only_by_its_pixels_mean_aspect_keeps_its_own(self):
+        # its pixels' aspects follow the footprint (which is at 60 degrees, and so 150), so
+        # it's kept even though it's too shallow to be kept off the footprint:
+        plane, footprint, normals = _south_face(30, slope_degrees=8, pixel_aspect=150.0)
+        self.assertIsNone(_implausible(plane, _FaceIndex.of(footprint), normals))
+        self.assertAlmostEqual(plane['aspect'], 180, delta=0.01)
+
+    def test_snaps_to_a_further_face_near_its_own_aspect_before_one_near_its_pixels_mean_aspect(self):
+        plane, _, _ = _south_face(0, pixel_aspect=150.0)
+        # within 1m of its pixels, a face at 60 degrees (so at right angles to 150); 2.5m
+        # from them, one at 90 (so at right angles to 180):
+        faces = [LineString([(-0.5, -0.5), (-0.5 + 2 * np.sin(np.radians(60)), -0.5 + 2 * np.cos(np.radians(60)))]),
+                 LineString([(2, -2), (8, -2)])]
+        self.assertEqual(_snapped_aspect(plane, _FaceIndex(faces, STRtree(faces))), (180, True))
 
     def test_footprint_aspect_gap(self):
         plane, footprint, _ = _south_face(30)

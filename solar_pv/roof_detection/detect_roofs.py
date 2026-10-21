@@ -636,7 +636,8 @@ def _implausible(plane: RoofPlane, face_index: _FaceIndex, reliable_normals: np.
     """
     Why `plane` isn't plausible as a candidate - not aligned with the building, a poor
     shape, or (if pitched) its locally planar pixels, whose normals are in
-    `reliable_normals`, mostly face another way - or None if it is. Sets the plane's `aspect`.
+    `reliable_normals`, mostly face another way - or None if it is. Sets the plane's `aspect`:
+    snapped to the building's faces if one is close to it (see `_snapped_aspect`), else its own.
 
     A plane not aligned with any of the building's faces keeps its own aspect if it's steep
     and big enough, and enough of its pixels are locally planar to corroborate it (see
@@ -654,11 +655,11 @@ def _implausible(plane: RoofPlane, face_index: _FaceIndex, reliable_normals: np.
     deep, mostly straddles a ridge, eave or valley; a locally planar pixel's normal comes
     from a window wholly on one face.
     """
-    plane['aspect'] = _snapped_aspect(plane, face_index)
+    plane['aspect'], aligned = _snapped_aspect(plane, face_index)
+    if not aligned and (plane['slope'] < _MIN_OFF_FOOTPRINT_SLOPE or len(plane['inliers_xy']) < _MIN_OFF_FOOTPRINT_PIXELS
+                        or len(reliable_normals) < _MIN_FACING_PIXELS):
+        return rejections.NO_CLOSE_ASPECT
     if plane['aspect'] is None:
-        if plane['slope'] < _MIN_OFF_FOOTPRINT_SLOPE or len(plane['inliers_xy']) < _MIN_OFF_FOOTPRINT_PIXELS \
-                or len(reliable_normals) < _MIN_FACING_PIXELS:
-            return rejections.NO_CLOSE_ASPECT
         plane['aspect'] = plane['aspect_raw']
     good_fit = plane['mae'] <= _residual_scale(plane) / 2
     if not good_fit:
@@ -736,7 +737,7 @@ def _finalise(xyz: np.ndarray,
         idxs = np.flatnonzero(labels == plane_id)
         set_plane_fit(plane, xyz[idxs, :2], xyz[idxs, 2], aspect[idxs], resolution_metres)
         _trim_plane_coefficients(plane, xyz[idxs])
-        snapped = _snapped_aspect(plane, face_index)
+        snapped, _ = _snapped_aspect(plane, face_index)
         if snapped is not None:
             plane['aspect'] = snapped
         else:
@@ -761,16 +762,27 @@ def _trim_plane_coefficients(plane: dict, xyz: np.ndarray) -> None:
     plane['inliers_xy'] = xy
 
 
-def _snapped_aspect(plane: RoofPlane, face_index: _FaceIndex) -> Optional[float]:
+def _snapped_aspect(plane: RoofPlane, face_index: _FaceIndex) -> Tuple[Optional[float], bool]:
     """
-    As DETSAC does: the building face azimuth (or a right angle to one) nearest the
-    plane's aspect, else nearest its pixels' mean aspect; or for flat roofs nearest south.
+    The building face azimuth (or a right angle to one) nearest the plane's aspect, or for
+    flat roofs nearest south, if one is close; and whether the plane is aligned with the
+    building: a face is close to its aspect or, if it's pitched, to its pixels' mean aspect.
 
     Faces are looked for within 1m of the plane's pixels, then 3m and 10m, as in
     `get_potential_aspects` - but a wider search is also tried if no nearer face is close
     in angle, not only if there are no nearer faces: a plane's pixels may stop short of
     the eaves, where the nearest faces are those of another part of the building.
+
+    The mean aspect is from the aspect raster, which is noisy on shallow faces, and on faces
+    a few pixels deep comes mostly from windows straddling a ridge, eave or valley (see
+    `_implausible`): it's evidence that a plane follows the building, but not of which way
+    it faces, so it isn't snapped to.
     """
+    if plane['is_flat']:
+        target, threshold = 180, FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD
+    else:
+        target, threshold = plane['aspect_raw'], AZIMUTH_ALIGNMENT_THRESHOLD
+    mean_aligned = False
     points = shapely.points(plane['inliers_xy'])
     points_tree = STRtree(points)
     for distance in (1.0, 3.0, 10.0):
@@ -778,15 +790,13 @@ def _snapped_aspect(plane: RoofPlane, face_index: _FaceIndex) -> Optional[float]
         if len(nearby) == 0:
             continue
         azimuths = _right_angles(face_index, nearby)
-        if plane['is_flat']:
-            snapped = closest_azimuth(azimuths, 180, FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD)
-        else:
-            snapped = closest_azimuth(azimuths, plane['aspect_raw'], AZIMUTH_ALIGNMENT_THRESHOLD)
-            if snapped is None:
-                snapped = closest_azimuth(azimuths, plane['aspect_circ_mean'], AZIMUTH_ALIGNMENT_THRESHOLD)
+        snapped = closest_azimuth(azimuths, target, threshold)
         if snapped is not None:
-            return snapped
-    return None
+            return snapped, True
+        if not plane['is_flat'] and \
+                closest_azimuth(azimuths, plane['aspect_circ_mean'], AZIMUTH_ALIGNMENT_THRESHOLD) is not None:
+            mean_aligned = True
+    return None, mean_aligned
 
 
 def _right_angles(face_index: _FaceIndex, faces) -> List[int]:
