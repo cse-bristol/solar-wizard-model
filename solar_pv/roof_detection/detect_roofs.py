@@ -20,7 +20,6 @@ from psycopg2.sql import SQL, Identifier
 import numpy as np
 import shapely
 from shapely import STRtree
-from scipy import ndimage
 from shapely import wkt
 
 from solar_pv.geos import deg_diff, slope_deg, aspect_deg, azimuth_deg
@@ -34,7 +33,7 @@ from solar_pv.constants import RANSAC_LARGE_BUILDING, \
 from solar_pv.roof_detection import rejections
 from solar_pv.roof_detection.mess import reject_mess
 from solar_pv.roof_detection.detsac import DETSACRegressorForLIDAR
-from solar_pv.roof_detection.assign_pixels import assign_pixels, grid_index, NONE
+from solar_pv.roof_detection.assign_pixels import assign_pixels, NONE
 from solar_pv.roof_detection.merge_adjacent import merge_adjacent, set_plane_fit
 from solar_pv.roof_detection.premade_planes import create_planes
 from solar_pv.roof_detection.ransac import RANSACRegressorForLIDAR, _FaceIndex, closest_azimuth, \
@@ -422,12 +421,12 @@ def _assign(xyz: np.ndarray,
     Reassign `labels` with `assign_pixels`, and refit `planes` to them (in place). Planes
     left with fewer than `min_pixels` are removed, and recorded in `rejected`. If
     `largest_component`, planes keep only their largest 4-connected group of pixels, and
-    `assign_pixels` only cuts a plane in two if that's worth losing the smaller part. If
-    `return_energy`, also returns `assign_pixels`' energy for the starting labels. If not
-    `full_fit`, only the planes' coefficients and what derives from them are refitted
-    (see `_set_plane_coefficients`). If `plane_coefs`, pixels are assigned to the planes'
-    own coefficients, not least-squares fits to their pixels, and the planes are refitted
-    to just their pixels near them (see `_trim_plane_coefficients`).
+    are only cut in two if that's worth losing the smaller part (see `assign_pixels`'
+    `connected`). If `return_energy`, also returns `assign_pixels`' energy for the
+    starting labels. If not `full_fit`, only the planes' coefficients and what derives
+    from them are refitted (see `_set_plane_coefficients`). If `plane_coefs`, pixels are
+    assigned to the planes' own coefficients, not least-squares fits to their pixels, and
+    the planes are refitted to just their pixels near them (see `_trim_plane_coefficients`).
     """
     plane_ids = list(planes.keys())
     idx_labels = np.full(np.count_nonzero(above_ground), NONE)
@@ -444,17 +443,8 @@ def _assign(xyz: np.ndarray,
 
     new_labels = np.full(labels.shape, labels_nodata)
     candidate_idxs = np.flatnonzero(above_ground)
-    if largest_component:
-        grid, rows, cols = grid_index(xyz[above_ground, :2], resolution_metres)
     for k, plane_id in enumerate(plane_ids):
-        in_plane = idx_labels == k
-        if largest_component and in_plane.any():
-            image = np.zeros(grid.shape, dtype=bool)
-            image[rows[in_plane], cols[in_plane]] = True
-            groups, _ = ndimage.label(image)
-            sizes = np.bincount(groups[rows[in_plane], cols[in_plane]])
-            in_plane &= groups[rows, cols] == np.argmax(sizes)
-        idxs = candidate_idxs[in_plane]
+        idxs = candidate_idxs[idx_labels == k]
         if len(idxs) < max(min_pixels, 3):
             rejections.record(rejected, planes.pop(plane_id), rejections.TOO_FEW_PIXELS, pixels=len(idxs))
             continue
