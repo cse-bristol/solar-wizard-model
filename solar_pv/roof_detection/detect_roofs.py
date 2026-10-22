@@ -65,16 +65,17 @@ _MAX_REFINE_ROUNDS = 10
 _MIN_REFINE_ENERGY_FALL = 0.01
 # RANSAC's default for its shape check:
 _MIN_CONVEX_HULL_RATIO = 0.65
-# A pixel is locally planar if the best 3x3 window containing it fits a plane this well (m):
+# A pixel is locally planar, and its normal reliable when growing regions, if the best 3x3
+# window containing it fits a plane this well (m):
 _MAX_LOCAL_RMS = 0.1
 _MIN_SMALL_REGION_PLANAR_SHARE = 0.5
-# As `segment_planes`' default:
+# Max angle between a pixel's normal and a region's (when growing regions) or a plane's:
 _MAX_NORMAL_ANGLE_DEGREES = 12
 # A pitched region is implausible if fewer than this share of its locally planar pixels
 # face the same way as it, if it has at least `_MIN_FACING_PIXELS` of them (see `_facing_share`):
 _MIN_FACING_SHARE = 0.5
 _MIN_FACING_PIXELS = 3
-# As `_snapped_aspect`'s widest search for faces:
+# The widest search for faces near a plane (see `_snapped_aspect`):
 _FOOTPRINT_SEARCH_M = 10.0
 # A pitched region not aligned with any of the building's faces is kept only if it's at
 # least this steep and big, and its locally planar pixels corroborate it (see `_implausible`).
@@ -237,7 +238,7 @@ def _detect_building_roof_planes(building: RoofDetBuilding,
     z = xyz[:, 2]
     mask = z > max_ground_height if max_ground_height else np.ones(aspect.shape)
 
-    min_points_per_plane = min(8, int(8 / resolution_metres))  # 8 for 2m, 8 for 1m, 16 for 0.5m
+    min_points_per_plane = min(8, int(8 / resolution_metres))  # 4 for 2m, 8 for 1m, 8 for 0.5m
     total_points_in_building = len(aspect)
 
     if method == "segment":
@@ -433,8 +434,7 @@ def _assign(xyz: np.ndarray,
     for k, plane_id in enumerate(plane_ids):
         idx_labels[labels[above_ground] == plane_id] = k
 
-    residual_scales = [_FLAT_ROOF_RESIDUAL_THRESHOLD if planes[plane_id]['is_flat'] else _RESIDUAL_THRESHOLD
-                       for plane_id in plane_ids]
+    residual_scales = [_residual_scale(planes[plane_id]['is_flat']) for plane_id in plane_ids]
     coefs = [(planes[plane_id]['x_coef'], planes[plane_id]['y_coef'], planes[plane_id]['intercept'])
              for plane_id in plane_ids] if plane_coefs else None
     idx_labels, energy = assign_pixels(xyz[above_ground], idx_labels, len(plane_ids), resolution_metres,
@@ -571,7 +571,12 @@ def _propose(xyz: np.ndarray,
         return first_id
     normals, rms = local
     locally_planar = rms <= _MAX_LOCAL_RMS
-    regions = segment_planes(xyz[candidate_idxs], resolution_metres, min_pixels=min_pixels,
+    regions = segment_planes(xyz[candidate_idxs], resolution_metres,
+                             max_normal_angle_degrees=_MAX_NORMAL_ANGLE_DEGREES,
+                             max_distance=_RESIDUAL_THRESHOLD,
+                             max_flat_distance=_FLAT_ROOF_RESIDUAL_THRESHOLD,
+                             max_normal_rms=_MAX_LOCAL_RMS,
+                             min_pixels=min_pixels,
                              local=(normals[candidate_idxs], rms[candidate_idxs]))
     plane_id = first_id
     for region in np.unique(regions[regions >= 0]):
@@ -605,7 +610,7 @@ def _explained(xyz: np.ndarray, labels: np.ndarray, planes: Dict[int, RoofPlane]
     for plane_id, plane in planes.items():
         idxs = np.flatnonzero(labels == plane_id)
         a, b, c = plane['x_coef'], plane['y_coef'], plane['intercept']
-        cost = data_cost(xyz[idxs], (a, b, c), _residual_scale(plane))
+        cost = data_cost(xyz[idxs], (a, b, c), _residual_scale(plane['is_flat']))
         unit = np.array([-a, -b, 1.0]) / np.sqrt(a * a + b * b + 1)
         facing = ~locally_planar[idxs] | (normals[idxs] @ unit >= cos_max)
         explained[idxs[(cost <= 1) & facing]] = True
@@ -632,11 +637,10 @@ def _merge_and_remove(xyz: np.ndarray,
                       debug: bool = False) -> bool:
     """Merge, then remove, planes (in place) where that lowers the energy including
     `_LABEL_COST` per plane. Returns whether anything changed."""
-    scale = lambda is_flat: _FLAT_ROOF_RESIDUAL_THRESHOLD if is_flat else _RESIDUAL_THRESHOLD
-    merges = merge_by_energy(xyz, labels, planes, resolution_metres, _LABEL_COST, scale, _mergeable,
+    merges = merge_by_energy(xyz, labels, planes, resolution_metres, _LABEL_COST, _residual_scale, _mergeable,
                              good_enough_cost=_GOOD_ENOUGH_MERGE_COST)
     kept = {plane_id: dict(plane) for plane_id, plane in planes.items()}
-    removed = remove_unprofitable(xyz, labels, planes, resolution_metres, _LABEL_COST, scale, labels_nodata)
+    removed = remove_unprofitable(xyz, labels, planes, resolution_metres, _LABEL_COST, _residual_scale, labels_nodata)
     for plane_id in removed:
         rejections.record(rejected, kept[plane_id], rejections.UNPROFITABLE)
     if debug:
@@ -673,7 +677,7 @@ def _implausible(plane: RoofPlane, face_index: _FaceIndex, reliable_normals: np.
         return rejections.NO_CLOSE_ASPECT
     if plane['aspect'] is None:
         plane['aspect'] = plane['aspect_raw']
-    good_fit = plane['mae'] <= _residual_scale(plane) / 2
+    good_fit = plane['mae'] <= _residual_scale(plane['is_flat']) / 2
     if not good_fit:
         if plane['cv_hull_ratio'] < _MIN_CONVEX_HULL_RATIO:
             return rejections.CONVEX_HULL_RATIO
@@ -696,8 +700,8 @@ def _facing_share(plane: RoofPlane, reliable_normals: np.ndarray) -> float:
     return float(np.mean(reliable_normals @ unit >= np.cos(np.radians(_MAX_NORMAL_ANGLE_DEGREES))))
 
 
-def _residual_scale(plane: RoofPlane) -> float:
-    return _FLAT_ROOF_RESIDUAL_THRESHOLD if plane['is_flat'] else _RESIDUAL_THRESHOLD
+def _residual_scale(is_flat: bool) -> float:
+    return _FLAT_ROOF_RESIDUAL_THRESHOLD if is_flat else _RESIDUAL_THRESHOLD
 
 
 def _refine(xyz: np.ndarray,
@@ -767,7 +771,7 @@ def _trim_plane_coefficients(plane: dict, xyz: np.ndarray) -> None:
     xy, z = xyz[:, :2], xyz[:, 2]
     for _ in range(_TRIM_ROUNDS):
         residual = z - (xy[:, 0] * plane['x_coef'] + xy[:, 1] * plane['y_coef'] + plane['intercept'])
-        inliers = np.abs(residual) <= _residual_scale(plane)
+        inliers = np.abs(residual) <= _residual_scale(plane['is_flat'])
         if np.count_nonzero(inliers) < max(3, _MIN_TRIM_SHARE * len(z)):
             break
         _set_plane_coefficients(plane, xy[inliers], z[inliers])
@@ -797,7 +801,7 @@ def _snapped_aspect(plane: RoofPlane, face_index: _FaceIndex) -> Tuple[Optional[
     mean_aligned = False
     points = shapely.points(plane['inliers_xy'])
     points_tree = STRtree(points)
-    for distance in (1.0, 3.0, 10.0):
+    for distance in (1.0, 3.0, _FOOTPRINT_SEARCH_M):
         nearby = face_index.faces_near(points, points_tree, distance)
         if len(nearby) == 0:
             continue
