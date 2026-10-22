@@ -536,7 +536,8 @@ def _propose(xyz: np.ndarray,
     Add (in place) the regions of `segment_planes` among the `candidates` pixels that
     RANSAC would accept as candidate planes to `planes`, taking their pixels in `labels`,
     with ids from `first_id`. Returns the next unused id. `local` is each pixel's local
-    fit (see `local_fits`).
+    fit (see `local_fits`). A region is judged on its least-squares plane, but its plane
+    in `planes` is fitted as refining fits planes (see `_fit`).
 
     Regions need `min_pixels`. On rough surfaces (vegetation, clutter) region growing finds
     many small regions, which fit their plane no worse than real small planes do, as
@@ -568,8 +569,8 @@ def _propose(xyz: np.ndarray,
         if reason:
             rejections.record(rejected, plane, reason)
             continue
-        planes[plane_id] = Plane(coef=(plane['x_coef'], plane['y_coef'], plane['intercept']),
-                                 is_flat=plane['is_flat'], plane_type=plane['plane_type'],
+        coef, is_flat = _fit(xyz[idxs])
+        planes[plane_id] = Plane(coef=coef, is_flat=is_flat, plane_type=plane['plane_type'],
                                  plane_id=plane['plane_id'], xy=plane['inliers_xy'], proposed=plane)
         labels[idxs] = plane_id
         plane_id += 1
