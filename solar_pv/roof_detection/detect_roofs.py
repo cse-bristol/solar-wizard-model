@@ -40,7 +40,7 @@ from solar_pv.roof_detection.ransac import RANSACRegressorForLIDAR, _FaceIndex, 
     _min_thinness_ratio
 from solar_pv.roof_detection.plane_fit import PlaneFit
 from solar_pv.roof_detection.plane_skew import plane_skew
-from solar_pv.roof_detection.plane_moves import merge_by_energy, remove_unprofitable, data_cost
+from solar_pv.roof_detection.plane_moves import merge_by_energy, remove_unprofitable, data_cost, Plane
 from solar_pv.roof_detection.segment_planes import segment_planes, local_fits
 from solar_pv.roof_polygons.roof_polygons import create_roof_polygons, _pixel_region
 from solar_pv.datatypes import RoofDetBuilding, RoofPlane, RoofPolygon
@@ -412,22 +412,10 @@ def _assign(xyz: np.ndarray,
             above_ground: np.ndarray,
             resolution_metres: float,
             labels_nodata: int,
-            rejected: Optional[List[dict]] = None,
-            min_pixels: int = 3,
-            largest_component: bool = False,
-            return_energy: bool = False,
-            full_fit: bool = True,
-            plane_coefs: bool = False):
+            rejected: Optional[List[dict]] = None) -> np.ndarray:
     """
     Reassign `labels` with `assign_pixels`, and refit `planes` to them (in place). Planes
-    left with fewer than `min_pixels` are removed, and recorded in `rejected`. If
-    `largest_component`, planes keep only their largest 4-connected group of pixels, and
-    are only cut in two if that's worth losing the smaller part (see `assign_pixels`'
-    `connected`). If `return_energy`, also returns `assign_pixels`' energy for the
-    starting labels. If not `full_fit`, only the planes' coefficients and what derives
-    from them are refitted (see `_set_plane_coefficients`). If `plane_coefs`, pixels are
-    assigned to the planes' own coefficients, not least-squares fits to their pixels, and
-    the planes are refitted to just their pixels near them (see `_trim_plane_coefficients`).
+    left with fewer than 3 pixels are removed, and recorded in `rejected`.
     """
     plane_ids = list(planes.keys())
     idx_labels = np.full(np.count_nonzero(above_ground), NONE)
@@ -435,29 +423,19 @@ def _assign(xyz: np.ndarray,
         idx_labels[labels[above_ground] == plane_id] = k
 
     residual_scales = [_residual_scale(planes[plane_id]['is_flat']) for plane_id in plane_ids]
-    coefs = [(planes[plane_id]['x_coef'], planes[plane_id]['y_coef'], planes[plane_id]['intercept'])
-             for plane_id in plane_ids] if plane_coefs else None
-    idx_labels, energy = assign_pixels(xyz[above_ground], idx_labels, len(plane_ids), resolution_metres,
-                                       residual_scales=residual_scales, return_energy=True, coefs=coefs,
-                                       connected=largest_component)
+    idx_labels = assign_pixels(xyz[above_ground], idx_labels, len(plane_ids), resolution_metres,
+                               residual_scales=residual_scales)
 
     new_labels = np.full(labels.shape, labels_nodata)
     candidate_idxs = np.flatnonzero(above_ground)
     for k, plane_id in enumerate(plane_ids):
         idxs = candidate_idxs[idx_labels == k]
-        if len(idxs) < max(min_pixels, 3):
+        if len(idxs) < 3:
             rejections.record(rejected, planes.pop(plane_id), rejections.TOO_FEW_PIXELS, pixels=len(idxs))
             continue
         new_labels[idxs] = plane_id
         planes[plane_id]['res'] = resolution_metres
-        if full_fit:
-            set_plane_fit(planes[plane_id], xyz[idxs, :2], xyz[idxs, 2], aspect[idxs], resolution_metres)
-        else:
-            _set_plane_coefficients(planes[plane_id], xyz[idxs, :2], xyz[idxs, 2])
-        if plane_coefs:
-            _trim_plane_coefficients(planes[plane_id], xyz[idxs])
-    if return_energy:
-        return new_labels, energy
+        set_plane_fit(planes[plane_id], xyz[idxs, :2], xyz[idxs, 2], aspect[idxs], resolution_metres)
     return new_labels
 
 
@@ -477,7 +455,7 @@ def _segment_and_assign(xyz: np.ndarray,
     (`_refine`), merging and removing planes when that lowers the energy of the assignment
     plus `_LABEL_COST` per plane (`plane_moves`), and proposing new candidates from the
     pixels no plane explains well - then finish the planes (`_finalise`) and reject clutter
-    and mess.
+    and mess. Until they're finished, planes are only what those steps use (`Plane`).
 
     New candidates don't come from the pixels of planes removed since the last proposal (as
     unprofitable, or left with too few pixels): their pixels are poorly explained, but a
@@ -497,7 +475,7 @@ def _segment_and_assign(xyz: np.ndarray,
     normals[above_ground], rms[above_ground] = local_fits(xyz[above_ground], resolution_metres)
     locally_planar = rms <= _MAX_LOCAL_RMS
     face_index = _FaceIndex.of(polygon)
-    planes: Dict[int, RoofPlane] = {}
+    planes: Dict[int, Plane] = {}
 
     def propose(candidates: np.ndarray, first_id: int, min_region_pixels: int) -> int:
         return _propose(xyz, aspect, candidates, labels, planes, (normals, rms), face_index, building_id,
@@ -508,8 +486,8 @@ def _segment_and_assign(xyz: np.ndarray,
     def refine(removed: np.ndarray) -> np.ndarray:
         """`_refine`, marking in `removed` the pixels of the planes it drops for having too few."""
         start, plane_ids = labels, set(planes)
-        new_labels = _refine(xyz, aspect, labels, planes, above_ground, resolution_metres, labels_nodata,
-                             3, debug=debug, rejected=rejected)
+        new_labels = _refine(xyz, labels, planes, above_ground, resolution_metres, labels_nodata, debug=debug,
+                             rejected=rejected)
         removed[np.isin(start, list(plane_ids - set(planes)))] = True
         return new_labels
 
@@ -537,16 +515,15 @@ def _segment_and_assign(xyz: np.ndarray,
             break
     if len(planes) == 0:
         return []
-    _finalise(xyz, aspect, labels, planes, face_index, resolution_metres)
-    return reject_mess(planes, labels, xyz, resolution_metres, above_ground=above_ground, debug=debug,
-                       rejected=rejected)
+    return reject_mess(_finalise(xyz, aspect, labels, planes, face_index, resolution_metres), labels, xyz,
+                       resolution_metres, above_ground=above_ground, debug=debug, rejected=rejected)
 
 
 def _propose(xyz: np.ndarray,
              aspect: np.ndarray,
              candidates: np.ndarray,
              labels: np.ndarray,
-             planes: Dict[int, RoofPlane],
+             planes: Dict[int, Plane],
              local: Tuple[np.ndarray, np.ndarray],
              face_index: _FaceIndex,
              building_id: str,
@@ -591,13 +568,15 @@ def _propose(xyz: np.ndarray,
         if reason:
             rejections.record(rejected, plane, reason)
             continue
-        planes[plane_id] = plane
+        planes[plane_id] = Plane(coef=(plane['x_coef'], plane['y_coef'], plane['intercept']),
+                                 is_flat=plane['is_flat'], plane_type=plane['plane_type'],
+                                 plane_id=plane['plane_id'], xy=plane['inliers_xy'], proposed=plane)
         labels[idxs] = plane_id
         plane_id += 1
     return plane_id
 
 
-def _explained(xyz: np.ndarray, labels: np.ndarray, planes: Dict[int, RoofPlane], normals: np.ndarray,
+def _explained(xyz: np.ndarray, labels: np.ndarray, planes: Dict[int, Plane], normals: np.ndarray,
                locally_planar: np.ndarray) -> np.ndarray:
     """
     Which pixels are within the residual scale of the plane they're assigned to, and if
@@ -609,28 +588,28 @@ def _explained(xyz: np.ndarray, labels: np.ndarray, planes: Dict[int, RoofPlane]
     cos_max = np.cos(np.radians(_MAX_NORMAL_ANGLE_DEGREES))
     for plane_id, plane in planes.items():
         idxs = np.flatnonzero(labels == plane_id)
-        a, b, c = plane['x_coef'], plane['y_coef'], plane['intercept']
-        cost = data_cost(xyz[idxs], (a, b, c), _residual_scale(plane['is_flat']))
+        a, b, c = plane.coef
+        cost = data_cost(xyz[idxs], plane.coef, _residual_scale(plane.is_flat))
         unit = np.array([-a, -b, 1.0]) / np.sqrt(a * a + b * b + 1)
         facing = ~locally_planar[idxs] | (normals[idxs] @ unit >= cos_max)
         explained[idxs[(cost <= 1) & facing]] = True
     return explained
 
 
-def _mergeable(p: RoofPlane, q: RoofPlane) -> bool:
+def _mergeable(p: Plane, q: Plane) -> bool:
     """
     Whether two planes could be the same roof face: both flat, or facing the same way.
     Energy alone doesn't separate a roof face split by noise from, say, a dormer's side
     and the roof it's on, at 1m: small planes' energies differ by little either way.
     """
-    if p['is_flat'] or q['is_flat']:
-        return p['is_flat'] and q['is_flat']
-    return deg_diff(p['aspect_raw'], q['aspect_raw']) <= AZIMUTH_ALIGNMENT_THRESHOLD
+    if p.is_flat or q.is_flat:
+        return p.is_flat and q.is_flat
+    return deg_diff(p.aspect_raw, q.aspect_raw) <= AZIMUTH_ALIGNMENT_THRESHOLD
 
 
 def _merge_and_remove(xyz: np.ndarray,
                       labels: np.ndarray,
-                      planes: Dict[int, RoofPlane],
+                      planes: Dict[int, Plane],
                       resolution_metres: float,
                       labels_nodata: int,
                       rejected: Optional[List[dict]] = None,
@@ -639,10 +618,10 @@ def _merge_and_remove(xyz: np.ndarray,
     `_LABEL_COST` per plane. Returns whether anything changed."""
     merges = merge_by_energy(xyz, labels, planes, resolution_metres, _LABEL_COST, _residual_scale, _mergeable,
                              good_enough_cost=_GOOD_ENOUGH_MERGE_COST)
-    kept = {plane_id: dict(plane) for plane_id, plane in planes.items()}
+    kept = dict(planes)
     removed = remove_unprofitable(xyz, labels, planes, resolution_metres, _LABEL_COST, _residual_scale, labels_nodata)
     for plane_id in removed:
-        rejections.record(rejected, kept[plane_id], rejections.UNPROFITABLE)
+        rejections.record(rejected, kept[plane_id].record(), rejections.UNPROFITABLE)
     if debug:
         print(f"Merged {len(merges)} pairs of planes, removed {len(removed)}")
     return bool(merges or removed)
@@ -705,28 +684,24 @@ def _residual_scale(is_flat: bool) -> float:
 
 
 def _refine(xyz: np.ndarray,
-            aspect: np.ndarray,
             labels: np.ndarray,
-            planes: Dict[int, RoofPlane],
+            planes: Dict[int, Plane],
             above_ground: np.ndarray,
             resolution_metres: float,
             labels_nodata: int,
-            min_pixels: int,
             debug: bool = False,
             rejected: Optional[List[dict]] = None) -> np.ndarray:
     """
     Reassign pixels and refit `planes` (in place) until the labels stop changing or the
-    energy stops falling. Only what assigning pixels and the plane moves use is refitted:
-    the rest is for `_finalise`.
+    energy stops falling.
 
     Refitting is by least squares, not the energy `assign_pixels` minimises, so it can
     raise the energy and the rounds can cycle rather than converge.
     """
     last_energy = np.inf
     for round_ in range(_MAX_REFINE_ROUNDS):
-        new_labels, energy = _assign(xyz, aspect, labels, planes, above_ground, resolution_metres, labels_nodata,
-                                     rejected, min_pixels=min_pixels, largest_component=True, return_energy=True,
-                                     full_fit=False, plane_coefs=True)
+        new_labels, energy = _reassign(xyz, labels, planes, above_ground, resolution_metres, labels_nodata,
+                                       rejected)
         changed = np.count_nonzero(new_labels != labels)
         labels = new_labels
         if debug:
@@ -737,27 +712,97 @@ def _refine(xyz: np.ndarray,
     return labels
 
 
+def _reassign(xyz: np.ndarray,
+              labels: np.ndarray,
+              planes: Dict[int, Plane],
+              above_ground: np.ndarray,
+              resolution_metres: float,
+              labels_nodata: int,
+              rejected: Optional[List[dict]] = None) -> Tuple[np.ndarray, float]:
+    """
+    Reassign `labels` to the planes as they are, each keeping only its largest 4-connected
+    group of pixels (see `assign_pixels`' `connected`), and refit `planes` to them (in place,
+    see `_fit`). Planes left with fewer than 3 pixels are removed, and recorded in
+    `rejected`. Also returns `assign_pixels`' energy for the starting labels.
+    """
+    plane_ids = list(planes.keys())
+    idx_labels = np.full(np.count_nonzero(above_ground), NONE)
+    for k, plane_id in enumerate(plane_ids):
+        idx_labels[labels[above_ground] == plane_id] = k
+
+    idx_labels, energy = assign_pixels(xyz[above_ground], idx_labels, len(plane_ids), resolution_metres,
+                                       residual_scales=[_residual_scale(planes[i].is_flat) for i in plane_ids],
+                                       return_energy=True, coefs=[planes[i].coef for i in plane_ids],
+                                       connected=True)
+
+    new_labels = np.full(labels.shape, labels_nodata)
+    candidate_idxs = np.flatnonzero(above_ground)
+    for k, plane_id in enumerate(plane_ids):
+        idxs = candidate_idxs[idx_labels == k]
+        if len(idxs) < 3:
+            rejections.record(rejected, planes.pop(plane_id).record(), rejections.TOO_FEW_PIXELS, pixels=len(idxs))
+            continue
+        new_labels[idxs] = plane_id
+        plane = planes[plane_id]
+        plane.coef, plane.is_flat = _fit(xyz[idxs])
+        plane.xy = xyz[idxs, :2]
+    return new_labels, energy
+
+
+def _fit(xyz: np.ndarray) -> Tuple[Tuple[float, float, float], bool]:
+    """
+    A plane through `xyz` and whether it's flat: fitted by least squares, then again (for up
+    to `_TRIM_ROUNDS`) to just the pixels within its residual scale of it, if there are
+    enough of them. Pixels up to about twice that from a plane are assigned to it, and at
+    1m those are mostly mixed ridge, eave or gutter pixels, which tilt a least-squares fit
+    on a plane only a few pixels deep.
+    """
+    xy, z = xyz[:, :2], xyz[:, 2]
+    coef, is_flat = _least_squares(xy, z)
+    for _ in range(_TRIM_ROUNDS):
+        residual = z - (xy[:, 0] * coef[0] + xy[:, 1] * coef[1] + coef[2])
+        inliers = np.abs(residual) <= _residual_scale(is_flat)
+        if np.count_nonzero(inliers) < max(3, _MIN_TRIM_SHARE * len(z)):
+            break
+        coef, is_flat = _least_squares(xy[inliers], z[inliers])
+    return coef, is_flat
+
+
+def _least_squares(xy: np.ndarray, z: np.ndarray) -> Tuple[Tuple[float, float, float], bool]:
+    lr = PlaneFit().fit(xy, z)
+    return (lr.coef_[0], lr.coef_[1], lr.intercept_), slope_deg(lr.coef_[0], lr.coef_[1]) <= FLAT_ROOF_DEGREES_THRESHOLD
+
+
 def _finalise(xyz: np.ndarray,
               aspect: np.ndarray,
               labels: np.ndarray,
-              planes: Dict[int, RoofPlane],
+              planes: Dict[int, Plane],
               face_index: _FaceIndex,
-              resolution_metres: float) -> None:
+              resolution_metres: float) -> Dict[int, RoofPlane]:
     """
-    Refit each of `planes` (in place) to its pixels, with everything that derives from them
-    (see `set_plane_fit`) but its orientation from just its pixels near it (see
-    `_trim_plane_coefficients`), and snap its aspect to the building's faces. A pitched
-    plane with no face close keeps its own aspect, and a flat one faces south.
+    Each of `planes` as a `RoofPlane`, fitted to its pixels with everything that derives
+    from them (see `set_plane_fit`) but its orientation from just its pixels near it (see
+    `_fit`), and its aspect snapped to the building's faces. A pitched plane with no face
+    close keeps its own aspect, and a flat one faces south.
     """
+    finished = {}
     for plane_id, plane in planes.items():
         idxs = np.flatnonzero(labels == plane_id)
-        set_plane_fit(plane, xyz[idxs, :2], xyz[idxs, 2], aspect[idxs], resolution_metres)
-        _trim_plane_coefficients(plane, xyz[idxs])
-        snapped, _ = _snapped_aspect(plane, face_index)
+        roof_plane = {"building_id": plane.proposed["building_id"], "plane_type": plane.plane_type,
+                      "plane_id": plane.plane_id, "res": resolution_metres}
+        set_plane_fit(roof_plane, xyz[idxs, :2], xyz[idxs, 2], aspect[idxs], resolution_metres)
+        coef, is_flat = _fit(xyz[idxs])
+        roof_plane['x_coef'], roof_plane['y_coef'], roof_plane['intercept'] = coef
+        roof_plane['slope'] = slope_deg(coef[0], coef[1])
+        roof_plane['is_flat'] = is_flat
+        roof_plane['aspect_raw'] = aspect_deg(coef[0], coef[1])
+        snapped, _ = _snapped_aspect(roof_plane, face_index)
         if snapped is not None:
-            plane['aspect'] = snapped
+            roof_plane['aspect'] = snapped
         else:
-            plane['aspect'] = 180 if plane['is_flat'] else plane['aspect_raw']
+            roof_plane['aspect'] = 180 if is_flat else roof_plane['aspect_raw']
+        finished[plane_id] = roof_plane
+    return finished
 
 
 def _trim_plane_coefficients(plane: dict, xyz: np.ndarray) -> None:

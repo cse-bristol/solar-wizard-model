@@ -14,6 +14,7 @@ from solar_pv.roof_detection.detect_roofs import _detect_building_roof_planes, _
     _set_skew, _trim_plane_coefficients, _facing_share, _implausible, _set_footprint_aspect_gap, _finalise, \
     _snapped_aspect
 from solar_pv.roof_detection.merge_adjacent import set_plane_fit
+from solar_pv.roof_detection.plane_moves import Plane
 from solar_pv.roof_detection.segment_planes import local_fits
 from solar_pv.roof_detection.ransac import _FaceIndex
 from solar_pv.roof_detection import rejections
@@ -351,10 +352,11 @@ class FinaliseTest(unittest.TestCase):
 
     def _finalise(self, xs, ys, zs, footprint) -> dict:
         xyz = np.column_stack([xs.ravel(), ys.ravel(), zs.ravel()])
-        planes = {0: {'aspect': 63}}
-        _finalise(xyz, np.full(len(xyz), 180.0), np.zeros(len(xyz), dtype=int), planes, _FaceIndex.of(footprint),
-                  1.0)
-        return planes[0]
+        # proposed with another aspect, which isn't kept:
+        planes = {0: Plane(coef=(0.0, 0.0, 0.0), is_flat=True, plane_type="segmented", plane_id="segmented_0",
+                           xy=xyz[:, :2], proposed={'building_id': "0", 'aspect': 63})}
+        return _finalise(xyz, np.full(len(xyz), 180.0), np.zeros(len(xyz), dtype=int), planes,
+                         _FaceIndex.of(footprint), 1.0)[0]
 
     def test_pitched_plane_with_no_face_close_keeps_its_own_aspect(self):
         from shapely import affinity

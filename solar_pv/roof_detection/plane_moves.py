@@ -16,6 +16,7 @@ pixels again. Removal ignores how boundaries would change, as the assignment tha
 settles those.
 """
 from collections import defaultdict
+from dataclasses import dataclass
 from typing import Callable, Dict, List, Tuple
 
 import numpy as np
@@ -27,15 +28,42 @@ from solar_pv.roof_detection.assign_pixels import grid_index, _neighbour_pairs, 
 from solar_pv.roof_detection.plane_fit import PlaneFit
 
 
+@dataclass
+class Plane:
+    """
+    A plane while planes are refined, merged and removed: only what those use, all of which
+    is kept up to date. What else is known of it (fit metrics, shape ratios and so on) is
+    from when it was `proposed`, and only computed afresh once the planes are final.
+    """
+    coef: Tuple[float, float, float]
+    is_flat: bool
+    plane_type: str
+    plane_id: str
+    # its pixels when last refitted:
+    xy: np.ndarray
+    proposed: dict
+
+    @property
+    def slope(self) -> float:
+        return slope_deg(self.coef[0], self.coef[1])
+
+    @property
+    def aspect_raw(self) -> float:
+        return aspect_deg(self.coef[0], self.coef[1])
+
+    def record(self) -> dict:
+        """The plane as a `RoofPlane`-like dict, for recording it if it's thrown away."""
+        return {**self.proposed,
+                'x_coef': self.coef[0], 'y_coef': self.coef[1], 'intercept': self.coef[2],
+                'slope': self.slope, 'is_flat': self.is_flat, 'aspect_raw': self.aspect_raw,
+                'plane_type': self.plane_type, 'plane_id': self.plane_id, 'inliers_xy': self.xy}
+
+
 def data_cost(xyz: np.ndarray, coef: Tuple[float, float, float], residual_scale: float) -> np.ndarray:
     """`assign_pixels`' cost of each pixel of `xyz` on the plane z = a x + b y + c."""
     a, b, c = coef
     residual = np.abs(xyz[:, 2] - (xyz[:, 0] * a + xyz[:, 1] * b + c))
     return np.minimum(residual / residual_scale, RESIDUAL_CAP)
-
-
-def _coef(plane: dict) -> Tuple[float, float, float]:
-    return plane['x_coef'], plane['y_coef'], plane['intercept']
 
 
 def adjacent_planes(xyz: np.ndarray, labels: np.ndarray, resolution_metres: float) -> Dict[Tuple[int, int], int]:
@@ -53,26 +81,25 @@ def adjacent_planes(xyz: np.ndarray, labels: np.ndarray, resolution_metres: floa
 
 def merge_by_energy(xyz: np.ndarray,
                     labels: np.ndarray,
-                    planes: Dict[int, dict],
+                    planes: Dict[int, Plane],
                     resolution_metres: float,
                     label_cost: float,
                     residual_scale,
-                    mergeable: Callable[[dict, dict], bool] = lambda p, q: True,
+                    mergeable: Callable[[Plane, Plane], bool] = lambda p, q: True,
                     good_enough_cost: float = 0.0) -> List[Tuple[int, int]]:
     """
     Greedily merge (in place) the adjacent pair of planes whose merge lowers the energy
     most, until no merge would. Only pairs that are `mergeable` are considered, and a pair
     whose merged plane costs at most `good_enough_cost` per pixel is merged even if that
     raises the energy. A merged
-    plane keeps the first plane's id and has its coefficients (and slope, aspect and
-    flatness) refitted; its other attributes are left for the caller to refit.
+    plane keeps the first plane's id and has its coefficients and flatness refitted.
     `residual_scale(is_flat)` is the residual scale for a plane.
 
     Returns the (kept, merged away) plane ids.
     """
     smoothness = SMOOTHNESS_PER_M / resolution_metres
     idxs = {plane_id: np.flatnonzero(labels == plane_id) for plane_id in planes}
-    costs = {plane_id: data_cost(xyz[idxs[plane_id]], _coef(plane), residual_scale(plane['is_flat'])).sum()
+    costs = {plane_id: data_cost(xyz[idxs[plane_id]], plane.coef, residual_scale(plane.is_flat)).sum()
              for plane_id, plane in planes.items()}
     edges = adjacent_planes(xyz, labels, resolution_metres)
 
@@ -98,12 +125,9 @@ def merge_by_energy(xyz: np.ndarray,
         keep, gone = pair
         coef, is_flat, merged_cost = fit
         plane = planes[keep]
-        plane['x_coef'], plane['y_coef'], plane['intercept'] = coef
-        plane['is_flat'] = is_flat
-        plane['slope'] = slope_deg(coef[0], coef[1])
-        plane['aspect_raw'] = aspect_deg(coef[0], coef[1])
-        plane['plane_type'] = plane['plane_type'] + "_MERGED_" + planes[gone]['plane_type']
-        plane['plane_id'] = plane['plane_id'] + "_MERGED_" + planes[gone]['plane_id']
+        plane.coef, plane.is_flat = coef, is_flat
+        plane.plane_type = plane.plane_type + "_MERGED_" + planes[gone].plane_type
+        plane.plane_id = plane.plane_id + "_MERGED_" + planes[gone].plane_id
         del planes[gone]
         labels[idxs[gone]] = keep
         idxs[keep] = np.concatenate([idxs[keep], idxs.pop(gone)])
@@ -143,7 +167,7 @@ def _merged_fit(xyz: np.ndarray, residual_scale):
 
 def remove_unprofitable(xyz: np.ndarray,
                         labels: np.ndarray,
-                        planes: Dict[int, dict],
+                        planes: Dict[int, Plane],
                         resolution_metres: float,
                         label_cost: float,
                         residual_scale,
@@ -163,12 +187,12 @@ def remove_unprofitable(xyz: np.ndarray,
         profit = {}
         for plane_id, plane in planes.items():
             idxs = np.flatnonzero(labels == plane_id)
-            cost = data_cost(xyz[idxs], _coef(plane), residual_scale(plane['is_flat']))
+            cost = data_cost(xyz[idxs], plane.coef, residual_scale(plane.is_flat))
             alternative = np.full(len(idxs), NONE_COST)
             for other in neighbours[plane_id]:
                 other_plane = planes[other]
-                alternative = np.minimum(alternative, data_cost(xyz[idxs], _coef(other_plane),
-                                                                residual_scale(other_plane['is_flat'])))
+                alternative = np.minimum(alternative, data_cost(xyz[idxs], other_plane.coef,
+                                                                residual_scale(other_plane.is_flat)))
             profit[plane_id] = (alternative - cost).sum()
         worst = min(profit, key=profit.get)
         if profit[worst] >= label_cost:
