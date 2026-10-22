@@ -86,6 +86,10 @@ _FOOTPRINT_SEARCH_M = 10.0
 _MIN_OFF_FOOTPRINT_SLOPE = 15.0
 _MIN_OFF_FOOTPRINT_PIXELS = 12
 # The energy (in `assign_pixels`' units) a plane must save to be worth having.
+# TODO: this is per plane at any resolution, while the smoothness and mess checks scale
+#  with it, so at 0.5m a plane costs a quarter as much per m2 as at 1m (and 4x at 2m).
+#  Decide whether it's per area (divide by res^2) or per plane, and scale segment's minimum
+#  region pixels to match; that needs a sample at another resolution. Tuned at 1m.
 _LABEL_COST = 8.0
 # Planes facing the same way are merged if the merged plane's energy per pixel is at most
 # this - that is, it explains their pixels to within about its residual scale - even if
