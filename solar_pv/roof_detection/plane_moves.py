@@ -21,11 +21,9 @@ from typing import Callable, Dict, List, Tuple
 
 import numpy as np
 
-from solar_pv.constants import FLAT_ROOF_DEGREES_THRESHOLD
 from solar_pv.geos import slope_deg, aspect_deg
 from solar_pv.roof_detection.assign_pixels import grid_index, _neighbour_pairs, RESIDUAL_CAP, NONE_COST, \
     SMOOTHNESS_PER_M
-from solar_pv.roof_detection.plane_fit import PlaneFit
 
 
 @dataclass
@@ -85,14 +83,16 @@ def merge_by_energy(xyz: np.ndarray,
                     resolution_metres: float,
                     label_cost: float,
                     residual_scale,
+                    fit: Callable[[np.ndarray], Tuple[Tuple[float, float, float], bool]],
                     mergeable: Callable[[Plane, Plane], bool] = lambda p, q: True,
                     good_enough_cost: float = 0.0) -> List[Tuple[int, int]]:
     """
     Greedily merge (in place) the adjacent pair of planes whose merge lowers the energy
     most, until no merge would. Only pairs that are `mergeable` are considered, and a pair
     whose merged plane costs at most `good_enough_cost` per pixel is merged even if that
-    raises the energy. A merged
-    plane keeps the first plane's id and has its coefficients and flatness refitted.
+    raises the energy. A merged plane keeps the first plane's id, and is refitted to the
+    pixels of both: `fit(xyz)` is a plane's coefficients and flatness, fitted as the planes
+    are refitted when refining, so that a merge is judged on the plane it would become.
     `residual_scale(is_flat)` is the residual scale for a plane.
 
     Returns the (kept, merged away) plane ids.
@@ -108,12 +108,10 @@ def merge_by_energy(xyz: np.ndarray,
         if not mergeable(planes[p], planes[q]):
             return -np.inf, None, False
         union = np.concatenate([idxs[p], idxs[q]])
-        fit = _merged_fit(xyz[union], residual_scale)
-        if fit is None:
-            return -np.inf, None, False
-        coef, is_flat, merged_cost = fit
+        coef, is_flat = fit(xyz[union])
+        merged_cost = data_cost(xyz[union], coef, residual_scale(is_flat)).sum()
         g = costs[p] + costs[q] + smoothness * edges[pair] + label_cost - merged_cost
-        return g, fit, g > 0 or merged_cost <= good_enough_cost * len(union)
+        return g, (coef, is_flat, merged_cost), g > 0 or merged_cost <= good_enough_cost * len(union)
 
     gains = {pair: gain(pair) for pair in edges}
     merges = []
@@ -121,9 +119,9 @@ def merge_by_energy(xyz: np.ndarray,
         acceptable = {pair: g for pair, g in gains.items() if g[2]}
         if not acceptable:
             break
-        pair, (_, fit, _) = max(acceptable.items(), key=lambda kv: kv[1][0])
+        pair, (_, merged, _) = max(acceptable.items(), key=lambda kv: kv[1][0])
         keep, gone = pair
-        coef, is_flat, merged_cost = fit
+        coef, is_flat, merged_cost = merged
         plane = planes[keep]
         plane.coef, plane.is_flat = coef, is_flat
         plane.plane_type = plane.plane_type + "_MERGED_" + planes[gone].plane_type
@@ -131,6 +129,7 @@ def merge_by_energy(xyz: np.ndarray,
         del planes[gone]
         labels[idxs[gone]] = keep
         idxs[keep] = np.concatenate([idxs[keep], idxs.pop(gone)])
+        plane.xy = xyz[idxs[keep], :2]
         costs[keep] = merged_cost
         del costs[gone]
         merges.append((keep, gone))
@@ -144,25 +143,6 @@ def merge_by_energy(xyz: np.ndarray,
         edges = dict(new_edges)
         gains = {pair: (gains[pair] if keep not in pair and pair in gains else gain(pair)) for pair in edges}
     return merges
-
-
-def _merged_fit(xyz: np.ndarray, residual_scale):
-    """
-    A plane through `xyz`, and its energy. Fitted by least squares, then again to just
-    the pixels it would be assigned (those cheaper on it than unassigned), so that a few
-    pixels far off it don't drag it away from the rest. None if `xyz` is too few pixels.
-    """
-    if len(xyz) < 3:
-        return None
-    lr = PlaneFit().fit(xyz[:, :2], xyz[:, 2])
-    is_flat = slope_deg(*lr.coef_) <= FLAT_ROOF_DEGREES_THRESHOLD
-    coef = (lr.coef_[0], lr.coef_[1], lr.intercept_)
-    kept = data_cost(xyz, coef, residual_scale(is_flat)) < NONE_COST
-    if 3 <= np.count_nonzero(kept) < len(xyz):
-        lr = PlaneFit().fit(xyz[kept, :2], xyz[kept, 2])
-        is_flat = slope_deg(*lr.coef_) <= FLAT_ROOF_DEGREES_THRESHOLD
-        coef = (lr.coef_[0], lr.coef_[1], lr.intercept_)
-    return coef, is_flat, data_cost(xyz, coef, residual_scale(is_flat)).sum()
 
 
 def remove_unprofitable(xyz: np.ndarray,

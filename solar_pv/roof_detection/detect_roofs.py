@@ -616,7 +616,7 @@ def _merge_and_remove(xyz: np.ndarray,
                       debug: bool = False) -> bool:
     """Merge, then remove, planes (in place) where that lowers the energy including
     `_LABEL_COST` per plane. Returns whether anything changed."""
-    merges = merge_by_energy(xyz, labels, planes, resolution_metres, _LABEL_COST, _residual_scale, _mergeable,
+    merges = merge_by_energy(xyz, labels, planes, resolution_metres, _LABEL_COST, _residual_scale, _fit, _mergeable,
                              good_enough_cost=_GOOD_ENOUGH_MERGE_COST)
     kept = dict(planes)
     removed = remove_unprofitable(xyz, labels, planes, resolution_metres, _LABEL_COST, _residual_scale, labels_nodata)
