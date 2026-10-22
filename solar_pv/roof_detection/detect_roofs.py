@@ -102,6 +102,11 @@ _MIN_REPROPOSED_PIXELS = 4
 # pixels that must be (else its least-squares fit is kept):
 _TRIM_ROUNDS = 3
 _MIN_TRIM_SHARE = 0.5
+# A finished plane is refitted to just its pixels within this (m) of it, if less than its
+# residual scale: at 1m, the pixels 0.1-0.25m off a pitched plane are mostly mixed ridge, eave
+# or gutter pixels. Refining keeps to the residual scale, as fitting planes this tightly
+# there splits more faces.
+_FINAL_TRIM_RESIDUAL = 0.1
 # Max rounds of proposing new candidate planes from the pixels no plane explains well.
 _MAX_PROPOSAL_ROUNDS = 2
 
@@ -754,11 +759,11 @@ def _reassign(xyz: np.ndarray,
     return new_labels, energy
 
 
-def _fit(xyz: np.ndarray) -> Tuple[Tuple[float, float, float], bool]:
+def _fit(xyz: np.ndarray, max_trim_residual: float = np.inf) -> Tuple[Tuple[float, float, float], bool]:
     """
     A plane through `xyz` and whether it's flat: fitted by least squares, then again (for up
-    to `_TRIM_ROUNDS`) to just the pixels within its residual scale of it, if there are
-    enough of them. Pixels up to about twice that from a plane are assigned to it, and at
+    to `_TRIM_ROUNDS`) to just the pixels within its residual scale of it (or
+    `max_trim_residual`, if less), if there are enough of them. Pixels up to about twice that from a plane are assigned to it, and at
     1m those are mostly mixed ridge, eave or gutter pixels, which tilt a least-squares fit
     on a plane only a few pixels deep.
     """
@@ -766,7 +771,7 @@ def _fit(xyz: np.ndarray) -> Tuple[Tuple[float, float, float], bool]:
     coef, is_flat = _least_squares(xy, z)
     for _ in range(_TRIM_ROUNDS):
         residual = z - (xy[:, 0] * coef[0] + xy[:, 1] * coef[1] + coef[2])
-        inliers = np.abs(residual) <= _residual_scale(is_flat)
+        inliers = np.abs(residual) <= min(_residual_scale(is_flat), max_trim_residual)
         if np.count_nonzero(inliers) < max(3, _MIN_TRIM_SHARE * len(z)):
             break
         coef, is_flat = _least_squares(xy[inliers], z[inliers])
@@ -787,7 +792,7 @@ def _finalise(xyz: np.ndarray,
     """
     Each of `planes` as a `RoofPlane`, fitted to its pixels with everything that derives
     from them (see `set_plane_fit`) but its orientation from just its pixels near it (see
-    `_fit`), and its aspect snapped to the building's faces. A pitched plane with no face
+    `_fit` and `_FINAL_TRIM_RESIDUAL`), and its aspect snapped to the building's faces. A pitched plane with no face
     close keeps its own aspect, and a flat one faces south.
     """
     finished = {}
@@ -796,7 +801,7 @@ def _finalise(xyz: np.ndarray,
         roof_plane = {"building_id": plane.proposed["building_id"], "plane_type": plane.plane_type,
                       "plane_id": plane.plane_id, "res": resolution_metres}
         set_plane_fit(roof_plane, xyz[idxs, :2], xyz[idxs, 2], aspect[idxs], resolution_metres)
-        coef, is_flat = _fit(xyz[idxs])
+        coef, is_flat = _fit(xyz[idxs], _FINAL_TRIM_RESIDUAL)
         roof_plane['x_coef'], roof_plane['y_coef'], roof_plane['intercept'] = coef
         roof_plane['slope'] = slope_deg(coef[0], coef[1])
         roof_plane['is_flat'] = is_flat

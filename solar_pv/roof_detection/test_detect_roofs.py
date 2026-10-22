@@ -12,7 +12,8 @@ from shapely import wkt, box, LineString, STRtree
 from solar_pv.paths import TEST_DATA
 from solar_pv.roof_detection.detect_roofs import _detect_building_roof_planes, _create_adaptive_batches, _assign_and_merge, \
     _set_skew, _trim_plane_coefficients, _facing_share, _implausible, _set_footprint_aspect_gap, _finalise, \
-    _snapped_aspect
+    _snapped_aspect, _fit
+from solar_pv.geos import slope_deg
 from solar_pv.roof_detection.merge_adjacent import set_plane_fit
 from solar_pv.roof_detection.plane_moves import Plane
 from solar_pv.roof_detection.segment_planes import local_fits
@@ -364,6 +365,20 @@ class FinaliseTest(unittest.TestCase):
         plane = self._finalise(xs, ys, ys * np.tan(np.radians(30)) + 5,
                                affinity.rotate(box(0, 0, 10, 6), 30, origin=(5, 3)))
         self.assertAlmostEqual(plane['aspect'], 180, delta=0.01)
+
+    def test_orientation_leaves_out_mixed_pixels_within_the_residual_scale(self):
+        # a 30 degree roof 6 pixels deep, whose eave row is mixed with the gutter below, 0.3m
+        # under the roof: within the pitched residual scale of the least-squares plane it
+        # tilts, so refining keeps it
+        xs, ys = np.meshgrid(np.arange(10) + 0.5, np.arange(6) + 0.5)
+        zs = ys * np.tan(np.radians(30)) + 5 - np.where(ys < 1, 0.3, 0.0)
+        xyz = np.column_stack([xs.ravel(), ys.ravel(), zs.ravel()])
+        self.assertGreater(abs(slope_deg(*_fit(xyz)[0][:2]) - 30), 0.5)
+
+        plane = self._finalise(xs, ys, zs, box(0, 0, 10, 6))
+
+        self.assertAlmostEqual(plane['slope'], 30, delta=0.01)
+        self.assertEqual(len(plane['inliers_xy']), 60)
 
     def test_flat_plane_with_no_face_near_faces_south(self):
         # in the middle of a large footprint, more than 10m from all its faces:
