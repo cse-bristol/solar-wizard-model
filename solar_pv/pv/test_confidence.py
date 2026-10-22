@@ -113,6 +113,16 @@ class CombineTest(unittest.TestCase):
     def test_weights_sum_to_one(self):
         self.assertAlmostEqual(sum(CONFIDENCE_WEIGHTS.values()), 1.0)
 
+    def test_unknown_sub_score_counts_neither_way(self):
+        scores = {k: 0.6 for k in CONFIDENCE_WEIGHTS}
+        self.assertAlmostEqual(confidence.combine(dict(scores, aspect=None)), 0.6)
+        scores["fit"] = 0.3
+        without = {k: v for k, v in scores.items() if k != "aspect"}
+        expected = 1.0
+        for k, v in without.items():
+            expected *= v ** (CONFIDENCE_WEIGHTS[k] / (1 - CONFIDENCE_WEIGHTS["aspect"]))
+        self.assertAlmostEqual(confidence.combine(dict(scores, aspect=None)), expected)
+
 
 class RoofPlaneConfidenceTest(unittest.TestCase):
 
@@ -122,6 +132,21 @@ class RoofPlaneConfidenceTest(unittest.TestCase):
             meta=meta, slope=35, resolution=0.5, area_raw=95.0, area_grown=100.0)
         self.assertGreater(score, 0.85)
         self.assertEqual(set(sub), set(CONFIDENCE_WEIGHTS))
+
+    def test_facing_share_is_scored_instead_of_aspect_spread_if_recorded(self):
+        meta = {"score": 0.08, "aspect_circ_sd": 1.4, "thinness_ratio": 0.9, "facing_share": 0.9}
+        _, sub = confidence.roof_plane_confidence(
+            meta=meta, slope=35, resolution=1.0, area_raw=95.0, area_grown=100.0)
+        self.assertAlmostEqual(sub["aspect"], 0.9)
+
+    def test_unknown_facing_share_is_not_scored(self):
+        meta = {"score": 0.08, "aspect_circ_sd": 1.4, "thinness_ratio": 0.9, "facing_share": None}
+        _, sub = confidence.roof_plane_confidence(
+            meta=meta, slope=35, resolution=1.0, area_raw=95.0, area_grown=100.0)
+        self.assertIsNone(sub["aspect"])
+        _, flat = confidence.roof_plane_confidence(
+            meta=meta, slope=0, resolution=1.0, area_raw=95.0, area_grown=100.0)
+        self.assertEqual(flat["aspect"], 1.0)
 
     def test_poor_roof_scores_low(self):
         meta = {"score": 0.9, "aspect_circ_sd": 1.4, "thinness_ratio": 0.2}

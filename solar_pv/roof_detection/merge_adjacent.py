@@ -200,9 +200,7 @@ def set_plane_fit(plane: dict, xy: np.ndarray, z: np.ndarray, aspect: np.ndarray
     lr = PlaneFit()
     lr.fit(xy, z)
     z_pred = lr.predict(xy)
-    score = mean_absolute_error(z, z_pred)
 
-    plane['score'] = score
     plane['x_coef'] = lr.coef_[0]
     plane['y_coef'] = lr.coef_[1]
     plane['intercept'] = lr.intercept_
@@ -210,17 +208,7 @@ def set_plane_fit(plane: dict, xy: np.ndarray, z: np.ndarray, aspect: np.ndarray
     plane['is_flat'] = plane['slope'] <= FLAT_ROOF_DEGREES_THRESHOLD
     plane['aspect_raw'] = aspect_deg(lr.coef_[0], lr.coef_[1])
     plane['inliers_xy'] = xy
-
-    plane["r2"] = r2_score(z, z_pred)
-    plane["mae"] = score
-    plane["mse"] = metrics.mean_squared_error(z, z_pred)
-    plane["rmse"] = metrics.root_mean_squared_error(z, z_pred)
-    try:
-        plane["msle"] = metrics.mean_squared_log_error(z, z_pred)
-    except ValueError:
-        plane["msle"] = None
-    plane["mape"] = metrics.mean_absolute_percentage_error(z, z_pred)
-    plane["sd"] = np.std(np.abs(z - z_pred))
+    set_fit_metrics(plane, z, z_pred)
 
     z_image, idxs = _image(xy, z, nodata=-9999, res=res)
     plane_mask = z_image != -9999
@@ -237,6 +225,20 @@ def set_plane_fit(plane: dict, xy: np.ndarray, z: np.ndarray, aspect: np.ndarray
     aspect_rads = np.radians(aspect)
     plane["aspect_circ_mean"] = math.degrees(circular_mean_rad(aspect_rads))
     plane["aspect_circ_sd"] = circular_sd_rad(aspect_rads)
+
+
+def set_fit_metrics(plane: dict, z: np.ndarray, z_pred: np.ndarray) -> None:
+    """The fit metrics of `plane` (`score` is its MAE) for pixel elevations `z`, which it predicts are `z_pred`."""
+    plane["score"] = plane["mae"] = mean_absolute_error(z, z_pred)
+    plane["r2"] = r2_score(z, z_pred)
+    plane["mse"] = metrics.mean_squared_error(z, z_pred)
+    plane["rmse"] = metrics.root_mean_squared_error(z, z_pred)
+    try:
+        plane["msle"] = metrics.mean_squared_log_error(z, z_pred)
+    except ValueError:
+        plane["msle"] = None
+    plane["mape"] = metrics.mean_absolute_percentage_error(z, z_pred)
+    plane["sd"] = np.std(np.abs(z - z_pred))
 
 
 def _hierarchical_merge(graph, labels, thresh: float = 0):

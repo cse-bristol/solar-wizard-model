@@ -270,7 +270,7 @@ class FacingShareTest(unittest.TestCase):
 
     def test_too_few_locally_planar_pixels_to_say(self):
         plane, normals, south = self._gable()
-        self.assertEqual(_facing_share(plane, normals[~south][:2]), 1.0)
+        self.assertIsNone(_facing_share(plane, normals[~south][:2]))
 
 
 def _south_face(rotation_degrees: float, slope_degrees: float = 30, pixel_aspect: float = 180.0):
@@ -356,8 +356,10 @@ class FinaliseTest(unittest.TestCase):
         # proposed with another aspect, which isn't kept:
         planes = {0: Plane(coef=(0.0, 0.0, 0.0), is_flat=True, plane_type="segmented", plane_id="segmented_0",
                            xy=xyz[:, :2], proposed={'building_id': "0", 'aspect': 63})}
+        normals, rms = local_fits(xyz, 1.0)
+        reliable_normals = np.where((rms <= 0.1)[:, None], normals, np.nan)
         return _finalise(xyz, np.full(len(xyz), 180.0), np.zeros(len(xyz), dtype=int), planes,
-                         _FaceIndex.of(footprint), 1.0)[0]
+                         _FaceIndex.of(footprint), 1.0, reliable_normals)[0]
 
     def test_pitched_plane_with_no_face_close_keeps_its_own_aspect(self):
         from shapely import affinity
@@ -379,6 +381,11 @@ class FinaliseTest(unittest.TestCase):
 
         self.assertAlmostEqual(plane['slope'], 30, delta=0.01)
         self.assertEqual(len(plane['inliers_xy']), 60)
+        # the fit metrics are of that plane, not the least-squares one:
+        self.assertAlmostEqual(plane['mae'], 0.3 * 10 / 60, delta=1e-9)
+        self.assertEqual(plane['score'], plane['mae'])
+        # the eave row's pixels aren't locally planar, and the others face the plane's way:
+        self.assertEqual(plane['facing_share'], 1.0)
 
     def test_flat_plane_with_no_face_near_faces_south(self):
         # in the middle of a large footprint, more than 10m from all its faces:

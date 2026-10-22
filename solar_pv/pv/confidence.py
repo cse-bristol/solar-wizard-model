@@ -39,13 +39,33 @@ def _fit_score(mae: float) -> float:
                   / math.log(ROOFDET_MAX_MAE / CONFIDENCE_FULL_FIT_MAE))
 
 
+def _aspect_strength(slope: float) -> float:
+    """How much the aspect sub-score counts: aspect is meaningless for flat roofs and noisy
+    for shallow ones."""
+    return _clamp((slope - FLAT_ROOF_DEGREES_THRESHOLD)
+                  / (CONFIDENCE_ASPECT_FULL_SLOPE - FLAT_ROOF_DEGREES_THRESHOLD))
+
+
 def _aspect_score(aspect_circ_sd: float, slope: float) -> float:
-    """Spread of inlier-pixel aspects (radians), with the penalty faded in by slope:
-    aspect is meaningless for flat roofs and noisy for shallow ones."""
+    """Spread of inlier-pixel aspects (radians), with the penalty faded in by slope."""
     raw = _clamp(1 - aspect_circ_sd / CONFIDENCE_MAX_ASPECT_CIRC_SD)
-    strength = _clamp((slope - FLAT_ROOF_DEGREES_THRESHOLD)
-                      / (CONFIDENCE_ASPECT_FULL_SLOPE - FLAT_ROOF_DEGREES_THRESHOLD))
-    return 1 - (1 - raw) * strength
+    return 1 - (1 - raw) * _aspect_strength(slope)
+
+
+def _facing_score(facing_share: Optional[float], slope: float) -> Optional[float]:
+    """
+    The share of the plane's locally planar pixels whose own normals agree with it (see
+    `detect_roofs._facing_share`), with the penalty faded in by slope as `_aspect_score`'s
+    is. Segment roof detection records it in place of the spread of the pixels' aspects,
+    which come from 3x3 windows that at 1m mostly straddle a ridge, eave or valley. None
+    (not scored) if too few pixels were locally planar to say, unless it's flat.
+    """
+    strength = _aspect_strength(slope)
+    if strength == 0:
+        return 1.0
+    if facing_share is None:
+        return None
+    return 1 - (1 - facing_share) * strength
 
 
 def _footprint_score(footprint_aspect_gap: Optional[float], slope: float) -> float:
@@ -58,9 +78,7 @@ def _footprint_score(footprint_aspect_gap: Optional[float], slope: float) -> flo
         return 1.0
     raw = _clamp(1 - (footprint_aspect_gap - AZIMUTH_ALIGNMENT_THRESHOLD)
                  / (CONFIDENCE_MAX_FOOTPRINT_ASPECT_GAP - AZIMUTH_ALIGNMENT_THRESHOLD))
-    strength = _clamp((slope - FLAT_ROOF_DEGREES_THRESHOLD)
-                      / (CONFIDENCE_ASPECT_FULL_SLOPE - FLAT_ROOF_DEGREES_THRESHOLD))
-    return 1 - (1 - raw) * strength
+    return 1 - (1 - raw) * _aspect_strength(slope)
 
 
 def _shape_score(thinness_ratio: float, n_pixels: float) -> float:
@@ -92,12 +110,13 @@ def confidence_sub_scores(meta: dict,
                           slope: float,
                           resolution: float,
                           area_raw: float,
-                          area_grown: float) -> Dict[str, float]:
-    """The [0,1] sub-scores, keyed as in CONFIDENCE_WEIGHTS. `area_raw` is the
-    planar area (m2) of the polygon RANSAC fitted."""
+                          area_grown: float) -> Dict[str, Optional[float]]:
+    """The [0,1] sub-scores, keyed as in CONFIDENCE_WEIGHTS, or None for one that isn't
+    known. `area_raw` is the planar area (m2) of the polygon RANSAC fitted."""
     return {
         "fit": _fit_score(meta["score"]),
-        "aspect": _aspect_score(meta["aspect_circ_sd"], slope),
+        "aspect": (_facing_score(meta["facing_share"], slope) if "facing_share" in meta
+                   else _aspect_score(meta["aspect_circ_sd"], slope)),
         "shape": _shape_score(meta["thinness_ratio"], area_raw / resolution ** 2),
         "resolution": _resolution_score(resolution),
         "geom_agreement": _geom_agreement_score(area_raw, area_grown),
@@ -105,12 +124,14 @@ def confidence_sub_scores(meta: dict,
     }
 
 
-def combine(sub_scores: Dict[str, float]) -> float:
-    """Weighted geometric mean of the sub-scores (weights sum to 1), each floored at
-    CONFIDENCE_SUB_SCORE_FLOOR."""
+def combine(sub_scores: Dict[str, Optional[float]]) -> float:
+    """Weighted geometric mean of the known (not None) sub-scores, each floored at
+    CONFIDENCE_SUB_SCORE_FLOOR: one that isn't known counts neither for nor against."""
+    known = {key: weight for key, weight in CONFIDENCE_WEIGHTS.items() if sub_scores[key] is not None}
+    total = sum(known.values())
     product = 1.0
-    for key, weight in CONFIDENCE_WEIGHTS.items():
-        product *= max(sub_scores[key], CONFIDENCE_SUB_SCORE_FLOOR) ** weight
+    for key, weight in known.items():
+        product *= max(sub_scores[key], CONFIDENCE_SUB_SCORE_FLOOR) ** (weight / total)
     return product
 
 

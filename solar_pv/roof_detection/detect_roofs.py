@@ -34,7 +34,7 @@ from solar_pv.roof_detection import rejections
 from solar_pv.roof_detection.mess import reject_mess
 from solar_pv.roof_detection.detsac import DETSACRegressorForLIDAR
 from solar_pv.roof_detection.assign_pixels import assign_pixels, NONE
-from solar_pv.roof_detection.merge_adjacent import merge_adjacent, set_plane_fit
+from solar_pv.roof_detection.merge_adjacent import merge_adjacent, set_plane_fit, set_fit_metrics
 from solar_pv.roof_detection.premade_planes import create_planes
 from solar_pv.roof_detection.ransac import RANSACRegressorForLIDAR, _FaceIndex, closest_azimuth, \
     _min_thinness_ratio
@@ -524,8 +524,9 @@ def _segment_and_assign(xyz: np.ndarray,
             break
     if len(planes) == 0:
         return []
-    return reject_mess(_finalise(xyz, aspect, labels, planes, face_index, resolution_metres), labels, xyz,
-                       resolution_metres, above_ground=above_ground, debug=debug, rejected=rejected)
+    reliable_normals = np.where(locally_planar[:, None], normals, np.nan)
+    return reject_mess(_finalise(xyz, aspect, labels, planes, face_index, resolution_metres, reliable_normals),
+                       labels, xyz, resolution_metres, above_ground=above_ground, debug=debug, rejected=rejected)
 
 
 def _propose(xyz: np.ndarray,
@@ -672,18 +673,20 @@ def _implausible(plane: RoofPlane, face_index: _FaceIndex, reliable_normals: np.
             return rejections.CONVEX_HULL_RATIO
         if plane['thinness_ratio'] < _min_thinness_ratio(len(plane['inliers_xy'])):
             return rejections.THINNESS_RATIO
-    if not plane['is_flat'] and _facing_share(plane, reliable_normals) < _MIN_FACING_SHARE:
-        return rejections.NORMALS_DISAGREE
+    if not plane['is_flat']:
+        share = _facing_share(plane, reliable_normals)
+        if share is not None and share < _MIN_FACING_SHARE:
+            return rejections.NORMALS_DISAGREE
     return None
 
 
-def _facing_share(plane: RoofPlane, reliable_normals: np.ndarray) -> float:
+def _facing_share(plane: RoofPlane, reliable_normals: np.ndarray) -> Optional[float]:
     """
     The share of the plane's locally planar pixels whose own normal is within
-    `_MAX_NORMAL_ANGLE_DEGREES` of the plane's, or 1 if too few are locally planar to say.
+    `_MAX_NORMAL_ANGLE_DEGREES` of the plane's, or None if too few are locally planar to say.
     """
     if len(reliable_normals) < _MIN_FACING_PIXELS:
-        return 1.0
+        return None
     a, b = plane['x_coef'], plane['y_coef']
     unit = np.array([-a, -b, 1.0]) / np.sqrt(a * a + b * b + 1)
     return float(np.mean(reliable_normals @ unit >= np.cos(np.radians(_MAX_NORMAL_ANGLE_DEGREES))))
@@ -788,12 +791,16 @@ def _finalise(xyz: np.ndarray,
               labels: np.ndarray,
               planes: Dict[int, Plane],
               face_index: _FaceIndex,
-              resolution_metres: float) -> Dict[int, RoofPlane]:
+              resolution_metres: float,
+              reliable_normals: np.ndarray) -> Dict[int, RoofPlane]:
     """
     Each of `planes` as a `RoofPlane`, fitted to its pixels with everything that derives
     from them (see `set_plane_fit`) but its orientation from just its pixels near it (see
-    `_fit` and `_FINAL_TRIM_RESIDUAL`), and its aspect snapped to the building's faces. A pitched plane with no face
-    close keeps its own aspect, and a flat one faces south.
+    `_fit` and `_FINAL_TRIM_RESIDUAL`), and its aspect snapped to the building's faces. A
+    pitched plane with no face close keeps its own aspect, and a flat one faces south.
+
+    Its fit metrics are of that plane, and its `facing_share` (see `_facing_share`) is from
+    `reliable_normals`, each pixel's local normal if it's locally planar, else NaN.
     """
     finished = {}
     for plane_id, plane in planes.items():
@@ -806,6 +813,10 @@ def _finalise(xyz: np.ndarray,
         roof_plane['slope'] = slope_deg(coef[0], coef[1])
         roof_plane['is_flat'] = is_flat
         roof_plane['aspect_raw'] = aspect_deg(coef[0], coef[1])
+        xy, z = xyz[idxs, :2], xyz[idxs, 2]
+        set_fit_metrics(roof_plane, z, xy[:, 0] * coef[0] + xy[:, 1] * coef[1] + coef[2])
+        normals = reliable_normals[idxs]
+        roof_plane['facing_share'] = _facing_share(roof_plane, normals[~np.isnan(normals[:, 0])])
         snapped, _ = _snapped_aspect(roof_plane, face_index)
         if snapped is not None:
             roof_plane['aspect'] = snapped
@@ -1047,6 +1058,8 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[RoofPolygon]):
             "mape": plane["mape"],
             "skew": plane.get("skew"),
             "footprint_aspect_gap": plane.get("footprint_aspect_gap"),
+            # only segment's planes have one, which confidence then scores instead of aspect_circ_sd:
+            **({"facing_share": plane["facing_share"]} if "facing_share" in plane else {}),
         })
         plane['roof_geom_27700'] = plane['roof_geom_27700'].wkt
         plane['roof_geom_raw_27700'] = shapely.multipolygons(shapely.get_parts(plane['roof_geom_raw_27700'])).wkt
