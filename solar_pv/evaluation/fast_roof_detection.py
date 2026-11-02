@@ -105,9 +105,24 @@ def _init_worker(sample_path: str, settings: List[Tuple[str, object]]) -> None:
     global _DATA
     with open(sample_path, "rb") as f:
         _DATA = pickle.load(f)
+    apply_settings(settings)
+
+
+def apply_settings(settings: List[Tuple[str, object]]) -> None:
+    """Override module-level constants: (module.NAME, value)."""
     for target, value in settings:
         module, name = target.rsplit(".", 1)
         setattr(importlib.import_module(module), name, value)
+
+
+def detect(building_id: str, method: str) -> Tuple[List[dict], List[dict], np.ndarray]:
+    """A sample building's roof planes, rejected planes and pixels, as the model finds them."""
+    building = _DATA["buildings"][building_id]
+    rejected = []
+    random_state = np.random.RandomState(zlib.crc32(str(building_id).encode()))
+    found = detect_roofs._detect_building_roof_planes(building, building_id, _DATA["resolution"], method=method,
+                                                      random_state=random_state, rejected=rejected)
+    return found, rejected, detect_roofs._pixels_xyz(building["pixels"])
 
 
 def _score_building(job) -> dict:
@@ -118,11 +133,7 @@ def _score_building(job) -> dict:
     out = {"building_id": building_id, "footprint_m2": footprint.area, "methods": {}, "skew": []}
 
     start = time.process_time()
-    rejected = []
-    random_state = np.random.RandomState(zlib.crc32(str(building_id).encode()))
-    found = detect_roofs._detect_building_roof_planes(building, building_id, res, method=method,
-                                                      random_state=random_state, rejected=rejected)
-    pixels_xyz = detect_roofs._pixels_xyz(building["pixels"])
+    found, rejected, pixels_xyz = detect(building_id, method)
     polygons = create_roof_polygons(building_id, footprint, found, resolution_metres=res, method=polygon_method,
                                     rejected=rejected, pixels_xyz=pixels_xyz, **_POLYGON_PARAMS) if found else []
     out["seconds"] = time.process_time() - start
