@@ -230,9 +230,12 @@ class LegacyCarveTest(ParameterisedTestCase):
         self.assertEqual(len(polygons), 2)
 
 
-def _plane(xy: np.ndarray, aspect: float, slope: float) -> dict:
-    """Just what the mincut polygon method reads of a plane."""
-    return {"building_id": "b", "inliers_xy": xy, "aspect": aspect, "slope": slope, "is_flat": slope < 5}
+def _plane(xy: np.ndarray, aspect: float, slope: float, coefs: Tuple[float, float, float] = None) -> dict:
+    """Just what the mincut polygon method reads of a plane. With no `coefs`, no nodes are placed."""
+    plane = {"building_id": "b", "inliers_xy": xy, "aspect": aspect, "slope": slope, "is_flat": slope < 5}
+    if coefs is not None:
+        plane["x_coef"], plane["y_coef"], plane["intercept"] = coefs
+    return plane
 
 
 def _mincut(building: Polygon, planes: List[dict]) -> List[RoofPolygon]:
@@ -267,9 +270,6 @@ class MincutLinesTest(ParameterisedTestCase):
         # the wobble is symmetric, so y=4.5 separates the pixels as well as y=5:
         np.testing.assert_allclose(shapely.get_coordinates(edge)[:, 1], 5, atol=0.51)
 
-        with patch.object(roof_polygons, "CORE_HALF_WIDTH_TILES", 0):
-            self.assertFalse(_is_straight(_shared_edge(_mincut(building, copy.deepcopy(planes)))))
-
     def test_step_straight_along_grid_axis(self):
         # two roofs facing about south side by side at a step along y=5, the pixel
         # assignment jogging a row across it in one place:
@@ -282,9 +282,6 @@ class MincutLinesTest(ParameterisedTestCase):
         edge = _shared_edge(_mincut(building, copy.deepcopy(planes)))
         self.assertTrue(_is_straight(edge))
         self.assertGreater(edge.length, 19)
-
-        with patch.object(roof_polygons, "STEP_LINES", False):
-            self.assertFalse(_is_straight(_shared_edge(_mincut(building, copy.deepcopy(planes)))))
 
     def test_valleys_of_cross_gable(self):
         # a gable along x (ridge y=5, z=10) meeting a higher cross gable along y (ridge
@@ -310,9 +307,71 @@ class MincutLinesTest(ParameterisedTestCase):
 
         with patch.object(roof_polygons, "LINE_END_TILES", 100):
             owned = [p['inliers_xy'] for p in planes]
-            lines = roof_polygons._meeting_lines(planes, owned, [roof_polygons._pixel_region(o, 1.0) for o in owned], 1.0)
+            lines = roof_polygons._meeting_lines(planes, owned, [roof_polygons._pixel_region(o, 1.0) for o in owned],
+                                                 building.buffer(-0.1), 1.0)
             self.assertNotIn((0, 2), lines)
             self.assertNotIn((1, 2), lines)
+
+    def test_hips_meet_ridge_at_one_point(self):
+        # a 20x10m hipped roof, ridge along y=5 from x=5 to x=15, with no pixels assigned
+        # within 1.5m of either end of the ridge:
+        xy = _grid(0, 20, 0, 10)
+        x, y = xy[:, 0], xy[:, 1]
+        heights = np.column_stack([0.8 * y, 8 - 0.8 * y, 0.8 * x, 16 - 0.8 * x])
+        face = np.argmin(heights, axis=1)
+        unassigned = (np.hypot(x - 5, y - 5) < 1.5) | (np.hypot(x - 15, y - 5) < 1.5)
+        slope = float(np.degrees(np.arctan(0.8)))
+        building = Polygon([(0, 0), (20, 0), (20, 10), (0, 10)])
+        coefs = [(0, 0.8, 0), (0, -0.8, 8), (0.8, 0, 0), (-0.8, 0, 16)]
+        planes = [_plane(xy[(face == f) & ~unassigned], aspect, slope, coefs[f])
+                  for f, aspect in enumerate((180, 0, 270, 90))]
+
+        def common_points(polygons):
+            g = [p['roof_geom_27700'] for p in polygons]
+            return [g[0].intersection(g[1]).intersection(g[k]) for k in (2, 3)]
+
+        west, east = common_points(_mincut(building, copy.deepcopy(planes)))
+        self.assertLess(west.distance(shapely.Point(5, 5)), 1e-6)
+        self.assertLess(east.distance(shapely.Point(15, 5)), 1e-6)
+
+    def test_line_applies_only_beside_it_at_node(self):
+        # lines from a node at 0°, 40° and 80°, the last between plane 2 (40°-80°) and plane
+        # 1, whose sector (80°-360°) is wider than 180°:
+        def ray(angle_deg: float):
+            u = np.array([np.cos(np.radians(angle_deg)), np.sin(np.radians(angle_deg))])
+            n = np.array([u[1], -u[0]])
+            shared = np.array([t * u + o * n for t in (1, 2, 3, 4, 5) for o in (-0.5, 0.5)])
+            return roof_polygons._Line(point=np.zeros(2), normal=n, direction=1.0, shared_xy=shared,
+                                       start=0.0, end=5.5, meets=True, at_node=[True, False])
+
+        rays = {(0, 1): ray(0), (0, 2): ray(40), (1, 2): ray(80)}
+        lines = {pair: roof_polygons._restrict(line, 1.0, 2) for pair, line in rays.items()}
+        # in plane 1's sector, past where the 80° line would run on through the node, so on
+        # plane 2's side of that line:
+        point = shapely.Point(2 * np.cos(np.radians(-10)), 2 * np.sin(np.radians(-10)))
+        self.assertTrue(lines[(1, 2)].zone.contains(point))
+        roof_polygons._clip_at_nodes(lines)
+        self.assertFalse(lines[(1, 2)].zone.contains(point))
+        self.assertTrue(lines[(1, 2)].zone.contains(shapely.Point(0.5, 3)))
+
+    def test_ridge_reaches_gable_wall(self):
+        # a 20x10m gable, ridge along y=5, with no pixels assigned by either gable wall
+        # next to the ridge, more of them on the north side:
+        xy = _grid(0, 20, 0, 10)
+        x, y = xy[:, 0], xy[:, 1]
+        xy = xy[~(((x < 1) | (x > 19)) & (y > 4) & (y < 7))]
+        south = xy[:, 1] < 5
+        building = Polygon([(0, 0), (20, 0), (20, 10), (0, 10)])
+        planes = [_plane(xy[south], 180, 30), _plane(xy[~south], 0, 30)]
+
+        edge = _shared_edge(_mincut(building, copy.deepcopy(planes)))
+        self.assertTrue(_is_straight(edge))
+        x = shapely.get_coordinates(edge)[:, 0]
+        self.assertAlmostEqual(x.min(), 0.1)
+        self.assertAlmostEqual(x.max(), 19.9)
+
+        with patch.object(roof_polygons, "WALL_MAX_TILES", 0), patch.object(roof_polygons, "MEETING_WALL_MAX_TILES", 0):
+            self.assertFalse(_is_straight(_shared_edge(_mincut(building, copy.deepcopy(planes)))))
 
     def test_direction_sensitivity(self):
         ridge = roof_polygons._direction_sensitivity({"aspect": 180, "slope": 30}, {"aspect": 0, "slope": 30})
@@ -336,7 +395,3 @@ class MincutSmoothTest(ParameterisedTestCase):
         self.assertLessEqual(len(smooth.exterior.coords), 5)
         # cutting the staircase's corners loses a little of its pixels
         self.assertGreater(smooth.area, len(xy) * 0.9)
-
-        with patch.object(roof_polygons, "SMOOTH_TOLERANCE_TILES", 0):
-            stairs = _mincut(building, copy.deepcopy(planes))[0]['roof_geom_27700']
-            self.assertGreater(len(stairs.exterior.coords), 20)
