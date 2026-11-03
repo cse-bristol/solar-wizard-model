@@ -7,7 +7,7 @@ from os.path import join
 from typing import List
 
 import numpy as np
-from shapely import wkt, box, LineString, STRtree
+from shapely import wkt, box, LineString
 
 from solar_pv.paths import TEST_DATA
 from solar_pv.roof_detection.detect_roofs import _detect_building_roof_planes, _create_adaptive_batches, _assign_and_merge, \
@@ -322,7 +322,7 @@ class FootprintAspectTest(unittest.TestCase):
         # from them, one at 90 (so at right angles to 180):
         faces = [LineString([(-0.5, -0.5), (-0.5 + 2 * np.sin(np.radians(60)), -0.5 + 2 * np.cos(np.radians(60)))]),
                  LineString([(2, -2), (8, -2)])]
-        self.assertEqual(_snapped_aspect(plane, _FaceIndex(faces, STRtree(faces))), (180, True))
+        self.assertEqual(_snapped_aspect(plane, _FaceIndex.of_faces(faces)), (180, True))
 
     def test_footprint_aspect_gap(self):
         plane, footprint, _ = _south_face(30)

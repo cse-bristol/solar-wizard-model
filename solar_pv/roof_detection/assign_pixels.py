@@ -24,6 +24,7 @@ NONE_COST = 2.0
 SMOOTHNESS_PER_M = 0.5
 # maximum_flow needs int32 capacities: energy is quantized to this many steps per unit.
 _ENERGY_SCALE = 1000
+_FOUR_CONNECTED = ndimage.generate_binary_structure(2, 1)
 
 
 def assign_pixels(xyz: np.ndarray,
@@ -72,9 +73,10 @@ def assign_pixels(xyz: np.ndarray,
 
     # internally, label 0 is none and plane k is k + 1
     current = labels + 1
-    data = np.full((len(z), n_planes + 1), none_cost)
-    allowed = np.zeros((len(z), n_planes + 1), dtype=bool)
-    allowed[:, 0] = True
+    # per label, each pixel's data cost and whether it may take that label:
+    data = np.full((n_planes + 1, len(z)), none_cost)
+    allowed = np.zeros((n_planes + 1, len(z)), dtype=bool)
+    allowed[0] = True
     for k in range(1, n_planes + 1):
         idxs = np.flatnonzero(current == k)
         if len(idxs) < 3:
@@ -85,32 +87,55 @@ def assign_pixels(xyz: np.ndarray,
         else:
             a, b, c = coefs[k - 1]
             predicted = xy[:, 0] * a + xy[:, 1] * b + c
-        data[:, k] = np.minimum(np.abs(z - predicted) / residual_scales[k - 1], residual_cap)
+        data[k] = np.minimum(np.abs(z - predicted) / residual_scales[k - 1], residual_cap)
 
-        start_image = np.zeros(grid.shape, dtype=bool)
-        start_image[rows[idxs], cols[idxs]] = True
-        dist = distance_transform_edt(~start_image)
-        allowed[:, k] = dist[rows, cols] <= max_dist_pixels
+        allowed[k] = _within(rows, cols, rows[idxs], cols[idxs], max_dist_pixels)
 
     lo, hi = _neighbour_pairs(grid)
-    energy = _energy(current, data, lo, hi, smoothness)
-    start_energy = energy
+    start_energy = _energy(current, data, lo, hi, smoothness)
     if connected:
         current, _ = _largest_components(current, np.unique(current), grid, rows, cols)
-        energy = _energy(current, data, lo, hi, smoothness)
+    # Per label, the edges with an end it may claim - the only ones its expansions involve -
+    # and the pixels at their ends, whose labels are all an expansion depends on, but for
+    # (if `connected`) the shapes of the planes there. So a rejected expansion would be
+    # rejected again until one of those changes, and isn't tried till then. Changes are
+    # stamped with the number of moves made so far.
+    near, reach, planes_near = [None] * (n_planes + 1), [None] * (n_planes + 1), [None] * (n_planes + 1)
+    rejected_at = np.full(n_planes + 1, -1)
+    pixel_changed_at = np.zeros(len(z), dtype=int)
+    plane_changed_at = np.zeros(n_planes + 1, dtype=int)
+    moves = 0
     for _ in range(max_cycles):
         improved = False
         for alpha in range(n_planes + 1):
-            candidate = _expand(alpha, current, data, allowed[:, alpha], lo, hi, smoothness)
+            if near[alpha] is None:
+                near[alpha] = np.flatnonzero(allowed[alpha][lo] | allowed[alpha][hi])
+                ends = allowed[alpha].copy()
+                ends[lo[near[alpha]]] = ends[hi[near[alpha]]] = True
+                reach[alpha] = np.flatnonzero(ends)
+            elif rejected_at[alpha] >= 0 and len(reach[alpha]) and \
+                    pixel_changed_at[reach[alpha]].max() <= rejected_at[alpha] and \
+                    (not connected or plane_changed_at[planes_near[alpha]].max(initial=0) <= rejected_at[alpha]):
+                continue
+            edges = near[alpha]
+            candidate = _expand(alpha, current, data, allowed[alpha], lo, hi, smoothness, edges)
             if connected:
                 candidate, cut = _connected_move(alpha, current, candidate, grid, rows, cols)
-                if cut.size and _energy(candidate, data, lo, hi, smoothness) >= energy - 1e-9:
-                    retry = _expand(alpha, current, data, allowed[:, alpha] & ~np.isin(current, cut), lo, hi,
-                                    smoothness)
+                if cut.size and _energy_change(current, candidate, data, lo, hi, smoothness) >= -1e-9:
+                    retry = _expand(alpha, current, data, allowed[alpha] & ~np.isin(current, cut), lo, hi,
+                                    smoothness, edges)
                     candidate, _ = _connected_move(alpha, current, retry, grid, rows, cols)
-            candidate_energy = _energy(candidate, data, lo, hi, smoothness)
-            if candidate_energy < energy - 1e-9:
-                current, energy, improved = candidate, candidate_energy, True
+            if _energy_change(current, candidate, data, lo, hi, smoothness) < -1e-9:
+                moves += 1
+                changed = np.flatnonzero(candidate != current)
+                pixel_changed_at[changed] = moves
+                plane_changed_at[current[changed]] = plane_changed_at[candidate[changed]] = moves
+                current, improved = candidate, True
+            else:
+                rejected_at[alpha] = moves
+                if connected:
+                    # none is never cut, so its shape doesn't matter:
+                    planes_near[alpha] = np.flatnonzero(np.bincount(current[reach[alpha]], minlength=n_planes + 1)[1:]) + 1
         if not improved:
             break
 
@@ -125,6 +150,9 @@ def _connected_move(alpha: int, current: np.ndarray, candidate: np.ndarray, grid
     keeping only its largest group of pixels; and the planes other than `alpha` that lost
     pixels by that."""
     changed = candidate != current
+    if not changed.any():
+        # every plane is already a single group
+        return candidate, np.array([], dtype=int)
     affected = np.unique(np.concatenate([current[changed], [alpha]]))
     return _largest_components(candidate, affected[affected != alpha], grid, rows, cols, alpha)
 
@@ -145,7 +173,7 @@ def _largest_components(labels: np.ndarray, planes: np.ndarray, grid: np.ndarray
         r0, c0 = r.min(), c.min()
         image = np.zeros((r.max() - r0 + 1, c.max() - c0 + 1), dtype=bool)
         image[r - r0, c - c0] = True
-        groups, n = ndimage.label(image)
+        groups, n = ndimage.label(image, _FOUR_CONNECTED)
         if n < 2:
             continue
         group = groups[r - r0, c - c0]
@@ -180,9 +208,38 @@ def _neighbour_pairs(grid: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     return lo, hi
 
 
+def _within(rows: np.ndarray, cols: np.ndarray, start_rows: np.ndarray, start_cols: np.ndarray,
+            max_dist: float) -> np.ndarray:
+    """Which pixels (`rows`, `cols`) are within `max_dist` (pixels) of a start pixel. The
+    distance transform is of just the start pixels' bounding box, grown by `max_dist`."""
+    pad = int(np.ceil(max_dist)) + 1
+    r0, c0 = start_rows.min() - pad, start_cols.min() - pad
+    start_image = np.zeros((start_rows.max() + pad + 1 - r0, start_cols.max() + pad + 1 - c0), dtype=bool)
+    start_image[start_rows - r0, start_cols - c0] = True
+    r, c = rows - r0, cols - c0
+    inside = (r >= 0) & (r < start_image.shape[0]) & (c >= 0) & (c < start_image.shape[1])
+    within = np.zeros(len(rows), dtype=bool)
+    within[inside] = distance_transform_edt(~start_image)[r[inside], c[inside]] <= max_dist
+    return within
+
+
 def _energy(labels: np.ndarray, data: np.ndarray, lo: np.ndarray, hi: np.ndarray, smoothness: float) -> float:
-    return float(data[np.arange(len(labels)), labels].sum()
+    return float(data[labels, np.arange(len(labels))].sum()
                  + smoothness * np.count_nonzero(labels[lo] != labels[hi]))
+
+
+def _energy_change(labels: np.ndarray, new_labels: np.ndarray, data: np.ndarray, lo: np.ndarray, hi: np.ndarray,
+                   smoothness: float) -> float:
+    """The energy of `new_labels` less that of `labels`, from just the pixels that differ."""
+    changed = labels != new_labels
+    idxs = np.flatnonzero(changed)
+    if len(idxs) == 0:
+        return 0.0
+    edges = np.flatnonzero(changed[lo] | changed[hi])
+    l, h = lo[edges], hi[edges]
+    return float(data[new_labels[idxs], idxs].sum() - data[labels[idxs], idxs].sum()
+                 + smoothness * (np.count_nonzero(new_labels[l] != new_labels[h])
+                                 - np.count_nonzero(labels[l] != labels[h])))
 
 
 def _expand(alpha: int,
@@ -191,10 +248,13 @@ def _expand(alpha: int,
             allowed: np.ndarray,
             lo: np.ndarray,
             hi: np.ndarray,
-            smoothness: float) -> np.ndarray:
+            smoothness: float,
+            edges: Optional[np.ndarray] = None) -> np.ndarray:
     """
     One alpha-expansion move: every allowed pixel either keeps its label or switches to
     `alpha`, whichever labelling minimises the energy, by min-cut. Source side = keep.
+    `edges` (indices into `lo`/`hi`, in order) must include every edge with an allowed end;
+    if None, all are looked at.
 
     Each pairwise term E(x_p, x_q) with values A, B, C, D at (0,0), (0,1), (1,0), (1,1) is
     A + (C - A) x_p + (D - C) x_q + (B + C - A - D) (1 - x_p) x_q; the last coefficient is
@@ -207,8 +267,14 @@ def _expand(alpha: int,
     local = np.full(len(labels), -1)
     local[nodes] = np.arange(len(nodes))
 
-    u0 = data[nodes, labels[nodes]].copy()
-    u1 = data[nodes, alpha].copy()
+    # only edges with a movable end matter, and keeping them in order keeps the sums below in order
+    if edges is not None:
+        lo, hi = lo[edges], hi[edges]
+    touching = movable[lo] | movable[hi]
+    lo, hi = lo[touching], hi[touching]
+
+    u0 = data[labels[nodes], nodes]
+    u1 = data[alpha, nodes]
 
     a, b = labels[lo], labels[hi]
     differ = smoothness * (a != b)

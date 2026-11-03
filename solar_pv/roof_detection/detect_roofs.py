@@ -883,8 +883,7 @@ def _snapped_aspect(plane: RoofPlane, face_index: _FaceIndex) -> Tuple[Optional[
 
 def _right_angles(face_index: _FaceIndex, faces) -> List[int]:
     """The azimuths of `faces`, and those at right angles to them (as `get_potential_aspects`)."""
-    base = [int(azimuth_deg(face_index.line_segments[i].coords[0], face_index.line_segments[i].coords[1]))
-            for i in faces]
+    base = [face_index.azimuths[i] for i in faces]
     return list({(az + turn) % 360 for az in base for turn in (0, 90, 180, 270)})
 
 

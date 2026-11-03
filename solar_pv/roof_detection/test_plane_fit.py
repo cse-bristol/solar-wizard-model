@@ -6,7 +6,8 @@ import numpy as np
 from sklearn import metrics
 from sklearn.linear_model import LinearRegression
 
-from solar_pv.roof_detection.plane_fit import PlaneFit, PlaneSums, mean_absolute_error, r2_score
+from solar_pv.roof_detection.plane_fit import PlaneFit, PlaneSums, mean_absolute_error, r2_score, \
+    mean_squared_error, root_mean_squared_error, mean_squared_log_error, mean_absolute_percentage_error
 
 
 def _roof_like_xyz(rng, n: int) -> np.ndarray:
@@ -49,6 +50,11 @@ class PlaneFitMatchesSklearnTest(unittest.TestCase):
             self.assertEqual(mean_absolute_error(y, y_pred), metrics.mean_absolute_error(y, y_pred))
             if len(y) >= 2:
                 self.assertEqual(r2_score(y, y_pred), metrics.r2_score(y, y_pred))
+            self.assertEqual(mean_squared_error(y, y_pred), metrics.mean_squared_error(y, y_pred))
+            self.assertEqual(root_mean_squared_error(y, y_pred), metrics.root_mean_squared_error(y, y_pred))
+            self.assertEqual(mean_squared_log_error(y, y_pred), metrics.mean_squared_log_error(y, y_pred))
+            self.assertEqual(mean_absolute_percentage_error(y, y_pred),
+                             metrics.mean_absolute_percentage_error(y, y_pred))
             # exact fit / constant target edge cases:
             self.assertEqual(r2_score(y, y.copy()), metrics.r2_score(y, y.copy()))
             const = np.full(y.shape, 3.0)
@@ -57,6 +63,16 @@ class PlaneFitMatchesSklearnTest(unittest.TestCase):
             idxs = np.arange(0, len(y), 2)
             self.assertEqual(mean_absolute_error(y[idxs], y_pred[idxs]),
                              metrics.mean_absolute_error(y[idxs], y_pred[idxs]))
+
+    def test_msle_is_none_where_sklearn_raises(self):
+        y = np.array([1.0, -1.0, 2.0])
+        with self.assertRaises(ValueError):
+            metrics.mean_squared_log_error(y, y + 0.5)
+        self.assertIsNone(mean_squared_log_error(y, y + 0.5))
+
+    def test_mape_near_zero_targets(self):
+        y, y_pred = np.array([0.0, 1e-20, 2.0]), np.array([0.1, 0.0, 2.5])
+        self.assertEqual(mean_absolute_percentage_error(y, y_pred), metrics.mean_absolute_percentage_error(y, y_pred))
 
 
 class PlaneSumsTest(unittest.TestCase):

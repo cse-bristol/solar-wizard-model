@@ -5,7 +5,6 @@ import numpy as np
 from skimage import morphology
 from skimage.graph import RAG, merge_hierarchical
 from skimage.measure import perimeter_crofton
-from sklearn import metrics
 
 from solar_pv.constants import ROOFDET_GOOD_SCORE, FLAT_ROOF_DEGREES_THRESHOLD, \
     AZIMUTH_ALIGNMENT_THRESHOLD, FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD
@@ -13,7 +12,8 @@ from solar_pv.datatypes import RoofPlane
 from solar_pv.roof_detection.premade_planes import _image
 from solar_pv.geos import slope_deg, aspect_deg, deg_diff, circular_mean_rad, circular_sd_rad
 from solar_pv.roof_detection.ransac import _group_areas
-from solar_pv.roof_detection.plane_fit import PlaneFit, PlaneSums, mean_absolute_error, r2_score
+from solar_pv.roof_detection.plane_fit import PlaneFit, PlaneSums, mean_absolute_error, r2_score, \
+    mean_squared_error, root_mean_squared_error, mean_squared_log_error, mean_absolute_percentage_error
 
 DO_NOT_MERGE = 9999
 DO_MERGE = -9999
@@ -231,13 +231,10 @@ def set_fit_metrics(plane: dict, z: np.ndarray, z_pred: np.ndarray) -> None:
     """The fit metrics of `plane` (`score` is its MAE) for pixel elevations `z`, which it predicts are `z_pred`."""
     plane["score"] = plane["mae"] = mean_absolute_error(z, z_pred)
     plane["r2"] = r2_score(z, z_pred)
-    plane["mse"] = metrics.mean_squared_error(z, z_pred)
-    plane["rmse"] = metrics.root_mean_squared_error(z, z_pred)
-    try:
-        plane["msle"] = metrics.mean_squared_log_error(z, z_pred)
-    except ValueError:
-        plane["msle"] = None
-    plane["mape"] = metrics.mean_absolute_percentage_error(z, z_pred)
+    plane["mse"] = mean_squared_error(z, z_pred)
+    plane["rmse"] = root_mean_squared_error(z, z_pred)
+    plane["msle"] = mean_squared_log_error(z, z_pred)
+    plane["mape"] = mean_absolute_percentage_error(z, z_pred)
     plane["sd"] = np.std(np.abs(z - z_pred))
 
 

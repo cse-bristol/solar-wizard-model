@@ -7,7 +7,7 @@ from typing import Set, Tuple, List, Optional
 import numpy as np
 import math
 import shapely
-from shapely.geometry import Polygon, MultiPoint
+from shapely.geometry import Polygon
 from shapely.strtree import STRtree
 from scipy.spatial import cKDTree
 from sklearn import metrics
@@ -672,15 +672,21 @@ def _min_thinness_ratio(area) -> float:
 
 @dataclass
 class _FaceIndex:
-    """The building's simplified faces, and a spatial index over them."""
+    """The building's simplified faces, a spatial index over them, and their azimuths
+    (whole degrees, truncated)."""
     line_segments: list
     rtree: STRtree
+    azimuths: List[int]
 
     @classmethod
     def of(cls, polygon: Polygon) -> "_FaceIndex":
         polygon = simplify_by_angle(polygon, tolerance_degrees=2.0)
-        line_segments = polygon_line_segments(polygon, min_length=1.0)
-        return cls(line_segments, STRtree(line_segments))
+        return cls.of_faces(polygon_line_segments(polygon, min_length=1.0))
+
+    @classmethod
+    def of_faces(cls, line_segments: list) -> "_FaceIndex":
+        return cls(line_segments, STRtree(line_segments),
+                   [int(azimuth_deg(seg.coords[0], seg.coords[1])) for seg in line_segments])
 
     def faces_near(self, points: np.ndarray, points_tree: STRtree, distance: float) -> np.ndarray:
         """
@@ -691,14 +697,22 @@ class _FaceIndex:
         faces within `distance` of any point, then tests each against the buffers of
         just the points near it. Those buffers use `buffer()`'s default of 16 segments
         per quarter circle - the faces between the polygonal and true circle are
-        excluded, as they would be by the MultiPoint buffer.
+        excluded, as they would be by the MultiPoint buffer. A face nearer a point than
+        the polygon's inscribed circle intersects its buffer, so only the points in the
+        sliver between are buffered.
         """
-        candidates = self.rtree.query(MultiPoint(points), predicate='dwithin', distance=distance)
+        x0, y0, x1, y1 = shapely.total_bounds(points)
+        candidates = self.rtree.query(shapely.box(x0 - distance, y0 - distance, x1 + distance, y1 + distance))
+        inscribed = distance * np.cos(np.pi / 64) - 1e-6
         keep = np.zeros(len(candidates), dtype=bool)
         for i, face_idx in enumerate(candidates):
             face = self.line_segments[face_idx]
             near = points_tree.query(face, predicate='dwithin', distance=distance)
-            keep[i] = shapely.intersects(face, shapely.buffer(points[near], distance, quad_segs=16)).any()
+            if len(near) == 0:
+                continue
+            dist = shapely.distance(face, points[near])
+            keep[i] = dist.min() < inscribed or \
+                shapely.intersects(face, shapely.buffer(points[near[dist >= inscribed]], distance, quad_segs=16)).any()
         return candidates[keep]
 
 
@@ -707,7 +721,6 @@ def get_potential_aspects(X_inlier_subset, polygon: Polygon, face_index: _FaceIn
     against one building can build once and pass in."""
     if face_index is None:
         face_index = _FaceIndex.of(polygon)
-    line_segments = face_index.line_segments
     points = shapely.points(X_inlier_subset)
     points_tree = STRtree(points)
     nearby = face_index.faces_near(points, points_tree, 1.0)
@@ -718,7 +731,7 @@ def get_potential_aspects(X_inlier_subset, polygon: Polygon, face_index: _FaceIn
     if len(nearby) == 0:
         return []
 
-    azimuths_base = [int(azimuth_deg(line_segments[idx].coords[0], line_segments[idx].coords[1])) for idx in nearby]
+    azimuths_base = [face_index.azimuths[idx] for idx in nearby]
     azimuths = set(azimuths_base)
     for az in azimuths_base:
         azimuths.add((az + 90) % 360)

@@ -123,3 +123,22 @@ def r2_score(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     if denominator == 0:
         return 0.0
     return float(1 - (numerator / denominator))
+
+
+def mean_squared_error(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    return float(((y_true - y_pred) ** 2).mean(axis=0))
+
+
+def root_mean_squared_error(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    return float(np.sqrt(((y_true - y_pred) ** 2).mean(axis=0)))
+
+
+def mean_squared_log_error(y_true: np.ndarray, y_pred: np.ndarray) -> Optional[float]:
+    """None where sklearn's raises ValueError: if any value is -1 or less."""
+    if np.any(y_true <= -1) or np.any(y_pred <= -1):
+        return None
+    return mean_squared_error(np.log1p(y_true), np.log1p(y_pred))
+
+
+def mean_absolute_percentage_error(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    return float((np.abs(y_pred - y_true) / np.maximum(np.abs(y_true), np.finfo(np.float64).eps)).mean(axis=0))
