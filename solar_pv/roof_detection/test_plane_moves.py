@@ -64,6 +64,20 @@ class MergeByEnergyTest(unittest.TestCase):
 
         self.assertEqual(merge_by_energy(xyz, labels, planes, 1.0, 8.0, _scale, _fit, lambda p, q: False), [])
 
+    def test_good_enough_share(self):
+        # halves of a face with a step between them: one plane is within 0.15m of every
+        # pixel at a step of 0.3m, so explains them all, but at 0.6m none
+        def halves(step):
+            xyz = _grid(lambda x, y: y * np.tan(np.radians(30)) + 5 + np.where(x < 5, 0, step))
+            labels = np.where(xyz[:, 0] < 5, 0, 1)
+            return xyz, labels, _planes(xyz, labels)
+
+        xyz, labels, planes = halves(0.3)
+        self.assertEqual(merge_by_energy(xyz, labels, planes, 1.0, 8.0, _scale, _fit), [])
+        self.assertEqual(merge_by_energy(xyz, labels, planes, 1.0, 8.0, _scale, _fit, good_enough_share=0.9), [(0, 1)])
+        xyz, labels, planes = halves(0.6)
+        self.assertEqual(merge_by_energy(xyz, labels, planes, 1.0, 8.0, _scale, _fit, good_enough_share=0.9), [])
+
 
 class RemoveUnprofitableTest(unittest.TestCase):
 

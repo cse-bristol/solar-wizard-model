@@ -92,7 +92,14 @@ def _rotate_valid(geom, angle_deg: float, origin: Point):
     rot = affinity.rotate(geom, angle_deg, origin=origin)
     if rot.is_valid:
         return rot
-    return shapely.make_valid(rot, method='structure', keep_collapsed=False)
+    try:
+        return shapely.make_valid(rot, method='structure', keep_collapsed=False)
+    except shapely.errors.GEOSException:
+        # GEOS can fail on a multipolygon with a self-intersecting part ("unable to assign
+        # free hole to a shell"), even snapped to a grid, though not on each part alone;
+        # buffer(0) alone drops the self-intersecting part.
+        parts = [shapely.make_valid(part, method='structure', keep_collapsed=False) for part in shapely.get_parts(rot)]
+        return shapely.GeometryCollection(parts).buffer(0)
 
 
 def _cell_fractions(geom, minx: float, maxy: float, fpix: float, nrow: int, ncol: int) -> np.ndarray:

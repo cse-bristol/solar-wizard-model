@@ -80,10 +80,10 @@ _MIN_OFF_FOOTPRINT_PIXELS = 12
 #  Decide whether it's per area (divide by res^2) or per plane, and scale segment's minimum
 #  region pixels to match; that needs a sample at another resolution. Tuned at 1m.
 _LABEL_COST = 8.0
-# Planes facing the same way are merged if the merged plane's energy per pixel is at most
-# this - that is, it explains their pixels to within about its residual scale - even if
-# merging raises the energy: at 1m, a slightly warped roof face fits two planes better.
-_GOOD_ENOUGH_MERGE_COST = 1.0
+# Planes facing the same way are merged if the merged plane explains at least this share of
+# their pixels (is within its residual scale of them), even if merging raises the energy:
+# at 1m, a slightly warped roof face fits two planes better.
+_GOOD_ENOUGH_MERGE_SHARE = 0.8
 # Regions re-proposed from poorly explained pixels can be smaller than the first ones, as
 # the energy decides whether they're worth keeping (see `plane_moves`).
 _MIN_REPROPOSED_PIXELS = 4
@@ -98,6 +98,10 @@ _MIN_TRIM_SHARE = 0.5
 _FINAL_TRIM_RESIDUAL = 0.1
 # Max rounds of proposing new candidate planes from the pixels no plane explains well.
 _MAX_PROPOSAL_ROUNDS = 2
+# Max passes of merging and removing planes, each followed by refining, per proposal round:
+# refining after a pass can make planes mergeable that weren't (growing them into each
+# other, or flattening them), so passes repeat until one changes nothing.
+_MAX_MERGE_PASSES = 5
 
 
 def _roof_det_cpu_count():
@@ -281,8 +285,10 @@ def _segment_and_assign(xyz: np.ndarray,
             return []
         removed = np.zeros(len(xyz), dtype=bool)
         labels = refine(removed)
-        assigned = labels != labels_nodata
-        if _merge_and_remove(xyz, labels, planes, resolution_metres, labels_nodata, rejected, debug):
+        for _ in range(_MAX_MERGE_PASSES):
+            assigned = labels != labels_nodata
+            if not _merge_and_remove(xyz, labels, planes, resolution_metres, labels_nodata, rejected, debug):
+                break
             # merging only relabels pixels, so those it unassigned were removed planes':
             removed |= assigned & (labels == labels_nodata)
             labels = refine(removed)
@@ -401,7 +407,7 @@ def _merge_and_remove(xyz: np.ndarray,
     """Merge, then remove, planes (in place) where that lowers the energy including
     `_LABEL_COST` per plane. Returns whether anything changed."""
     merges = merge_by_energy(xyz, labels, planes, resolution_metres, _LABEL_COST, _residual_scale, _fit, _mergeable,
-                             good_enough_cost=_GOOD_ENOUGH_MERGE_COST)
+                             good_enough_share=_GOOD_ENOUGH_MERGE_SHARE)
     kept = dict(planes)
     removed = remove_unprofitable(xyz, labels, planes, resolution_metres, _LABEL_COST, _residual_scale, labels_nodata)
     for plane_id in removed:

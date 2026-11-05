@@ -17,7 +17,7 @@ settles those.
 """
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -85,12 +85,12 @@ def merge_by_energy(xyz: np.ndarray,
                     residual_scale,
                     fit: Callable[[np.ndarray], Tuple[Tuple[float, float, float], bool]],
                     mergeable: Callable[[Plane, Plane], bool] = lambda p, q: True,
-                    good_enough_cost: float = 0.0) -> List[Tuple[int, int]]:
+                    good_enough_share: Optional[float] = None) -> List[Tuple[int, int]]:
     """
     Greedily merge (in place) the adjacent pair of planes whose merge lowers the energy
     most, until no merge would. Only pairs that are `mergeable` are considered, and a pair
-    whose merged plane costs at most `good_enough_cost` per pixel is merged even if that
-    raises the energy. A merged plane keeps the first plane's id, and is refitted to the
+    whose merged plane explains (has a data cost of at most 1 for) at least
+    `good_enough_share` of their pixels is merged even if that raises the energy. A merged plane keeps the first plane's id, and is refitted to the
     pixels of both: `fit(xyz)` is a plane's coefficients and flatness, fitted as the planes
     are refitted when refining, so that a merge is judged on the plane it would become.
     `residual_scale(is_flat)` is the residual scale for a plane.
@@ -109,9 +109,11 @@ def merge_by_energy(xyz: np.ndarray,
             return -np.inf, None, False
         union = np.concatenate([idxs[p], idxs[q]])
         coef, is_flat = fit(xyz[union])
-        merged_cost = data_cost(xyz[union], coef, residual_scale(is_flat)).sum()
+        merged = data_cost(xyz[union], coef, residual_scale(is_flat))
+        merged_cost = merged.sum()
         g = costs[p] + costs[q] + smoothness * edges[pair] + label_cost - merged_cost
-        return g, (coef, is_flat, merged_cost), g > 0 or merged_cost <= good_enough_cost * len(union)
+        good_enough = good_enough_share is not None and np.mean(merged <= 1) >= good_enough_share
+        return g, (coef, is_flat, merged_cost), g > 0 or good_enough
 
     gains = {pair: gain(pair) for pair in edges}
     merges = []
