@@ -1,3 +1,5 @@
+# test_plane_fit checks PlaneFit against scikit-learn:
+scikit-learn==1.9.0
 testing.postgresql==1.3.0
 testing.common.database==2.0.3
 pg8000==1.31.5

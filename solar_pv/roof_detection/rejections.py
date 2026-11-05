@@ -9,15 +9,13 @@ from typing import List, Optional
 
 import numpy as np
 
-HIGH_MAE = "HIGH_MAE"
+# Left with fewer than 3 pixels when pixels were reassigned
 TOO_FEW_PIXELS = "TOO_FEW_PIXELS"
 # Not aligned with any of the building's faces
 NO_CLOSE_ASPECT = "NO_CLOSE_ASPECT"
-# Shape and aspect checks, as RANSAC applies to candidate planes
+# Shape checks on candidate regions that fit their plane poorly
 CONVEX_HULL_RATIO = "CONVEX_HULL_RATIO"
 THINNESS_RATIO = "THINNESS_RATIO"
-CIRCULAR_MEAN = "CIRCULAR_MEAN"
-CIRCULAR_SD = "CIRCULAR_SD"
 # A pitched plane most of whose locally planar pixels face another way
 NORMALS_DISAGREE = "NORMALS_DISAGREE"
 # A small region that fits its plane poorly

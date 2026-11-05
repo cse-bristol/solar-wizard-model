@@ -24,26 +24,6 @@ FLAT_ROOF_ROW_SPACING_SUN_ELEVATION_DEGREES = 15
 # https://joint-research-centre.ec.europa.eu/pvgis-photovoltaic-geographical-information-system/getting-started-pvgis/pvgis-data-sources-calculation-methods_en#ref-5-calculation-of-pv-power-output
 SYSTEM_LOSS = 0.14
 
-# Area in m2 of a building to consider large for RANSAC purposes
-# (which has the effect of allowing planes that cover multiple discontinuous groups
-# of pixels, as large buildings often have separate roof areas that are on the
-# same plane):
-RANSAC_LARGE_BUILDING = 1000
-# Area in m2 of a building to consider small for RANSAC purposes
-# (which has the effect of increasing `max_trials`, as it is harder to fit a
-# good plane to a smaller set of points):
-RANSAC_SMALL_BUILDING = 100
-
-RANSAC_LARGE_MAX_TRIALS = 500
-RANSAC_MEDIUM_MAX_TRIALS = 500
-RANSAC_SMALL_MAX_TRIALS = 1000
-
-# If a roof plane's score is lower than this, stop optimising for score
-# and start optimising for number of points on the plane:
-ROOFDET_GOOD_SCORE = 0.125
-
-ROOFDET_MAX_MAE = 1.0
-
 # GDAL default tile geotiff tilesize:
 POSTGIS_TILESIZE = 256
 
@@ -68,12 +48,9 @@ INTERANNUAL_GHI_COV = 0.05
 ##
 
 # Plane-fit MAE (metres) at/below which the fit sub-score is 1. It falls on a log
-# scale from here to 0 at ROOFDET_MAX_MAE, as residuals span orders of magnitude:
+# scale from here to 0 at CONFIDENCE_ZERO_FIT_MAE, as residuals span orders of magnitude:
 CONFIDENCE_FULL_FIT_MAE = 0.05
-
-# aspect_circ_sd (radians) at/above which the aspect sub-score is 0. Matches the
-# roof-detection rejection threshold (Thresholds.max_aspect_circular_sd):
-CONFIDENCE_MAX_ASPECT_CIRC_SD = 1.5
+CONFIDENCE_ZERO_FIT_MAE = 1.0
 
 # Pixel aspects get noisier as slope approaches flat, so the aspect penalty fades in
 # linearly from FLAT_ROOF_DEGREES_THRESHOLD, reaching full strength at this slope:

@@ -6,8 +6,7 @@ polygons meet, and how closely they follow their planes' pixels. A fast loop for
 roof polygon stage: detection's planes are saved once, and each run reruns only the polygons.
 
     # once: save detection's planes, from a fast_roof_detection sample...
-    python -m solar_pv.evaluation.roof_polygons planes --sample sample.pkl --method segment \\
-        --out planes.pkl
+    python -m solar_pv.evaluation.roof_polygons planes --sample sample.pkl --out planes.pkl
     # ...or from a job's schema (e.g. a CLI run with --pg-uri and --keep)
     python -m solar_pv.evaluation.roof_polygons planes --pg-uri postgresql://... --job-id 0 \\
         --out planes.pkl
@@ -124,25 +123,25 @@ def triple_points(footprint, planes: List[dict], res: float,
     return out
 
 
-def _sample_planes(building_id: str, method: str) -> Tuple[str, Optional[dict]]:
-    found, _, pixels_xyz = fast_roof_detection.detect(building_id, method)
+def _sample_planes(building_id: str) -> Tuple[str, Optional[dict]]:
+    found, _, _ = fast_roof_detection.detect(building_id)
     if not found:
         return building_id, None
     footprint = fast_roof_detection._DATA["buildings"][building_id]["polygon"]
     res = fast_roof_detection._DATA["resolution"]
-    return building_id, {"footprint": footprint, "planes": found, "pixels_xyz": pixels_xyz,
+    return building_id, {"footprint": footprint, "planes": found,
                          "triples": triple_points(footprint, found, res, _POLYGON_PARAMS["min_dist_to_edge_m"])}
 
 
-def planes_from_sample(sample_path: str, method: str, workers: int) -> dict:
+def planes_from_sample(sample_path: str, workers: int) -> dict:
     """Run detection over a `fast_roof_detection` sample, and keep each building's planes."""
     fast_roof_detection._init_worker(sample_path, [])
     data = fast_roof_detection._DATA
     ids = sorted(data["buildings"], key=lambda b: -len(data["buildings"][b]["pixels"]))
     with ProcessPoolExecutor(workers, initializer=fast_roof_detection._init_worker,
                              initargs=(sample_path, [])) as ex:
-        found = dict(ex.map(_sample_planes, ids, [method] * len(ids), chunksize=4))
-    return {"resolution": data["resolution"], "detection": method,
+        found = dict(ex.map(_sample_planes, ids, chunksize=4))
+    return {"resolution": data["resolution"],
             "buildings": {b: v for b, v in found.items() if v is not None}}
 
 
@@ -182,7 +181,7 @@ def planes_from_job(pg_uri: str, job_id: int, workers: int) -> dict:
     jobs = [(b, {"footprint": footprints[b], "planes": ps}, res) for b, ps in planes.items()]
     with ProcessPoolExecutor(workers) as ex:
         buildings = dict(ex.map(_with_triples, jobs, chunksize=32))
-    return {"resolution": res, "detection": f"job {job_id}", "buildings": buildings}
+    return {"resolution": res, "buildings": buildings}
 
 
 # --- metrics ---
@@ -276,14 +275,12 @@ def polygon_metrics(footprint, planes: List[dict], polygons: Polygons, triples: 
 # --- score ---
 
 _PLANES = None
-_POLYGON_METHOD = None
 
 
-def _init_worker(planes_path: str, polygon_method: str, settings: List[Tuple[str, object]]) -> None:
-    global _PLANES, _POLYGON_METHOD
+def _init_worker(planes_path: str, settings: List[Tuple[str, object]]) -> None:
+    global _PLANES
     with open(planes_path, "rb") as f:
         _PLANES = pickle.load(f)
-    _POLYGON_METHOD = polygon_method
     apply_settings(settings)
 
 
@@ -297,14 +294,12 @@ def _score_building(building_id: str) -> dict:
     start = time.process_time()
     try:
         made = rp.create_roof_polygons(building_id, building["footprint"], planes, resolution_metres=res,
-                                       method=_POLYGON_METHOD, pixels_xyz=building.get("pixels_xyz"),
                                        **_POLYGON_PARAMS)
     except Exception:
         out["error"] = traceback.format_exc()
         return out
     out["seconds"] = time.process_time() - start
-    # legacy polygons can merge planes, keeping one of their indices:
-    out["polygons"] = [(p.get(_INDEX, -1), p["roof_geom_27700"], p["roof_geom_raw_27700"], bool(p["usable"]))
+    out["polygons"] = [(p[_INDEX], p["roof_geom_27700"], p["roof_geom_raw_27700"], bool(p["usable"]))
                        for p in made]
     out["metrics"], out["triple_dist"] = polygon_metrics(
         building["footprint"], building["planes"], out["polygons"], building["triples"], res,
@@ -312,13 +307,13 @@ def _score_building(building_id: str) -> dict:
     return out
 
 
-def score(planes_path: str, polygon_method: str, settings: List[Tuple[str, object]], workers: int) -> List[dict]:
+def score(planes_path: str, settings: List[Tuple[str, object]], workers: int) -> List[dict]:
     with open(planes_path, "rb") as f:
         buildings = pickle.load(f)["buildings"]
     # biggest first, so a large building doesn't hold up the end of the run
     ids = sorted(buildings, key=lambda b: -len(buildings[b]["planes"]))
     with ProcessPoolExecutor(workers, initializer=_init_worker,
-                             initargs=(planes_path, polygon_method, settings)) as ex:
+                             initargs=(planes_path, settings)) as ex:
         return list(ex.map(_score_building, ids, chunksize=8))
 
 
@@ -439,14 +434,12 @@ def main():
     source = p.add_mutually_exclusive_group(required=True)
     source.add_argument("--sample", help="a fast_roof_detection sample to run detection over")
     source.add_argument("--pg-uri", help="a database with a job's schema to read planes from")
-    p.add_argument("--method", choices=["legacy", "mincut", "segment"], help="detection method, with --sample")
     p.add_argument("--job-id", type=int, default=0)
     p.add_argument("--out", required=True)
     p.add_argument("--workers", type=int, default=workers)
 
     p = sub.add_parser("score", help="run the polygon stage over saved planes, and score it")
     p.add_argument("planes")
-    p.add_argument("--polygons", choices=["legacy", "mincut"], default="mincut")
     p.add_argument("--set", dest="settings", action="append", default=[], type=_setting,
                    metavar="module.NAME=value")
     p.add_argument("--out", help="save the per-building scores and polygons here, for compare")
@@ -463,9 +456,7 @@ def main():
 
     if args.command == "planes":
         if args.sample:
-            if not args.method:
-                parser.error("--sample needs --method")
-            planes = planes_from_sample(args.sample, args.method, args.workers)
+            planes = planes_from_sample(args.sample, args.workers)
         else:
             planes = planes_from_job(args.pg_uri, args.job_id, args.workers)
         with open(args.out, "wb") as f:
@@ -476,13 +467,13 @@ def main():
         name = args.name or (os.path.splitext(os.path.basename(args.out))[0] if args.out else None)
         if args.gpkg and not name:
             parser.error("--gpkg needs --name or --out")
-        rs = score(args.planes, args.polygons, args.settings, args.workers)
+        rs = score(args.planes, args.settings, args.workers)
         if args.out:
             with open(args.out, "wb") as f:
                 pickle.dump(rs, f, protocol=5)
         if args.gpkg:
             write_layers(args.gpkg, name, rs, _load(args.planes))
-        print(compare([(name or args.polygons, rs)]))
+        print(compare([(name or "run", rs)]))
     else:
         runs = [(name, _load(path)) for name, path in (s.split("=", 1) for s in args.runs)]
         print(compare(runs, args.buildings.split(",") if args.buildings else None))

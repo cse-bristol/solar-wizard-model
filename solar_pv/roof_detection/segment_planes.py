@@ -2,8 +2,7 @@
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 """
 Over-segment a building's pixels into planar regions by region growing on local plane
-fits, as candidate planes for `assign_pixels` - an alternative to finding them with
-DETSAC and RANSAC.
+fits, as candidate planes for `assign_pixels`.
 
 Each pixel's normal comes from the best-fitting (lowest RMS) of the 9 3x3 windows that
 contain it, rather than the window centred on it: at a ridge, hip, eave or step the

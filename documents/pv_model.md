@@ -37,95 +37,76 @@ These values were reached experimentally.
 
 ## 3. roof plane detection
 
-We next try to fit planes to the LiDAR data, which is treated as a set of 3D points for this purpose. To do this we use a modified version of an algorithm called RANSAC (RAndom SAmple Consensus), which is a standard approach in the literature for detecting roofs in LiDAR data, and DETSAC, a deterministic variant of it (see below). DETSAC is run first, and RANSAC is then used to look for any planes DETSAC has missed.
+We next fit planes to the LiDAR pixels of each building, treating each pixel as a 3D point (`roof_detection/detect_roofs.py`). Only pixels above the building's ground height are used. The approach follows PEaRL (Propose, Expand And Re-estimate Labels; Isack & Boykov, 2012): propose more candidate planes than are needed, then alternately assign pixels to the planes and refit the planes to their pixels, keeping a plane only if it explains its pixels well enough to be worth having.
 
-The basic RANSAC algorithm is as follows:
-* pick 3 random points from the set of points
-* fit a plane to those points
-* fit the other points to that plane, and keep any that are within `residual_threshold` of the plane
-* continue until some criteria is reached, usually when a plane has been found where more than some number of points have been fit
+### proposing candidate planes
 
-You can then remove those points from the set, and continue to try and fit more planes until no more are found.
+Candidates come from region growing on local plane fits (`roof_detection/segment_planes.py`):
 
-The following changes are made following recommendations in Tarsha-Kurdi, 2007:
+* Each pixel is given a normal from the best-fitting of the nine 3x3 windows that contain it, rather than the window centred on it: at a ridge, hip, eave or step the centred window straddles two planes, but some window lies wholly on the pixel's side. A pixel whose best window fits a plane to within 0.1m is *locally planar*, and its normal is reliable.
+* Regions grow from the best-fitting unused pixel, over neighbouring pixels which lie within 0.25m (0.1m for flat regions) of the region's plane, refitted as it grows, and, if their own normal is reliable, whose normal is within 12 degrees of the region's. The distance test separates parallel planes at different heights and stops a pitched region at a ridge; the normal test stops it at shallow creases.
 
-* Tarsha-Kurdi, 2007 recommends rejecting planes where the (x,y) points in the plane do not form a single contiguous region of the LIDAR. On small buildings this mostly helps but does exclude some valid planes where the correctly-fitted plane also happens to fit to other pixels in disconnected areas of the roof. We have modified it to allow planes where a small number of non-contiguous pixels fit, as long as the area ratio of those non-contiguous pixels to the area of the main mass of contiguous pixels is small. We do not do this for large buildings, which often have disconnected areas of roof which lie on the same plane, but we do still only extract the largest contiguous region as one plane.
+This deliberately over-segments: a region only has to be good enough to start from, as refining lets a plane grow into pixels its region missed, and merging joins regions split by noise.
 
-* Do not optimise for number of points within `residual_threshold` distance from plane, instead optimise for lowest standard deviation of all points within `residual_threshold` distance from plane (Tarsha-Kurdi, 2007). In a normal regression trying to fit as many points as possible makes sense, but for roof plane fitting we know it is very likely that there will be multiple planes to fit in a given data set, so fitting more is not necessarily better.
+A region becomes a candidate plane only if it passes these checks:
 
-The following changes are made based on our own experimentation:
+* It must have at least 8 pixels (4 at 2m). Regions smaller than 0.8% of the building's pixels must be mostly locally planar: on rough surfaces like vegetation and clutter, region growing finds many small regions that fit their plane no worse than real small planes do.
+* It must be aligned with the building: a building face (an edge of the footprint), or a right angle to one, must be close to its aspect - or, for a pitched region, to the circular mean of its pixels' aspects from the aspect raster. A pitched region that isn't is still kept if it is at least 15 degrees steep, at least 12 pixels, and corroborated by its locally planar pixels, as footprints derived from LiDAR follow the roof's edges only roughly.
+* If it fits its plane poorly (a mean absolute error over half its residual scale), its shape must be reasonable. The area of its pixels must not be much less than that of their convex hull, which rejects planes that cut across a roof and so have a u-shaped intersection with it. Its `thinness ratio` (`4 * pi * area / perimeter^2`, a standard GIS measure of sliver polygons) must not be too low, as long thin planes are no good for panels even if accurately detected.
+* If it is pitched, at least half its locally planar pixels must face the same way as it (their normals within 12 degrees of its own).
 
-* Ignore very steep slopes - since we don't care about walls and the LIDAR is cropped to the building bounds the steep ones are likely to be false positives.
+### refining
 
-* Reject planes where the area of the polygon formed by the inliers in the xy plane is significantly less than the area of the convex hull of that polygon. This is intended to reject planes which have cut across a roof and so have a u-shaped intersect with the actual points.
+Pixels are assigned to planes, or to no plane, by minimising an energy (`roof_detection/assign_pixels.py`):
 
-* Reject planes where the `thinness ratio` is too low - i.e the shape of the polygon is very long and thin. The `thinness ratio` is defined as `4 * pi * area / perimeter^2`, and is a standard GIS approach to detecting sliver polygons. Even if these were accurately detected roofs, they're no good for PV panels so we can safely ignore them.
+* each pixel's distance from its plane, in units of the plane's residual scale (0.25m, or 0.1m for flat planes, as flat roofs are more likely to be covered in obstacles like HVAC units, pipes and parapets), capped at 4; or 2 for a pixel in no plane;
+* plus 0.5 per metre of boundary between differently assigned pixels, so that planes are compact.
 
-* Using aspect (compass direction) data created as a raster operation from the LiDAR, reject planes where the circular standard deviation of the aspect of each point is too high, or the circular mean of the aspect of each point differs from the aspect of the plane by too much.
+This can't be solved exactly; alpha-expansion (Boykov, Veksler & Zabih, 2001) gets within a factor of 2 of the optimum, each step being one exact min-cut. A plane may only claim pixels within 3m of the ones it has, so it can't take over a coplanar patch elsewhere on the building, and each plane keeps only its largest connected group of pixels.
 
-* Constrain the selection of the initial sample of 3 points to points whose detected aspect is close, if this is possible.
+Each plane is then refitted to its pixels by least squares, then again to just those within its residual scale of it, so that mixed pixels at ridges, eaves and gutters (which at 1m are a large share of a plane only a few pixels deep) don't tilt it. Assignment and refitting alternate until the assignment stops changing, or the energy falls by less than 1% in a round (at most 10 rounds).
 
-* Draw the initial sample's other 2 points from within 3m of the first. On a large building with many roof faces, 3 points drawn from anywhere rarely lie on the same face, so RANSAC would stop finding planes while whole faces were left.
+Planes are then merged, and removed, where that lowers the energy plus a fixed cost per plane: a plane is only worth having if it explains its pixels better than the other planes would by at least that much. Only planes that are both flat, or that face within 15.5 degrees of each other, are merged; and they are merged even if it raises the energy, if the merged plane's energy per pixel is at most 1 (it explains their pixels to within about its residual scale), as at 1m a slightly warped roof face fits two planes better than one. Planes are refined again after merging and removing.
 
-* Use a tighter `residual_threshold` (0.1m) for flat planes, as flat roofs are more likely to be covered in obstacles like HVAC units, pipes, and parapets.
+After that, new candidates are proposed from the pixels no plane explains well (other than those of planes just removed, which would mostly grow the same plane again), needing only 4 pixels, and the whole is repeated, up to twice.
 
-Planes that have too few pixels fit to them are also rejected.
+Finally, each plane's fit metrics, shape ratios and aspect statistics are computed from its pixels, and its orientation from just its pixels within 0.1m of it.
 
-All of these changes apply to DETSAC as well, apart from the constraint on the selection of the initial sample, as DETSAC does not sample.
+### aspect and flat roofs
 
-### DETSAC
+A plane is considered flat if its slope is 4.9 degrees or less (`FLAT_ROOF_DEGREES_THRESHOLD`).
 
-RANSAC is not deterministic: it begins by taking 3 points at random, and if it gets unlucky with this choice it can produce bad results. This happens most often on challenging roofs, like narrow terraces with shallow roofs. DETSAC replaces the random sampling with a set of candidate planes made in advance for each building:
+The aspect of a pitched plane is aligned to the azimuth of a building face, or a right angle to one, within 15.5 degrees of the plane's own aspect. Faces are looked for within 1m of the plane's pixels, then 3m, then 10m. A pitched plane with no such face keeps its own aspect. The aspect of a flat plane is not meaningful, so instead it is set to the face direction (or right angle to one) closest to south, or to south if there are no faces within 10m. This is the direction rows of panels on the flat roof are assumed to face.
 
-* The points are grouped by height using DBSCAN, so that parts of the roof at very different heights are separated.
-* Each connected region of similar height is segmented by aspect, using SLIC superpixels which are then merged where their aspect is similar (a region adjacency graph cut). This is done at two thresholds, 29 degrees and 15 degrees.
-* A plane is fitted to the points of each segment, and each of these is a candidate plane.
+### messy roofs
 
-Each candidate plane is also given a `sample_residual_threshold` of either 0.25m or 2m. The points of the segment the candidate was made from count as inliers if they are within this distance of the plane, even if they are further than `residual_threshold` from it. This helps on roofs where the segment the plane was fitted to is not entirely on the plane itself.
-
-DETSAC then runs like RANSAC, except that instead of trying random samples it tries every candidate plane, and keeps the best one that passes the checks above. A candidate plane that fails any of the checks other than the score is not tried again for that building. Points already fit to another plane are never considered inliers. As with RANSAC, the found plane's points are removed, and DETSAC is run again until no more planes are found.
-
-If more than 25% of the building's points have not been fit to a plane by DETSAC, RANSAC is then run on the remaining points.
-
-Planes with a mean absolute error of 1m or more are discarded, and their points are left to be picked up in the next step.
-
-### merging and messy roofs
-
-After detection, adjacent planes are merged, and so are planes and the adjacent points that were not fit to any plane. This is done using a region adjacency graph where each node is either a plane or a single unfitted point. Two nodes are merged if a plane fitted to the points of both is still a good fit.
-
-Flat roofs are often covered in obstacles like HVAC units and pipes, which can lead to roof planes that don't reflect the space actually available for panels. These are found from the points' heights once they have been assigned to planes (`roof_detection/mess.py`):
+Flat roofs are often covered in obstacles like HVAC units and pipes, which can lead to roof planes that don't reflect the space actually available for panels. These are found from the pixels' heights once they have been assigned to planes (`roof_detection/mess.py`):
 
 * Clutter: a small pitched plane within a flat roof is an obstacle (plant, vents, rooflights) that a plane has been fitted to, not a roof.
-* Obstacles on a flat plane are clutter standing on it; groups of unfitted points clearly above it (plant) or below it (rooflights, lightwells) and mostly surrounded by it; and groups of its own points a little above or below the rest of it (low plant, pipes, vents). Groups touching the edge of the building aren't counted, as they are usually parapets or taller parts of the building.
+* Obstacles on a flat plane are clutter standing on it; groups of unassigned pixels clearly above it (plant) or below it (rooflights, lightwells) and mostly surrounded by it; and groups of its own pixels a little above or below the rest of it (low plant, pipes, vents). Groups touching the edge of the building aren't counted, as they are usually parapets or taller parts of the building.
 * A flat plane is rejected as messy if obstacles cover a large share of it, or if it has many separate obstacles (at least 5, or 0.02 per m² on a large roof).
 * A small pitched plane whose surroundings within the building are mostly mess is rejected too: it is usually a plane fitted to part of the mess.
 * If most of the building is clutter, messy flat planes and obstacles, the whole building is rejected.
 
 Any buildings where no roof planes were detected that passed the above tests are now marked as excluded.
 
-### flat roofs
-
-A plane is considered flat if its slope is 4.9 degrees or less (`FLAT_ROOF_DEGREES_THRESHOLD`).
-
-The aspect of a pitched plane is aligned to the azimuth of a nearby building edge, which must be within 15.5 degrees of the plane's aspect. The aspect of a flat plane is not meaningful, so instead it is set to the azimuth of whichever nearby building edge faces closest to south, which must be within 46 degrees of south. This is the direction rows of panels on the flat roof are assumed to face. Planes where no suitable building edge is found are rejected.
-
 ## 4. creation of roof polygons
 
-At this stage, for each building we now have a set of roof planes, and each roof plane is associated with a set of 3D points. This needs to be converted into a polygon so that we can model PV output within each polygon.
+At this stage, for each building we now have a set of roof planes, and each roof plane is associated with a set of pixels. This needs to be converted into a polygon so that we can model PV output within each polygon (`roof_polygons/roof_polygons.py`).
 
-Two polygons are made for each roof plane:
+Two polygons are made for each roof plane, both within the building shrunk by `min_dist_to_edge_m`:
 
-* the **raw** polygon, which is as close as possible to the pixels RANSAC actually fit to the plane. A square is drawn around each pixel fit to the plane, the squares are merged, and the result is de-zigzagged (each vertex is moved halfway towards the next, which smooths the staircase effect of the pixel edges). If this has formed a multi-polygon, the largest polygon is taken.
+* the **grown** polygon, a tidy shape with straight edges, which is what is output.
+* the **raw** polygon: the plane's pixels, as squares, within its grown polygon, plus a neighbouring plane's pixels on its side of the line between them, close to it (see below). The plane's area, kWp and kWh are based on this.
 
-* the **grown** polygon, which is a tidier shape based on the raw polygon. If a bounding box rotated to match the aspect of the plane is close in area to the raw polygon, the bounding box is used. Otherwise, the raw polygon is gridded onto a 1m grid oriented to the aspect of the plane, and the result is de-zigzagged.
+Each grown polygon is made as follows:
 
-Both polygons are constrained to the building, with a minimum distance to the edge of the building of `min_dist_to_edge_m`.
+1. **Lines between planes.** For each pair of planes whose pixels share an edge, a straight line between them is found. If the two planes meet along a line (a ridge, hip or valley) that follows their shared edge, it is that line: its direction comes from the planes' slopes and aspects, and its position from where it best separates their pixels. Otherwise, e.g. for planes side by side at a step, it is whichever line along either plane's grid (see below) best separates their pixels, if that follows their shared edge. A line applies only alongside the shared edge. Where three planes meet, the lines between them are moved to run to the point where all three are at the same height, so that their polygons meet cleanly there. A line whose pixels stop just short of the building's edge, e.g. a ridge at a gable wall, is run to the edge.
+2. **Tiling.** Each plane's pixels are tiled on a grid aligned to its aspect, with tiles the size of a pixel, choosing which tiles to occupy by an exact min-cut: each tile costs its mismatch in area with the plane's pixels, plus a cost for each tile edge of boundary, which straightens the polygon's edges. Near a line, the plane may only occupy its own side of it, and gets its neighbour's pixels on its side; elsewhere, it may not occupy other planes' pixels.
+3. **Overlaps** between polygons are split along the line between the two planes if they have one, else by which plane's pixels are nearer.
+4. **Smoothing.** Boundaries that are not along a line or the building's edge are de-zigzagged, straightening the staircases left by the grid.
 
-Then,
-
-1. Pitched roof planes that touch, have the same aspect, and have slopes within 4 degrees of each other are merged, and their polygons re-made. Flat roof planes are never merged.
-2. Overlaps between grown polygons are removed by splitting the overlapping area evenly between the two planes, using the straight line between the points where their boundaries cross if that doesn't leave the overlap, or else a Voronoi-based centre-line.
-3. The raw polygon is clipped to its grown polygon.
+If a polygon has more than one part, only the largest is kept. Planes left with no polygon are dropped.
 
 Finally, planes are marked unusable if they are steeper than `max_roof_slope_degrees`, if their aspect is within `min_roof_degrees_from_north` of north, or if their area is below `min_roof_area_m`.
 
@@ -203,15 +184,16 @@ This only accounts for variation in the weather between years - it does not acco
 
 ### confidence
 
-Each roof plane is given a `confidence` score between 0 and 1, which is a measure of how well we know the roof surface. It is made up of 5 sub-scores, each between 0 and 1:
+Each roof plane is given a `confidence` score between 0 and 1, which is a measure of how well we know the roof surface. It is made up of 6 sub-scores, each between 0 and 1:
 
-* `fit`: how well the plane fits the LiDAR points, from the mean absolute error of the RANSAC fit. It is 1 at or below an error of 0.05m, falling on a log scale to 0 at the maximum error roof detection accepts (1m).
+* `fit`: how well the plane fits its LiDAR pixels, from its mean absolute error. It is 1 at or below an error of 0.05m, falling on a log scale to 0 at 1m.
 * `resolution`: the resolution of the LiDAR used, as finer LiDAR resolves roof detail better.
 * `geom_agreement`: the ratio of the area of the raw roof polygon to the area of the grown roof polygon. The closer they are, the less ambiguity there is about the extent of the roof.
-* `aspect`: the circular standard deviation of the aspect of the pixels fit to the plane, scoring 0 at the maximum roof detection accepts. Aspect is meaningless for flat roofs and noisy for shallow ones, so this penalty is not applied at all to flat roofs and fades in linearly to full strength at 20 degrees.
-* `shape`: the thinness ratio of the plane (see section 3), relative to the minimum roof detection accepts for a plane of its size.
+* `aspect`: the share of the plane's locally planar pixels (see section 3) whose own normals are within 12 degrees of the plane's. Aspect is meaningless for flat roofs and noisy for shallow ones, so this penalty is not applied at all to flat roofs and fades in linearly to full strength at 20 degrees. It isn't scored if too few of the plane's pixels are locally planar to say.
+* `shape`: the thinness ratio of the plane (see section 3), relative to the minimum for a plane of its size.
+* `footprint`: how far the aspect of the plane's fit is from the nearest building face direction (or right angle to one): 1 within 15.5 degrees, falling to 0 at 45. Roof detection keeps pitched planes the footprint disagrees with if their pixels corroborate them; this is what the disagreement costs. It fades in with slope as `aspect` does.
 
-These are combined with a weighted geometric mean.
+These are combined with a weighted geometric mean, leaving out any that aren't known.
 
 Each sub-score is floored at 0.05 before being combined, so that a single sub-score of zero puts a roof at the bottom of the ranking without discarding what the other sub-scores say about it.
 

@@ -4,15 +4,13 @@
 Lean stand-ins for the parts of sklearn's `LinearRegression` and regression metrics
 that roof detection needs in its inner loops.
 
-Roof detection fits and scores tens of thousands of candidate planes per building, and
-sklearn's per-call input validation cost ~30x more than the maths itself. `PlaneFit` and
+Roof detection fits planes to pixels many times per building, and sklearn's per-call
+input validation cost ~30x more than the maths itself. `PlaneFit` and
 the metrics repeat sklearn 1.9's arithmetic in the same order, so results are
 identical to sklearn's (`test_plane_fit.py` guards this). They assume what the
 callers guarantee: dense, finite float64 inputs with X of shape (n, 2).
-
-`PlaneSums` is an incremental fit, close to but not identical to `PlaneFit`.
 """
-from typing import Optional, Tuple
+from typing import Optional
 
 import numpy as np
 from scipy.linalg import lapack
@@ -45,56 +43,6 @@ class PlaneFit:
 
     def score(self, X: np.ndarray, y: np.ndarray) -> float:
         return r2_score(y, self.predict(X))
-
-
-class PlaneSums:
-    """
-    Running sums over a set of points, from which the least-squares plane through them
-    can be solved in O(1) - and two sets' sums added to give their union, so the plane
-    fit to a merge of two sets doesn't need a pass over their points.
-
-    Solving from sums isn't exactly the same as `PlaneFit` (lstsq via SVD), and loses
-    precision when the coordinates are large: use coordinates relative to a nearby
-    origin, not raw 27700 ones.
-    """
-    __slots__ = ("sums",)
-
-    # Below this ratio of the smallest to the largest eigenvalue of the points' xy
-    # covariance, `solve` defers to `PlaneFit`. lstsq treats singular values below
-    # 1e-6 of the largest as zero, i.e. an eigenvalue ratio of 1e-12; this is set
-    # wider so that everything near that cutoff goes through lstsq.
-    _MIN_EIGENVALUE_RATIO = 1e-9
-
-    def __init__(self, sums: np.ndarray):
-        self.sums = sums
-
-    @classmethod
-    def of(cls, xy: np.ndarray, z: np.ndarray) -> "PlaneSums":
-        x = xy[:, 0]
-        y = xy[:, 1]
-        return cls(np.array([len(z), x.sum(), y.sum(), z.sum(), x @ x, x @ y, y @ y, x @ z, y @ z]))
-
-    def __add__(self, other: "PlaneSums") -> "PlaneSums":
-        return PlaneSums(self.sums + other.sums)
-
-    def solve(self) -> Optional[Tuple[float, float, float]]:
-        """(x_coef, y_coef, intercept), or None if the points are too near collinear
-        (or too few) to solve reliably this way."""
-        n, sx, sy, sz, sxx, sxy, syy, sxz, syz = self.sums
-        mx, my, mz = sx / n, sy / n, sz / n
-        cxx = sxx - sx * mx
-        cxy = sxy - sx * my
-        cyy = syy - sy * my
-        cxz = sxz - sx * mz
-        cyz = syz - sy * mz
-        det = cxx * cyy - cxy * cxy
-        trace = cxx + cyy
-        # det / trace^2 approximates the smaller eigenvalue over the larger:
-        if not det > self._MIN_EIGENVALUE_RATIO * trace * trace:
-            return None
-        a = (cxz * cyy - cyz * cxy) / det
-        b = (cyz * cxx - cxz * cxy) / det
-        return a, b, mz - a * mx - b * my
 
 
 def _lstsq(X: np.ndarray, y: np.ndarray) -> np.ndarray:

@@ -59,8 +59,7 @@ def make_job_roof_polygons(pg_uri: str, job_id: int,
                                              min_roof_degrees_from_north=_MIN_ROOF_DEGREES_FROM_NORTH,
                                              flat_roof_degrees=_FLAT_ROOF_DEGREES,
                                              min_dist_to_edge_m=_MIN_DIST_TO_EDGE_M,
-                                             resolution_metres=resolution_metres,
-                                             debug=True)
+                                             resolution_metres=resolution_metres)
             logging.info(f"Created {len(polygons)} planes for building_id {building_id}")
             all_planes.extend(polygons)
 
@@ -103,8 +102,7 @@ def make_roof_polygons(pg_uri: str, job_id: int, building_id: str,
                                    min_roof_degrees_from_north=_MIN_ROOF_DEGREES_FROM_NORTH,
                                    flat_roof_degrees=_FLAT_ROOF_DEGREES,
                                    min_dist_to_edge_m=_MIN_DIST_TO_EDGE_M,
-                                   resolution_metres=resolution_metres,
-                                   debug=True)
+                                   resolution_metres=resolution_metres)
 
     if write_test_data:
         _write_outputs(building_id, planes, out_dir, building_geom)
@@ -154,7 +152,7 @@ def _write_outputs(name: str, planes: List[dict], out_dir: str, building_geom: P
 
 def _load_building_id_planes(pg_uri: str, job_id: int, building_id: str):
     """
-    Load LIDAR pixel data for RANSAC processing for a specific building_id.
+    Load the roof planes detected for a specific building_id.
     """
     with connection(pg_uri, cursor_factory=psycopg2.extras.DictCursor) as pg_conn:
         planes = sql_command(

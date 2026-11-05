@@ -55,12 +55,6 @@ class E2ETest(unittest.TestCase):
             os.environ["PVGIS_DATA_TAR_FILE_DIR"] = self._prev_pvgis_dir
 
     def test_cli_runs_end_to_end(self):
-        self._run_and_check([])
-
-    def test_cli_runs_end_to_end_mincut(self):
-        self._run_and_check(["--roof-detection-method", "mincut", "--roof-polygon-method", "mincut"])
-
-    def _run_and_check(self, extra_args):
         with TemporaryDirectory(prefix="solar_pv_e2e_") as work_dir:
             out = join(work_dir, "results.gpkg")
             cli.main([
@@ -70,7 +64,7 @@ class E2ETest(unittest.TestCase):
                 "--id-field", "osm_id",
                 "--horizon-search-radius", "300",
                 "--work-dir", work_dir,
-            ] + extra_args)
+            ])
 
             self.assertTrue(exists(out), "CLI produced no output GeoPackage")
 
@@ -115,14 +109,14 @@ class E2ETest(unittest.TestCase):
                 self._check_confidence_meta(plane)
                 if "_MERGED_" in json.loads(plane.GetField("meta"))["plane_type"]:
                     n_merged += 1
-            # make sure the merge path, which recomputes the aspect stats, was exercised:
+            # make sure plane merging was exercised:
             self.assertGreater(n_merged, 0, "no merged roof planes in the fixture")
             self.assertGreater(n_unusable, 0, "no unusable roof planes in the output")
 
             rejected = results.GetLayerByName("rejected_roof_plane")
             self.assertIsNotNone(rejected, "rejected_roof_plane layer missing")
             reasons = {r.GetField("rejection_reason") for r in rejected}
-            self.assertIn("HIGH_MAE", reasons)
+            self.assertIn("UNPROFITABLE", reasons)
 
     def _check_confidence_meta(self, plane):
         """The confidence sub-scores in `meta` survive to the GeoPackage, are
@@ -134,6 +128,9 @@ class E2ETest(unittest.TestCase):
         self.assertIsInstance(sub_scores, dict, f"roof plane {rp_id}: no meta.confidence")
         self.assertEqual(set(sub_scores), set(CONFIDENCE_WEIGHTS), f"roof plane {rp_id}")
         for k, v in sub_scores.items():
+            # the aspect sub-score isn't known if too few pixels are locally planar:
+            if v is None and k == "aspect":
+                continue
             self.assertGreaterEqual(v, 0, f"roof plane {rp_id}: {k}")
             self.assertLessEqual(v, 1, f"roof plane {rp_id}: {k}")
         self.assertAlmostEqual(combine(sub_scores), plane.GetField("confidence"),

@@ -6,7 +6,7 @@ import numpy as np
 from sklearn import metrics
 from sklearn.linear_model import LinearRegression
 
-from solar_pv.roof_detection.plane_fit import PlaneFit, PlaneSums, mean_absolute_error, r2_score, \
+from solar_pv.roof_detection.plane_fit import PlaneFit, mean_absolute_error, r2_score, \
     mean_squared_error, root_mean_squared_error, mean_squared_log_error, mean_absolute_percentage_error
 
 
@@ -73,35 +73,6 @@ class PlaneFitMatchesSklearnTest(unittest.TestCase):
     def test_mape_near_zero_targets(self):
         y, y_pred = np.array([0.0, 1e-20, 2.0]), np.array([0.1, 0.0, 2.5])
         self.assertEqual(mean_absolute_percentage_error(y, y_pred), metrics.mean_absolute_percentage_error(y, y_pred))
-
-
-class PlaneSumsTest(unittest.TestCase):
-
-    def test_solve_matches_lstsq_fit(self):
-        rng = np.random.default_rng(2)
-        for n in [3, 10, 100, 5000]:
-            for _ in range(20):
-                xyz = _roof_like_xyz(rng, n)
-                # local coords, as merge_adjacent uses:
-                xy = xyz[:, :2] - xyz[:, :2].min(axis=0)
-                z = xyz[:, 2]
-                solved = PlaneSums.of(xy, z).solve()
-                if solved is None:
-                    continue
-                lr = PlaneFit().fit(xy, z)
-                np.testing.assert_allclose(solved, (*lr.coef_, lr.intercept_), rtol=0, atol=1e-9)
-
-    def test_sums_add_to_the_union(self):
-        rng = np.random.default_rng(3)
-        xyz = _roof_like_xyz(rng, 200)
-        xy, z = xyz[:, :2] - (358000, 172000), xyz[:, 2]
-        merged = PlaneSums.of(xy[:150], z[:150]) + PlaneSums.of(xy[150:], z[150:])
-        np.testing.assert_allclose(merged.sums, PlaneSums.of(xy, z).sums, rtol=1e-12)
-
-    def test_defers_when_points_are_collinear(self):
-        xy = np.array([[0.5, 0.5], [1.5, 1.5], [2.5, 2.5], [3.5, 3.5]])
-        self.assertIsNone(PlaneSums.of(xy, np.array([1.0, 2.0, 3.0, 4.0])).solve())
-        self.assertIsNone(PlaneSums.of(xy[:1], np.array([1.0])).solve())
 
 
 if __name__ == '__main__':

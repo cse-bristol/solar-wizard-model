@@ -3,7 +3,5 @@ requests==2.34.2
 # gdal must match the native libgdal = 3.12.4 is from nixpkgs 26.05
 gdal==3.12.4
 numpy==2.5.3
-scikit-learn==1.9.0
 scikit-image==0.26.0
 shapely==2.1.2
-networkx==3.6.1

@@ -27,11 +27,13 @@ python -m solar_pv --buildings buildings.gpkg --lidar tiles/ --out results.gpkg
     usable (`usable` false, with a `not_usable_reason` - `SLOPE`, `ASPECT` or `AREA` - and
     no PV outputs).
   * `rejected_roof_plane`: for debugging, the roof planes that roof detection or roof polygon
-    creation threw away, with a `rejection_reason` and diagnostics in `meta`: `HIGH_MAE`
-    (a poor plane fit; its pixels may since have gone to other planes), `TOO_FEW_PIXELS`,
-    `CLUTTER`, `MESSY_FLAT_ROOF`, `MESSY_BUILDING` or `NO_POLYGON`; and, as `OBSTACLES`, the
-    pixels the mess check counted as obstacles. The mincut roof detection and polygon methods
-    record all of these; legacy only records the mess rejections and `HIGH_MAE`.
+    creation threw away, with a `rejection_reason` and diagnostics in `meta`. Candidate
+    regions that failed a check: `SMALL_POOR_FIT`, `NO_CLOSE_ASPECT`, `CONVEX_HULL_RATIO`,
+    `THINNESS_RATIO` or `NORMALS_DISAGREE`. Planes dropped while refining: `TOO_FEW_PIXELS`
+    or `UNPROFITABLE` (their pixels may since have gone to other planes). Mess:
+    `CLUTTER`, `MESSY_FLAT_ROOF`, `SURROUNDED_BY_MESS` or `MESSY_BUILDING`; and, as
+    `OBSTACLES`, the pixels the mess check counted as obstacles. And `NO_POLYGON`, for
+    planes roof polygon creation left with no polygon. See `solar_pv/roof_detection/rejections.py`.
 * `--pg-uri` points at an existing postGIS database; if omitted, a throwaway PostGIS cluster
   is started for the run and thrown away afterwards. That convenience uses `testing.postgresql`,
   which is not a core dependency (the model and the `--pg-uri` path don't need it) - install it
@@ -55,7 +57,7 @@ Results are inserted into 2 postgres tables (also the first two GeoPackage layer
 ### Output fields: `pv_roof_plane`
 
 All kWh figures are **modelled estimates for a typical meteorological year, not measurements**,
-computed over the roof plane RANSAC fits to the LiDAR points.
+computed over the roof plane's own LiDAR pixels.
 
 | Field | Meaning |
 |---|---|
@@ -66,12 +68,12 @@ computed over the roof plane RANSAC fits to the LiDAR points.
 | `kwh_per_kwp` | `kwh_year / kwp`. |
 | `area` | Usable roof-plane area (m², on the roof plane). |
 | `panel_area` | Area of panels (m²) the kWp and kWh figures are based on. Equal to `area` on pitched roofs, where panels are flush-mounted; smaller on flat roofs, allowing for the gaps between rows of panels tilted at `panel_slope`. |
-| `confidence` | Per-roof `[0,1]` score for how well the roof surface is known — plane fit, aspect consistency, shape, LiDAR resolution and raw-vs-grown geometry agreement, combined as a weighted geometric mean. The individual sub-scores are kept in `meta.confidence`. Higher is more trustworthy. |
+| `confidence` | Per-roof `[0,1]` score for how well the roof surface is known — plane fit, whether its pixels face the same way as it, shape, LiDAR resolution, raw-vs-grown geometry agreement and agreement with the building's footprint, combined as a weighted geometric mean. The individual sub-scores are kept in `meta.confidence`. Higher is more trustworthy. |
 | `horizon` | Per-slice horizon profile (obstruction angles around the roof plane). |
 | `slope`, `aspect`, `is_flat` | Roof-plane orientation; `is_flat` marks near-horizontal planes. `aspect` is aligned to a building edge, and on flat roofs is the edge closest to south that panel rows face. |
 | `panel_slope` | Tilt panels are modelled at: the `flat_roof_degrees` param on flat roofs, else `slope`. |
 | `x_coef`, `y_coef`, `intercept` | Coefficients of the fitted plane. |
-| `meta` | JSON of roof-detection diagnostics (fit residuals, aspect/shape stats) and the `confidence` sub-scores. |
+| `meta` | JSON of roof-detection diagnostics (fit residuals, aspect/shape stats, `skew`) and the `confidence` sub-scores. |
 
 The model has the following software dependencies:
 * various python libraries (see `requirements.txt`, can also be installed using nix - see `default.nix`)

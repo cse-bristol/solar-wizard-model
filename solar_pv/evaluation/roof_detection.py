@@ -1,13 +1,14 @@
 # This file is part of the solar wizard PV suitability model, copyright © Centre for Sustainable Energy, 2020-2023
 # Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 """
-Score CLI result GeoPackages from different roof detection / polygon methods against the
-same LiDAR, and find the buildings and roof planes they most disagree on.
+Score CLI result GeoPackages from different runs (e.g. before and after a change to roof
+detection or roof polygons) against the same LiDAR, and find the buildings and roof planes
+they most disagree on.
 
     python -m solar_pv.evaluation.roof_detection --lidar tiles/ --out-dir eval/ \\
-        segment=results-segment.gpkg mincut=results-mincut.gpkg legacy=results-legacy.gpkg
+        base=results-base.gpkg new=results-new.gpkg
 
-The runs must be over the same buildings. Each method's output roof polygons are laid over
+The runs must be over the same buildings. Each run's output roof polygons are laid over
 the model's pixels (centres in the building footprint, from the elevation the model would
 build from `--lidar`); a pixel takes the plane whose polygon contains its centre, and is
 scored against that plane - so this measures the polygons the model outputs, not detection's
@@ -16,19 +17,20 @@ exported). Pixels at or below the building's max ground height are left out, whi
 ground heights the CLI exports in `pv_building`; for older outputs without them, pass the
 `--pg-uri` of a database holding the job's schema (a CLI run with `--keep`).
 
-Per building and method:
+Per building and run:
   coverage, explained   shares of above-ground pixels in a polygon / within 0.25m (0.1m on a
                         flat plane) of it
   mae                   mean |residual| over covered pixels
   energy                as `assign_pixels` minimises (capped residual over scale, 2 per pixel
                         in no plane, 0.5/m of boundary) plus 8 per plane, as `plane_moves`
                         charges: lower is better. The per-plane cost stops it rewarding
-                        over-splitting, but only partly; and since segment minimises much the
-                        same energy, it has some home advantage
+                        over-splitting, but only partly; and roof detection minimises much
+                        the same energy, so it favours runs of it over other ways of
+                        finding planes
   missed_planar_m2      planar patches (MAE < 0.08m, >= 10 px) in pixels no plane covers, and
                         that no mess rejection (MESS_REASONS) explains
   oversplit_pairs       adjacent planes that one plane would fit nearly as well (see
-                        `_oversplit_pairs`): the measures above reward splitting, this doesn't
+                        `oversplit_pairs`): the measures above reward splitting, this doesn't
 Per plane, the skew against its pixels (`solar_pv.roof_detection.plane_skew`).
 
 Neither set of numbers is ground truth: they reward explaining the LiDAR, which mess
@@ -37,7 +39,7 @@ imagery.
 
 Writes to --out-dir: summary.csv, pairs.csv, divergent_buildings.csv, skew_summary.csv,
 plane_skew.csv, skew_review.csv, and review.gpkg (layers: building - every building with its
-metrics; plane_<method> and pixel - for the divergent buildings; skewed_plane and
+metrics; plane_<run> and pixel - for the divergent buildings; skewed_plane and
 skewed_plane_pixel - for the most skewed planes).
 """
 import argparse
@@ -241,18 +243,23 @@ def _lstsq_plane(xyz: np.ndarray):
     return coef, xyz[:, 2] - A @ coef
 
 
-def _oversplit_pairs(xyz: np.ndarray, labels: np.ndarray, planes: List[dict], lo: np.ndarray, hi: np.ndarray) -> int:
+def oversplit_pairs(xyz: np.ndarray, labels: np.ndarray, planes: List[dict], lo: np.ndarray,
+                    hi: np.ndarray) -> List[dict]:
     """
     Adjacent planes that look like one face split in two: their own least-squares fits are
     within 5° of each other, and one plane fitted to both pixel sets is within 2cm on MAE and
     explains under 5 percentage points fewer of their pixels. The measures above reward
     splitting (it lowers residuals for only `LABEL_COST` a plane), so this checks for it.
+
+    Each pair is the two planes' indices (`p` < `q`), the angle between their fits, how much
+    worse the MAE of one plane fitted to both is, and the share of their pixels it explains
+    fewer of.
     """
     a, b = labels[lo], labels[hi]
     touching = (a >= 0) & (b >= 0) & (a != b)
     pairs = set(zip(np.minimum(a[touching], b[touching]).tolist(), np.maximum(a[touching], b[touching]).tolist()))
-    count = 0
-    for p, q in pairs:
+    found = []
+    for p, q in sorted(pairs):
         in_p, in_q = labels == p, labels == q
         if in_p.sum() < 3 or in_q.sum() < 3:
             continue
@@ -264,9 +271,11 @@ def _oversplit_pairs(xyz: np.ndarray, labels: np.ndarray, planes: List[dict], lo
         separate_mae = (np.abs(rp).sum() + np.abs(rq).sum()) / n
         scale = _scale(planes[p]["is_flat"] and planes[q]["is_flat"])
         explained_loss = ((np.abs(rp) <= scale).sum() + (np.abs(rq) <= scale).sum() - (np.abs(ru) <= scale).sum()) / n
-        if angle < 5 and np.abs(ru).mean() - separate_mae < 0.02 and explained_loss < 0.05:
-            count += 1
-    return count
+        mae_loss = np.abs(ru).mean() - separate_mae
+        if angle < 5 and mae_loss < 0.02 and explained_loss < 0.05:
+            found.append({"p": int(p), "q": int(q), "angle_deg": float(angle), "mae_loss_m": float(mae_loss),
+                          "explained_loss": float(explained_loss)})
+    return found
 
 
 def building_context(xyz: np.ndarray, above: np.ndarray, res: float) -> dict:
@@ -314,7 +323,7 @@ def score_planes(xyz: np.ndarray, above: np.ndarray, res: float, planes: List[di
         "energy": float(cost.sum()) + float(smooth) + LABEL_COST * planes_on_pixels,
         "missed_planar_m2": missed,
         "missed_mess_m2": missed_mess,
-        "oversplit_pairs": _oversplit_pairs(xyz, np.where(above, labels, -1), planes, lo, hi),
+        "oversplit_pairs": len(oversplit_pairs(xyz, np.where(above, labels, -1), planes, lo, hi)),
         "usable_area": float(usable_area),
         "kwh": float(sum(p["kwh"] for p in usable)),
         "kwp": float(sum(p["kwp"] for p in usable)),

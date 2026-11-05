@@ -37,8 +37,6 @@ def model_solar_pv(pg_uri: str,
                    peak_power_per_m2: float = 0.2,
                    pv_tech: str = "crystSi",
                    min_dist_to_edge_m: float = 0.1,
-                   roof_polygon_method: str = "legacy",
-                   roof_detection_method: str = "legacy",
                    debug_mode: bool = False) -> None:
     """
     Main entrypoint to the PV model.
@@ -79,15 +77,6 @@ def model_solar_pv(pg_uri: str,
     based on the choice here - refer to the PVMAPS docs for more info.
     :param min_dist_to_edge_m: Min distance to the edge of the building for the roof polygon area.
     This only counts the edge of the building, not the edges of other areas of roof.
-    :param roof_polygon_method: how roof planes are turned into polygons: "legacy", or
-    "mincut" (assign LiDAR pixels to planes, then tile each plane on a grid aligned to its
-    aspect - see `solar_pv.roof_polygons.roof_polygons._create_roof_polygons_mincut`).
-    :param roof_detection_method: how pixels left over after RANSAC, and adjacent planes,
-    are merged: "legacy" (greedy region merging), or "mincut" (assign pixels to planes by
-    multi-label min-cut on their elevation residuals, and only merge planes greedily -
-    see `solar_pv.roof_detection.detect_roofs._assign_and_merge`), or "segment" (as
-    "mincut", but with candidate planes from region growing rather than RANSAC, refined
-    until stable - see `solar_pv.roof_detection.detect_roofs._segment_and_assign`).
     :param debug_mode: if True, don't delete temporary files or the postgres schema
     for the job, so the caller can read its intermediate tables (e.g. the input
     buildings, unusable and rejected roof planes). Drop it afterwards with
@@ -110,8 +99,6 @@ def model_solar_pv(pg_uri: str,
     flat_roof_degrees = _validate_int(flat_roof_degrees, "flat_roof_degrees", 0, 90)
     peak_power_per_m2 = _validate_float(peak_power_per_m2, "peak_power_per_m2", 0)
     min_dist_to_edge_m = _validate_float(min_dist_to_edge_m, "min_dist_to_edge_m", 0)
-    roof_polygon_method = _validate_str(roof_polygon_method, "roof_polygon_method", allowed=["legacy", "mincut"])
-    roof_detection_method = _validate_str(roof_detection_method, "roof_detection_method", allowed=["legacy", "mincut", "segment"])
 
     _validate_env_var("PVGIS_DATA_TAR_FILE_DIR")
 
@@ -157,9 +144,7 @@ def model_solar_pv(pg_uri: str,
                  min_roof_degrees_from_north=min_roof_degrees_from_north,
                  flat_roof_degrees=flat_roof_degrees,
                  min_dist_to_edge_m=min_dist_to_edge_m,
-                 resolution_metres=res,
-                 roof_polygon_method=roof_polygon_method,
-                 roof_detection_method=roof_detection_method)
+                 resolution_metres=res)
 
     if _should_skip(pg_uri, job_id, check_rasters=False):
         return

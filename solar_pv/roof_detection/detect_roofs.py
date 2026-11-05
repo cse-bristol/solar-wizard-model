@@ -8,9 +8,7 @@ from contextlib import contextmanager
 from os.path import join
 
 import time
-import math
 import traceback
-import zlib
 from typing import List, Dict, Tuple, Optional
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -22,22 +20,17 @@ import shapely
 from shapely import STRtree
 from shapely import wkt
 
-from solar_pv.geos import deg_diff, slope_deg, aspect_deg, azimuth_deg
+from solar_pv.geos import deg_diff, slope_deg, aspect_deg
 from solar_pv.db_funcs import count, sql_command, connect, connection
 from solar_pv.postgis import pixels_for_buildings
 from solar_pv import tables, stage
-from solar_pv.constants import RANSAC_LARGE_BUILDING, \
-    RANSAC_LARGE_MAX_TRIALS, RANSAC_SMALL_MAX_TRIALS, RANSAC_SMALL_BUILDING, \
-    RANSAC_MEDIUM_MAX_TRIALS, ROOFDET_MAX_MAE, ROOFDET_MAX_CPUS, ROOFDET_MAX_AREA, \
+from solar_pv.constants import ROOFDET_MAX_CPUS, ROOFDET_MAX_AREA, \
     AZIMUTH_ALIGNMENT_THRESHOLD, FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD, FLAT_ROOF_DEGREES_THRESHOLD
 from solar_pv.roof_detection import rejections
 from solar_pv.roof_detection.mess import reject_mess
-from solar_pv.roof_detection.detsac import DETSACRegressorForLIDAR
 from solar_pv.roof_detection.assign_pixels import assign_pixels, NONE
-from solar_pv.roof_detection.merge_adjacent import merge_adjacent, set_plane_fit, set_fit_metrics
-from solar_pv.roof_detection.premade_planes import create_planes
-from solar_pv.roof_detection.ransac import RANSACRegressorForLIDAR, _FaceIndex, closest_azimuth, \
-    _min_thinness_ratio
+from solar_pv.roof_detection.footprint import FaceIndex, closest_azimuth
+from solar_pv.roof_detection.plane_metrics import set_plane_fit, set_fit_metrics, min_thinness_ratio
 from solar_pv.roof_detection.plane_fit import PlaneFit
 from solar_pv.roof_detection.plane_skew import plane_skew
 from solar_pv.roof_detection.plane_moves import merge_by_energy, remove_unprofitable, data_cost, Plane
@@ -51,19 +44,15 @@ _SEMAPHORE_MAX_CONN = 50
 _PG_CONN_SEMAPHORE = mp.Semaphore(_SEMAPHORE_MAX_CONN)
 
 
-# Max distance (m) of a pixel from a plane for it to count as an inlier. Also the unit of
-# elevation residual in `assign_pixels`, per plane.
+# The residual scale (m) of a pitched or flat plane: the furthest a pixel may be from a
+# region's plane as it grows, and the unit of elevation residual in `assign_pixels`.
 _RESIDUAL_THRESHOLD = 0.25
 _FLAT_ROOF_RESIDUAL_THRESHOLD = 0.1
-# RANSAC samples each candidate's 3 points within this distance (m) of each other (see
-# `ransac._LocalSampler`): on a large building with many faces, 3 points from anywhere rarely
-# lie on one face, so RANSAC gave up with whole faces left.
-_RANSAC_SAMPLE_RADIUS_M = 3.0
 # Max rounds of refitting planes to their pixels and reassigning pixels to the planes.
 _MAX_REFINE_ROUNDS = 10
 # Refining stops once a round lowers the energy by less than this share.
 _MIN_REFINE_ENERGY_FALL = 0.01
-# RANSAC's default for its shape check:
+# A poorly fitting region's pixels must cover at least this share of their convex hull:
 _MIN_CONVEX_HULL_RATIO = 0.65
 # A pixel is locally planar, and its normal reliable when growing regions, if the best 3x3
 # window containing it fits a plane this well (m):
@@ -124,8 +113,6 @@ def detect_roofs(pg_uri: str,
                  flat_roof_degrees: int,
                  min_dist_to_edge_m: float,
                  resolution_metres: float,
-                 roof_polygon_method: str = "legacy",
-                 roof_detection_method: str = "legacy",
                  workers: int = _roof_det_cpu_count()) -> None:
 
     if stage.get_stage(pg_uri, job_id) >= stage.Stage.DETECT_ROOFS:
@@ -147,7 +134,6 @@ def detect_roofs(pg_uri: str,
         "flat_roof_degrees": flat_roof_degrees,
         "min_dist_to_edge_m": min_dist_to_edge_m,
         "resolution_metres": resolution_metres,
-        "method": roof_polygon_method,
     }
 
     work_queue = _create_adaptive_batches(buildings_with_areas)
@@ -157,8 +143,7 @@ def detect_roofs(pg_uri: str,
         futures = []
         for batch_building_ids in work_queue:
             futures.append(executor.submit(_handle_building_batch,
-                                           pg_uri, job_id, batch_building_ids, params,
-                                           roof_detection_method))
+                                           pg_uri, job_id, batch_building_ids, params))
 
         for future in as_completed(futures):
             try:
@@ -174,8 +159,7 @@ def detect_roofs(pg_uri: str,
     stage.set_stage(pg_uri, job_id, stage.Stage.DETECT_ROOFS)
 
 
-def _handle_building_batch(pg_uri: str, job_id: int, building_ids: List[str], params: dict,
-                           roof_detection_method: str = "legacy"):
+def _handle_building_batch(pg_uri: str, job_id: int, building_ids: List[str], params: dict):
     start_time = time.time()
     buildings = _load(pg_uri, job_id, building_ids)
 
@@ -184,11 +168,7 @@ def _handle_building_batch(pg_uri: str, job_id: int, building_ids: List[str], pa
     for building_id, building in buildings.items():
         try:
             t0 = time.time()
-            # seeded per building so that runs are reproducible, and runs with different
-            # methods start from the same RANSAC planes:
-            random_state = np.random.RandomState(zlib.crc32(str(building_id).encode()))
             found = _detect_building_roof_planes(building, building_id, params['resolution_metres'],
-                                                 method=roof_detection_method, random_state=random_state,
                                                  rejected=rejected)
             t1 = time.time()
             if t1 - t0 > 7200:
@@ -202,7 +182,7 @@ def _handle_building_batch(pg_uri: str, job_id: int, building_ids: List[str], pa
 
         if len(found) > 0:
             building_polygons = create_roof_polygons(building_id, building['polygon'], found, **params,
-                                                     rejected=rejected, pixels_xyz=_pixels_xyz(building['pixels']))
+                                                     rejected=rejected)
             _set_skew(building_polygons, building['pixels'], params['resolution_metres'])
             _set_footprint_aspect_gap(building_polygons, building['polygon'])
             polygons.extend(building_polygons)
@@ -223,229 +203,22 @@ def _detect_building_roof_planes(building: RoofDetBuilding,
                                  building_id: str,
                                  resolution_metres: float,
                                  debug: bool = False,
-                                 method: str = "legacy",
-                                 random_state: np.random.RandomState = None,
                                  rejected: Optional[List[dict]] = None) -> List[RoofPlane]:
     """
-    Find roof planes with DETSAC then RANSAC, then tidy up which pixels belong to which
-    plane. `method` "legacy" merges leftover pixels and planes greedily
-    (`merge_adjacent`); "mincut" assigns pixels to planes by multi-label min-cut on
-    their elevation residuals (`assign_pixels`), with `merge_adjacent` only merging planes.
-    "segment" replaces DETSAC and RANSAC with region growing on local plane fits
-    (`segment_planes`), then assigns pixels as "mincut" does (see `_segment_and_assign`).
-
-    `random_state` is for RANSAC; if None, numpy's global random state is used.
-    Planes thrown away are recorded in `rejected` (see `rejections`).
+    Find the building's roof planes (see `_segment_and_assign`), from its pixels above
+    ground. Planes thrown away are recorded in `rejected` (see `rejections`).
     """
-    pixels_in_building = building['pixels']
-    polygon = building['polygon']
+    pixels = building['pixels']
     max_ground_height = building['max_ground_height']
-
-    xyz = np.array([[pixel["x"], pixel["y"], pixel["elevation"]] for pixel in pixels_in_building])
-    aspect = np.array([pixel["aspect"] for pixel in pixels_in_building])
-    slope = np.array([pixel["slope"] for pixel in pixels_in_building])
+    xyz = _pixels_xyz(pixels)
+    aspect = np.array([pixel["aspect"] for pixel in pixels])
     z = xyz[:, 2]
-    mask = z > max_ground_height if max_ground_height else np.ones(aspect.shape)
+    above_ground = z > max_ground_height if max_ground_height else np.ones(len(z), dtype=bool)
 
-    min_points_per_plane = min(8, int(8 / resolution_metres))  # 4 for 2m, 8 for 1m, 8 for 0.5m
-    total_points_in_building = len(aspect)
-
-    if method == "segment":
-        above_ground = mask.astype(bool)
-        # as DETSAC and RANSAC's `min_points_per_plane_perc`:
-        small_pixels = int(total_points_in_building * 0.008)
-        return _segment_and_assign(xyz, aspect, polygon, above_ground, building_id, resolution_metres,
-                                   min_points_per_plane, small_pixels, debug=debug, rejected=rejected)
-    premade_planes = create_planes(xyz, aspect, slope, resolution_metres)
-    skip_planes = set()
-    xy = xyz[:, :2]
-    z = xyz[:, 2]
-
-    labels_nodata = -1
-    labels = np.full(z.shape, labels_nodata, dtype=int)
-    planes: Dict[int, RoofPlane] = {}
-
-    plane_idx = 0
-    while np.count_nonzero(mask) > min_points_per_plane:
-        detsac = DETSACRegressorForLIDAR(residual_threshold=_RESIDUAL_THRESHOLD,
-                                         flat_roof_residual_threshold=_FLAT_ROOF_RESIDUAL_THRESHOLD,
-                                         min_points_per_plane=min_points_per_plane,
-                                         resolution_metres=resolution_metres)
-        detsac.fit(xy, z,
-                   aspect=aspect,
-                   mask=mask,
-                   polygon=polygon,
-                   premade_planes=premade_planes,
-                   skip_planes=skip_planes,
-                   total_points_in_building=total_points_in_building,
-                   debug=debug)
-
-        if detsac.finished:
-            break
-
-        if detsac.success:
-            inlier_mask = detsac.inlier_mask_
-
-            # don't keep bad planes - their inliers become candidates for being
-            # merged into other planes (and the planes will still have been added to
-            # skip_planes, so we don't retry them)
-            if detsac.plane_properties["score"] < ROOFDET_MAX_MAE:
-                planes[plane_idx] = detsac.plane_properties
-                planes[plane_idx]["building_id"] = building_id
-                labels[inlier_mask] = plane_idx
-                plane_idx += 1
-                mask[inlier_mask] = 0
-            else:
-                rejections.record(rejected, {**detsac.plane_properties, "building_id": building_id},
-                                  rejections.HIGH_MAE)
-
-    total_pixels = len(aspect)
-    if total_pixels > RANSAC_LARGE_BUILDING / resolution_metres:
-        max_trials = RANSAC_LARGE_MAX_TRIALS
-    elif total_pixels < RANSAC_SMALL_BUILDING / resolution_metres:
-        max_trials = RANSAC_SMALL_MAX_TRIALS
-    else:
-        max_trials = RANSAC_MEDIUM_MAX_TRIALS
-
-    # We only fall back to RANSAC if a decent fraction of pixels are left to find:
-    pixels_required_for_ransac = max(min_points_per_plane * 5, total_points_in_building // 4)
-
-    while np.count_nonzero(mask) > pixels_required_for_ransac:
-        ransac = RANSACRegressorForLIDAR(residual_threshold=_RESIDUAL_THRESHOLD,
-                                         flat_roof_residual_threshold=_FLAT_ROOF_RESIDUAL_THRESHOLD,
-                                         max_trials=max_trials,
-                                         random_state=random_state,
-                                         max_slope=75,
-                                         min_slope=0,
-                                         min_points_per_plane=min_points_per_plane,
-                                         resolution_metres=resolution_metres,
-                                         sample_radius_m=_RANSAC_SAMPLE_RADIUS_M)
-        ransac.fit(xy, z,
-                   aspect=aspect,
-                   mask=mask,
-                   polygon=polygon,
-                   skip_planes=skip_planes,
-                   total_points_in_building=total_points_in_building,
-                   debug=debug)
-
-        if ransac.finished:
-            break
-
-        if ransac.success:
-            inlier_mask = ransac.inlier_mask_
-
-            # don't keep bad planes - their inliers become candidates for being
-            # merged into other planes (and the planes will still have been added to
-            # skip_planes, so we don't retry them)
-            if ransac.plane_properties["score"] < ROOFDET_MAX_MAE:
-                planes[plane_idx] = ransac.plane_properties
-                planes[plane_idx]["building_id"] = building_id
-                labels[inlier_mask] = plane_idx
-                plane_idx += 1
-                mask[inlier_mask] = 0
-            else:
-                rejections.record(rejected, {**ransac.plane_properties, "building_id": building_id},
-                                  rejections.HIGH_MAE)
-
-    if len(planes) == 0:
-        return []
-
-    if debug:
-        print("Finished detecting roofs")
-
-    above_ground = z > max_ground_height if max_ground_height else np.ones(z.shape, dtype=bool)
-    if method == "mincut":
-        return _assign_and_merge(
-            xyz, aspect, labels, planes, above_ground, resolution_metres, labels_nodata, debug=debug,
-            rejected=rejected)
-    elif method != "legacy":
-        raise ValueError(f"Unknown roof detection method {method}")
-
-    # label all the outlying pixels with individual IDs:
-    outliers = np.count_nonzero(labels[mask == 1])
-    labels[mask == 1] = range(plane_idx + 1, outliers + plane_idx + 1)
-
-    merged_planes, new_labels = merge_adjacent(xy, z, aspect, labels, planes, resolution_metres, labels_nodata, debug=debug)
-
-    if debug:
-        print("Merged planes and outliers")
-
-    return reject_mess(merged_planes, new_labels, xyz, resolution_metres, above_ground=above_ground, debug=debug,
-                       rejected=rejected)
-
-
-def _assign_and_merge(xyz: np.ndarray,
-                      aspect: np.ndarray,
-                      labels: np.ndarray,
-                      planes: Dict[int, RoofPlane],
-                      above_ground: np.ndarray,
-                      resolution_metres: float,
-                      labels_nodata: int,
-                      debug: bool = False,
-                      rejected: Optional[List[dict]] = None) -> List[RoofPlane]:
-    """
-    Assign pixels to planes, merge planes, assign again with the merged planes, then
-    reject clutter and mess. Each time pixels are assigned, planes are refitted to (and
-    their metrics recomputed from) them. The final orientations come from just the pixels
-    near each plane (see `_trim_plane_coefficients`).
-
-    Assigning first means planes separated only by unassigned pixels are adjacent when
-    `merge_adjacent` looks for planes to merge.
-    """
-    xy, z = xyz[:, :2], xyz[:, 2]
-    labels = _assign(xyz, aspect, labels, planes, above_ground, resolution_metres, labels_nodata, rejected)
-    if debug:
-        print(f"Assigned pixels to {len(planes)} planes")
-    # merge_adjacent fails if no pixel has a label
-    if len(planes) == 0:
-        return []
-
-    planes, labels = merge_adjacent(xy, z, aspect, labels, planes, resolution_metres, labels_nodata, debug=debug)
-    if debug:
-        print(f"Merged, now have {len(planes)} planes")
-
-    labels = _assign(xyz, aspect, labels, planes, above_ground, resolution_metres, labels_nodata, rejected)
-    if debug:
-        print(f"Reassigned pixels to {len(planes)} planes")
-    for plane_id, plane in planes.items():
-        _trim_plane_coefficients(plane, xyz[labels == plane_id])
-
-    return reject_mess(planes, labels, xyz, resolution_metres, above_ground=above_ground, debug=debug,
-                       rejected=rejected)
-
-
-def _assign(xyz: np.ndarray,
-            aspect: np.ndarray,
-            labels: np.ndarray,
-            planes: Dict[int, RoofPlane],
-            above_ground: np.ndarray,
-            resolution_metres: float,
-            labels_nodata: int,
-            rejected: Optional[List[dict]] = None) -> np.ndarray:
-    """
-    Reassign `labels` with `assign_pixels`, and refit `planes` to them (in place). Planes
-    left with fewer than 3 pixels are removed, and recorded in `rejected`.
-    """
-    plane_ids = list(planes.keys())
-    idx_labels = np.full(np.count_nonzero(above_ground), NONE)
-    for k, plane_id in enumerate(plane_ids):
-        idx_labels[labels[above_ground] == plane_id] = k
-
-    residual_scales = [_residual_scale(planes[plane_id]['is_flat']) for plane_id in plane_ids]
-    idx_labels = assign_pixels(xyz[above_ground], idx_labels, len(plane_ids), resolution_metres,
-                               residual_scales=residual_scales)
-
-    new_labels = np.full(labels.shape, labels_nodata)
-    candidate_idxs = np.flatnonzero(above_ground)
-    for k, plane_id in enumerate(plane_ids):
-        idxs = candidate_idxs[idx_labels == k]
-        if len(idxs) < 3:
-            rejections.record(rejected, planes.pop(plane_id), rejections.TOO_FEW_PIXELS, pixels=len(idxs))
-            continue
-        new_labels[idxs] = plane_id
-        planes[plane_id]['res'] = resolution_metres
-        set_plane_fit(planes[plane_id], xyz[idxs, :2], xyz[idxs, 2], aspect[idxs], resolution_metres)
-    return new_labels
+    min_pixels = min(8, int(8 / resolution_metres))  # 4 for 2m, 8 for 1m, 8 for 0.5m
+    small_pixels = int(len(z) * 0.008)
+    return _segment_and_assign(xyz, aspect, building['polygon'], above_ground, building_id, resolution_metres,
+                               min_pixels, small_pixels, debug=debug, rejected=rejected)
 
 
 def _segment_and_assign(xyz: np.ndarray,
@@ -470,8 +243,8 @@ def _segment_and_assign(xyz: np.ndarray,
     unprofitable, or left with too few pixels): their pixels are poorly explained, but a
     region grown from them is mostly removed again.
 
-    Candidates are the regions of `segment_planes` that RANSAC would accept as candidate
-    planes (see `_propose`). The regions over-segment: a region only has to be good enough
+    Candidates are the regions of `segment_planes` that pass the gates in `_propose`. The
+    regions over-segment: a region only has to be good enough
     to start from, as refining lets a plane grow into pixels its region missed (by up to
     `assign_pixels`' `max_dist_m` a round), and merging joins regions split by noise.
     """
@@ -483,7 +256,7 @@ def _segment_and_assign(xyz: np.ndarray,
     rms = np.full(len(xyz), np.inf)
     normals[above_ground], rms[above_ground] = local_fits(xyz[above_ground], resolution_metres)
     locally_planar = rms <= _MAX_LOCAL_RMS
-    face_index = _FaceIndex.of(polygon)
+    face_index = FaceIndex.of(polygon)
     planes: Dict[int, Plane] = {}
 
     def propose(candidates: np.ndarray, first_id: int, min_region_pixels: int) -> int:
@@ -535,7 +308,7 @@ def _propose(xyz: np.ndarray,
              labels: np.ndarray,
              planes: Dict[int, Plane],
              local: Tuple[np.ndarray, np.ndarray],
-             face_index: _FaceIndex,
+             face_index: FaceIndex,
              building_id: str,
              resolution_metres: float,
              min_pixels: int,
@@ -543,9 +316,9 @@ def _propose(xyz: np.ndarray,
              first_id: int,
              rejected: Optional[List[dict]] = None) -> int:
     """
-    Add (in place) the regions of `segment_planes` among the `candidates` pixels that
-    RANSAC would accept as candidate planes to `planes`, taking their pixels in `labels`,
-    with ids from `first_id`. Returns the next unused id. `local` is each pixel's local
+    Add (in place) the regions of `segment_planes` among the `candidates` pixels that are
+    plausible as candidate planes to `planes`, taking their pixels in `labels`, with ids
+    from `first_id`. Returns the next unused id. `local` is each pixel's local
     fit (see `local_fits`). A region is judged on its least-squares plane, but its plane
     in `planes` is fitted as refining fits planes (see `_fit`).
 
@@ -638,7 +411,7 @@ def _merge_and_remove(xyz: np.ndarray,
     return bool(merges or removed)
 
 
-def _implausible(plane: RoofPlane, face_index: _FaceIndex, reliable_normals: np.ndarray) -> Optional[str]:
+def _implausible(plane: RoofPlane, face_index: FaceIndex, reliable_normals: np.ndarray) -> Optional[str]:
     """
     Why `plane` isn't plausible as a candidate - not aligned with the building, a poor
     shape, or (if pitched) its locally planar pixels, whose normals are in
@@ -652,11 +425,11 @@ def _implausible(plane: RoofPlane, face_index: _FaceIndex, reliable_normals: np.
 
     The shape checks only apply to regions that fit their plane poorly: a region that
     fits closely is planar whatever its shape, and clean flat roofs are often concave
-    (wrapping round a raised part of the building) or long and thin. Unlike RANSAC's
-    candidates, regions don't need a check of the fit itself (`ROOFDET_MAX_MAE`): they only
-    grow within `segment_planes`' `max_distance` of their plane.
+    (wrapping round a raised part of the building) or long and thin. Regions don't need a
+    check of the fit itself: they only grow within `segment_planes`' `max_distance` of
+    their plane.
 
-    RANSAC checks the spread of its pixels' aspects instead of their normals. Those come
+    Pixels' normals are checked rather than the spread of their raster aspects. Those come
     from the 3x3 window centred on each pixel, which at 1m, on faces only a few pixels
     deep, mostly straddles a ridge, eave or valley; a locally planar pixel's normal comes
     from a window wholly on one face.
@@ -671,7 +444,7 @@ def _implausible(plane: RoofPlane, face_index: _FaceIndex, reliable_normals: np.
     if not good_fit:
         if plane['cv_hull_ratio'] < _MIN_CONVEX_HULL_RATIO:
             return rejections.CONVEX_HULL_RATIO
-        if plane['thinness_ratio'] < _min_thinness_ratio(len(plane['inliers_xy'])):
+        if plane['thinness_ratio'] < min_thinness_ratio(len(plane['inliers_xy'])):
             return rejections.THINNESS_RATIO
     if not plane['is_flat']:
         share = _facing_share(plane, reliable_normals)
@@ -734,7 +507,7 @@ def _reassign(xyz: np.ndarray,
               rejected: Optional[List[dict]] = None) -> Tuple[np.ndarray, float]:
     """
     Reassign `labels` to the planes as they are, each keeping only its largest 4-connected
-    group of pixels (see `assign_pixels`' `connected`), and refit `planes` to them (in place,
+    group of pixels (see `assign_pixels`), and refit `planes` to them (in place,
     see `_fit`). Planes left with fewer than 3 pixels are removed, and recorded in
     `rejected`. Also returns `assign_pixels`' energy for the starting labels.
     """
@@ -743,10 +516,8 @@ def _reassign(xyz: np.ndarray,
     for k, plane_id in enumerate(plane_ids):
         idx_labels[labels[above_ground] == plane_id] = k
 
-    idx_labels, energy = assign_pixels(xyz[above_ground], idx_labels, len(plane_ids), resolution_metres,
-                                       residual_scales=[_residual_scale(planes[i].is_flat) for i in plane_ids],
-                                       return_energy=True, coefs=[planes[i].coef for i in plane_ids],
-                                       connected=True)
+    idx_labels, energy = assign_pixels(xyz[above_ground], idx_labels, [planes[i].coef for i in plane_ids],
+                                       [_residual_scale(planes[i].is_flat) for i in plane_ids], resolution_metres)
 
     new_labels = np.full(labels.shape, labels_nodata)
     candidate_idxs = np.flatnonzero(above_ground)
@@ -790,7 +561,7 @@ def _finalise(xyz: np.ndarray,
               aspect: np.ndarray,
               labels: np.ndarray,
               planes: Dict[int, Plane],
-              face_index: _FaceIndex,
+              face_index: FaceIndex,
               resolution_metres: float,
               reliable_normals: np.ndarray) -> Dict[int, RoofPlane]:
     """
@@ -826,34 +597,16 @@ def _finalise(xyz: np.ndarray,
     return finished
 
 
-def _trim_plane_coefficients(plane: dict, xyz: np.ndarray) -> None:
-    """
-    Refit the plane's coefficients (and slope, aspect and flatness) to just its pixels
-    within its residual scale of it. Pixels up to about twice that from a plane are
-    assigned to it, and at 1m those are mostly mixed ridge, eave or gutter pixels, which
-    tilt a least-squares fit on a plane only a few pixels deep. The fit metrics are left as
-    they are, over all its pixels.
-    """
-    xy, z = xyz[:, :2], xyz[:, 2]
-    for _ in range(_TRIM_ROUNDS):
-        residual = z - (xy[:, 0] * plane['x_coef'] + xy[:, 1] * plane['y_coef'] + plane['intercept'])
-        inliers = np.abs(residual) <= _residual_scale(plane['is_flat'])
-        if np.count_nonzero(inliers) < max(3, _MIN_TRIM_SHARE * len(z)):
-            break
-        _set_plane_coefficients(plane, xy[inliers], z[inliers])
-    plane['inliers_xy'] = xy
-
-
-def _snapped_aspect(plane: RoofPlane, face_index: _FaceIndex) -> Tuple[Optional[float], bool]:
+def _snapped_aspect(plane: RoofPlane, face_index: FaceIndex) -> Tuple[Optional[float], bool]:
     """
     The building face azimuth (or a right angle to one) nearest the plane's aspect, or for
     flat roofs nearest south, if one is close; and whether the plane is aligned with the
     building: a face is close to its aspect or, if it's pitched, to its pixels' mean aspect.
 
-    Faces are looked for within 1m of the plane's pixels, then 3m and 10m, as in
-    `get_potential_aspects` - but a wider search is also tried if no nearer face is close
-    in angle, not only if there are no nearer faces: a plane's pixels may stop short of
-    the eaves, where the nearest faces are those of another part of the building.
+    Faces are looked for within 1m of the plane's pixels, then 3m and 10m. A wider search
+    is tried if no nearer face is close in angle, not only if there are no nearer faces:
+    a plane's pixels may stop short of the eaves, where the nearest faces are those of
+    another part of the building.
 
     The mean aspect is from the aspect raster, which is noisy on shallow faces, and on faces
     a few pixels deep comes mostly from windows straddling a ridge, eave or valley (see
@@ -881,22 +634,10 @@ def _snapped_aspect(plane: RoofPlane, face_index: _FaceIndex) -> Tuple[Optional[
     return None, mean_aligned
 
 
-def _right_angles(face_index: _FaceIndex, faces) -> List[int]:
-    """The azimuths of `faces`, and those at right angles to them (as `get_potential_aspects`)."""
+def _right_angles(face_index: FaceIndex, faces) -> List[int]:
+    """The azimuths of `faces`, and those at right angles to them."""
     base = [face_index.azimuths[i] for i in faces]
     return list({(az + turn) % 360 for az in base for turn in (0, 90, 180, 270)})
-
-
-def _set_plane_coefficients(plane: dict, xy: np.ndarray, z: np.ndarray) -> None:
-    """The part of `set_plane_fit` that `assign_pixels` needs between rounds of refining,
-    without the fit metrics, shape ratios and aspect statistics."""
-    lr = PlaneFit().fit(xy, z)
-    plane['x_coef'], plane['y_coef'] = lr.coef_
-    plane['intercept'] = lr.intercept_
-    plane['slope'] = slope_deg(lr.coef_[0], lr.coef_[1])
-    plane['is_flat'] = plane['slope'] <= FLAT_ROOF_DEGREES_THRESHOLD
-    plane['aspect_raw'] = aspect_deg(lr.coef_[0], lr.coef_[1])
-    plane['inliers_xy'] = xy
 
 
 def _load(pg_uri: str,
@@ -911,10 +652,9 @@ def _load(pg_uri: str,
     with semaphore_connection(pg_uri, cursor_factory=DictCursor) as pg_conn:
         elevation_table = f"{tables.schema(job_id)}.{tables.ELEVATION}"
         aspect_table = f"{tables.schema(job_id)}.{tables.ASPECT}"
-        slope_table = f"{tables.schema(job_id)}.{tables.SLOPE}"
 
         by_building_id = pixels_for_buildings(pg_conn, job_id, 0, len(building_ids),
-                                       [elevation_table, aspect_table, slope_table],
+                                       [elevation_table, aspect_table],
                                        building_ids, force_load=force_load)
         
         # TODO The things in building_ids that aren't in list(by_building_id.keys()) need marking as no coverage.
@@ -1020,7 +760,7 @@ def _set_footprint_aspect_gap(planes: List[RoofPlane], polygon) -> None:
     over the faces within `_FOOTPRINT_SEARCH_M` of its pixels (None if there are none).
     It's None for flat planes, whose aspect means little.
     """
-    face_index = _FaceIndex.of(polygon)
+    face_index = FaceIndex.of(polygon)
     for plane in planes:
         plane['footprint_aspect_gap'] = None
         if plane['is_flat'] or len(plane['inliers_xy']) == 0:
@@ -1057,8 +797,7 @@ def _save_planes(pg_uri: str, job_id: int, planes: List[RoofPolygon]):
             "mape": plane["mape"],
             "skew": plane.get("skew"),
             "footprint_aspect_gap": plane.get("footprint_aspect_gap"),
-            # only segment's planes have one, which confidence then scores instead of aspect_circ_sd:
-            **({"facing_share": plane["facing_share"]} if "facing_share" in plane else {}),
+            "facing_share": plane["facing_share"],
         })
         plane['roof_geom_27700'] = plane['roof_geom_27700'].wkt
         plane['roof_geom_raw_27700'] = shapely.multipolygons(shapely.get_parts(plane['roof_geom_raw_27700'])).wkt
@@ -1179,7 +918,7 @@ def _clear(pg_uri: str, job_id: int):
 
 
 def _write_test_data(job_id: int, building: RoofDetBuilding):
-    """Write data for building in the format that the RANSAC tests expect"""
+    """Write data for building in the format that the roof detection tests expect"""
     debug_data_dir = os.environ.get("DEBUG_DATA_DIR")
     os.makedirs(debug_data_dir, exist_ok=True)
     if debug_data_dir:

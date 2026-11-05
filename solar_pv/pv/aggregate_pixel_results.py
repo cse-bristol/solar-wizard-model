@@ -227,8 +227,7 @@ def _aggregate_pixel_data(roof_planes,
 
         roof_plane['horizon'] = [0 for _ in range(len(horizon_fields))]
 
-        # Central (P50) estimate, computed over the raw geometry RANSAC actually
-        # fit to the LiDAR points
+        # Central (P50) estimate, computed over the raw geometry: the plane's own pixels
         area, panel_area = roof_and_panel_area(
             geom_raw.area, roof_plane['slope'], roof_plane['panel_slope'], roof_plane['is_flat'])
         kwh_years = []

@@ -14,24 +14,19 @@ from typing import Dict, List, Optional, cast, Tuple
 import math
 import numpy as np
 import shapely
-from shapely import affinity, ops, set_precision
 from shapely.geometry import Polygon, CAP_STYLE, JOIN_STYLE, MultiPolygon, LineString, Point
-from shapely.validation import make_valid
 
-from solar_pv.geos import square, largest_polygon, get_grid_cells, \
-    de_zigzag, slope_deg, aspect_deg
-from solar_pv.constants import ROOFDET_GOOD_SCORE
+from solar_pv.geos import largest_polygon
 from solar_pv.datatypes import RoofPlane, RoofPolygon
 from solar_pv.roof_detection import rejections
 from solar_pv.roof_polygons.occupancy import tile_polygon
-from solar_pv.roof_polygons.split_evenly import split_evenly
 
 # Noding nearly coincident lines (a meeting line along the edge two polygons share) in
 # floating point can leave a gap in a ring, so that polygonizing merges the faces either
 # side of it.
 _NODING_GRID_M = 1e-6
 
-# Mincut polygons: module constants, so that `fast_roof_detection --set` can tune them.
+# Module constants, so that `fast_roof_detection --set` can tune them.
 # Tile edges of boundary are charged this much each, in tiles of area (see `tile_polygon`).
 PERIMETER_LAMBDA = 0.6
 # What it takes for the line between two planes to count as following the edge they share
@@ -81,14 +76,11 @@ def create_roof_polygons(building_id: str,
                          flat_roof_degrees: int,
                          min_dist_to_edge_m: float,
                          resolution_metres: float,
-                         method: str = "legacy",
-                         rejected: Optional[List[dict]] = None,
-                         pixels_xyz: Optional[np.ndarray] = None) -> List[RoofPolygon]:
+                         rejected: Optional[List[dict]] = None) -> List[RoofPolygon]:
     """
-    Add roof polygons and other related fields to the dicts in `planes`. Planes that end
-    up with no polygon are recorded in `rejected` (see `rejections`). `pixels_xyz` is the
-    building's pixels, which the legacy method keeps its polygons off where they don't fit
-    the plane (see `_carve_off_plane`).
+    Add roof polygons and other related fields to the dicts in `planes`, and return those
+    that got one. Planes that end up with no polygon are recorded in `rejected` (see
+    `rejections`).
     """
     t0 = time.time()
     polygons = _create_roof_polygons(
@@ -100,9 +92,7 @@ def create_roof_polygons(building_id: str,
         flat_roof_degrees=flat_roof_degrees,
         min_dist_to_edge_m=min_dist_to_edge_m,
         resolution_metres=resolution_metres,
-        method=method,
-        rejected=rejected,
-        pixels_xyz=pixels_xyz)
+        rejected=rejected)
     t1 = time.time()
     if t1 - t0 > 1200:
         print(f"very slow polygon creation: {building_id} took {round(t1 - t0, 2)} s")
@@ -118,34 +108,20 @@ def _create_roof_polygons(building_geom: Polygon,
                           flat_roof_degrees: int,
                           min_dist_to_edge_m: float,
                           resolution_metres: float,
-                          method: str = "legacy",
-                          debug: bool = False,
-                          rejected: Optional[List[dict]] = None,
-                          pixels_xyz: Optional[np.ndarray] = None) -> List[RoofPolygon]:
+                          rejected: Optional[List[dict]] = None) -> List[RoofPolygon]:
 
     if len(planes) == 0:
         return []
 
-    extra = {}
-    if method == "mincut":
-        make_polygons = _create_roof_polygons_mincut
-    elif method == "legacy":
-        make_polygons = _create_roof_polygons_legacy
-        extra = {"pixels_xyz": pixels_xyz}
-    else:
-        raise ValueError(f"Unknown roof polygon method {method}")
-
     try:
-        polygons = make_polygons(building_geom,
-                                 planes,
-                                 max_roof_slope_degrees=max_roof_slope_degrees,
-                                 min_roof_area_m=min_roof_area_m,
-                                 min_roof_degrees_from_north=min_roof_degrees_from_north,
-                                 flat_roof_degrees=flat_roof_degrees,
-                                 min_dist_to_edge_m=min_dist_to_edge_m,
-                                 resolution_metres=resolution_metres,
-                                 debug=debug,
-                                 **extra)
+        polygons = _make_roof_polygons(building_geom,
+                                       planes,
+                                       max_roof_slope_degrees=max_roof_slope_degrees,
+                                       min_roof_area_m=min_roof_area_m,
+                                       min_roof_degrees_from_north=min_roof_degrees_from_north,
+                                       flat_roof_degrees=flat_roof_degrees,
+                                       min_dist_to_edge_m=min_dist_to_edge_m,
+                                       resolution_metres=resolution_metres)
     except Exception as e:
         building_id = planes[0]['building_id']
         print(f"Exception during roof polygon creation for building_id {building_id}:")
@@ -153,76 +129,21 @@ def _create_roof_polygons(building_geom: Polygon,
         _write_test_data(_to_test_data(planes[0]['building_id'], planes, building_geom))
         raise e
 
-    # Legacy polygon creation merges planes, so a plane missing from its output may
-    # have been merged rather than lost:
-    if method == "mincut":
-        kept = {id(p) for p in polygons}
-        for plane in planes:
-            if id(plane) not in kept:
-                rejections.record(rejected, plane, rejections.NO_POLYGON)
+    kept = {id(p) for p in polygons}
+    for plane in planes:
+        if id(plane) not in kept:
+            rejections.record(rejected, plane, rejections.NO_POLYGON)
     return polygons
 
 
-def _create_roof_polygons_legacy(building_geom: Polygon,
-                                 planes: List[RoofPlane],
-                                 max_roof_slope_degrees: int,
-                                 min_roof_area_m: int,
-                                 min_roof_degrees_from_north: int,
-                                 flat_roof_degrees: int,
-                                 min_dist_to_edge_m: float,
-                                 resolution_metres: float,
-                                 debug: bool = False,
-                                 pixels_xyz: Optional[np.ndarray] = None) -> List[RoofPolygon]:
-    plane_polys: List[RoofPolygon] = []
-    for plane in planes:
-        plane = cast(RoofPolygon, plane)
-        plane['panel_slope'] = flat_roof_degrees if plane['is_flat'] else plane['slope']
-
-        raw_roof_poly, roof_poly = _make_polygon(plane, building_geom, min_dist_to_edge_m, resolution_metres,
-                                                 pixels_xyz=pixels_xyz)
-
-        if roof_poly and not roof_poly.is_empty and raw_roof_poly and not raw_roof_poly.is_empty:
-            plane['roof_geom_27700'] = roof_poly
-            plane['roof_geom_raw_27700'] = raw_roof_poly
-            plane_polys.append(plane)
-
-    if debug:
-        print(f"Made {len(plane_polys)} initial roof polygons")
-
-    plane_polys = _merge_touching(plane_polys, building_geom, min_dist_to_edge_m, resolution_metres,
-                                  pixels_xyz=pixels_xyz)
-
-    if debug:
-        print(f"Merged touching, now have {len(plane_polys)} roof polygons")
-
-    for p in plane_polys:
-        p['roof_geom_27700'] = largest_polygon(set_precision(p['roof_geom_27700'], 0.01))
-
-    _remove_overlaps(plane_polys, debug=debug)
-
-    if debug:
-        print(f"Removed overlaps")
-
-    for plane in plane_polys:
-        roof_poly = plane['roof_geom_27700']
-        plane['roof_geom_raw_27700'] = largest_polygon(plane['roof_geom_raw_27700'].intersection(roof_poly))
-
-        # Arbitrarily use the area of roof_geom_27700 rather than roof_geom_raw_27700...
-        _set_usability(plane, plane['roof_geom_27700'],
-                       max_roof_slope_degrees, min_roof_area_m, min_roof_degrees_from_north)
-
-    return [p for p in plane_polys if _is_valid(p)]
-
-
-def _create_roof_polygons_mincut(building_geom: Polygon,
-                                 planes: List[RoofPlane],
-                                 max_roof_slope_degrees: int,
-                                 min_roof_area_m: int,
-                                 min_roof_degrees_from_north: int,
-                                 flat_roof_degrees: int,
-                                 min_dist_to_edge_m: float,
-                                 resolution_metres: float,
-                                 debug: bool = False) -> List[RoofPolygon]:
+def _make_roof_polygons(building_geom: Polygon,
+                        planes: List[RoofPlane],
+                        max_roof_slope_degrees: int,
+                        min_roof_area_m: int,
+                        min_roof_degrees_from_north: int,
+                        flat_roof_degrees: int,
+                        min_dist_to_edge_m: float,
+                        resolution_metres: float) -> List[RoofPolygon]:
     """
     Each plane's inlier pixels are tile-quantized by min-cut on a grid aligned to its own
     aspect, within a legal area: the shrunk building minus areas claimed by
@@ -250,8 +171,8 @@ def _create_roof_polygons_mincut(building_geom: Polygon,
         plane['panel_slope'] = flat_roof_degrees if plane['is_flat'] else plane['slope']
         plane_polys.append(plane)
 
-    # Planes aren't merged here: that's for roof detection (`merge_adjacent`), which
-    # judges it by the fit of the merged plane.
+    # Planes aren't merged here: that's for roof detection, which judges it by the fit of
+    # the merged plane.
     regions = [_pixel_region(p['inliers_xy'], resolution_metres) for p in plane_polys]
     owned_xy = [p['inliers_xy'] for p in plane_polys]
 
@@ -1298,216 +1219,6 @@ def _is_valid(plane: RoofPolygon) -> bool:
            and not plane['roof_geom_27700'].is_empty \
            and plane['roof_geom_raw_27700'] \
            and not plane['roof_geom_raw_27700'].is_empty
-
-
-def _make_polygon(plane: RoofPlane,
-                  building_geom: Polygon,
-                  min_dist_to_edge_m: float,
-                  resolution_metres: float,
-                  max_area_diff: float = 5,
-                  max_area_diff_pct: float = 0.35,
-                  pixels_xyz: Optional[np.ndarray] = None) -> Tuple[Optional[Polygon], Optional[Polygon]]:
-    # Make the initial roof polygon (basically by just drawing round
-    # all the pixels and then de-zigzagging)
-    halfr = resolution_metres / 2
-    r = resolution_metres
-    pixels = [square(xy[0] - halfr, xy[1] - halfr, r) for xy in plane['inliers_xy']]
-    geom = ops.unary_union(pixels)
-    geom = de_zigzag(geom)
-    raw_roof_poly = largest_polygon(geom)
-    raw_roof_poly = _constrain_to_building(building_geom, raw_roof_poly, min_dist_to_edge_m)
-
-    if not raw_roof_poly or raw_roof_poly.is_empty:
-        return None, None
-
-    # If a bbox rotated to match the aspect is close enough area-wise to the initial
-    # polygon, just use that:
-    rotated: Polygon = affinity.rotate(raw_roof_poly, plane['aspect'], origin=raw_roof_poly.centroid)
-    bbox = rotated.envelope
-    area_diff = bbox.area - rotated.area
-    if area_diff < max_area_diff and area_diff / rotated.area < max_area_diff_pct:
-        roof_poly = affinity.rotate(bbox, -plane['aspect'], origin=raw_roof_poly.centroid)
-    else:
-        # Otherwise grid it based on a grid oriented to the aspect and then de-zigzag
-        roof_poly = _grid_polygon(raw_roof_poly, plane['aspect'], grid_size=1.0)
-        roof_poly = de_zigzag(roof_poly)
-
-    roof_poly = _constrain_to_building(building_geom, roof_poly, min_dist_to_edge_m)
-    if pixels_xyz is not None and roof_poly is not None:
-        roof_poly = _carve_off_plane(plane, roof_poly, pixels_xyz, resolution_metres)
-
-    return largest_polygon(raw_roof_poly), largest_polygon(roof_poly)
-
-
-# As roof detection's inlier thresholds:
-_CARVE_THRESHOLD = 0.25
-_FLAT_CARVE_THRESHOLD = 0.1
-_MERGE_MAX_MAE = ROOFDET_GOOD_SCORE
-
-
-def _carve_off_plane(plane: RoofPolygon, poly, pixels_xyz: np.ndarray, resolution_metres: float) -> Optional[Polygon]:
-    """
-    `poly` without the pixels inside it that are neither the plane's own nor
-    within its residual threshold of it. Growing and squaring up a polygon otherwise lets
-    it spill onto neighbouring surfaces: other roof faces, walls, the ground, plant.
-    """
-    x, y, z = pixels_xyz[:, 0], pixels_xyz[:, 1], pixels_xyz[:, 2]
-    inside = shapely.contains_xy(poly, x, y)
-    if not inside.any():
-        return poly
-    residual = np.abs(z - (plane['x_coef'] * x + plane['y_coef'] * y + plane['intercept']))
-    threshold = _FLAT_CARVE_THRESHOLD if plane['is_flat'] else _CARVE_THRESHOLD
-    off = inside & (residual > threshold)
-    if not off.any():
-        return poly
-    own = shapely.contains_xy(_pixel_region(plane['inliers_xy'], resolution_metres).buffer(-resolution_metres / 4), x, y)
-    off &= ~own
-    if not off.any():
-        return poly
-    carved = poly.difference(_pixel_region(pixels_xyz[off, :2], resolution_metres))
-    return largest_polygon(set_precision(carved, 0.01)) if not carved.is_empty else None
-
-
-def _grid_polygon(roof_poly: Polygon, aspect: float, grid_size: float):
-    # TODO maybe this should require that the grid cell intersection with roof_poly
-    #      is over a certain amount?
-    centroid = roof_poly.centroid
-
-    # Rotate the roof area CCW by aspect, to be gridded easily:
-    plane_points = affinity.rotate(roof_poly, aspect, origin=centroid)
-
-    # grid_size = math.sqrt(resolution_metres ** 2 * 2.0)
-    grid = get_grid_cells(plane_points, grid_size, grid_size, 0, 0, grid_start='bounds')
-    grid = affinity.rotate(MultiPolygon(grid), -aspect, origin=centroid).geoms
-    roof_poly = ops.unary_union(grid)
-    roof_poly = make_valid(roof_poly)
-    return roof_poly
-
-
-def _constrain_to_building(building_geom: Polygon,
-                           roof_poly: Polygon,
-                           min_dist_to_edge_m: float) -> Optional[Polygon]:
-    if not roof_poly or roof_poly.is_empty:
-        return None
-
-    neg_buffer = -min_dist_to_edge_m
-    building_geom_shrunk = building_geom.buffer(
-        neg_buffer, cap_style=CAP_STYLE.square, join_style=JOIN_STYLE.mitre)
-    roof_poly = roof_poly.intersection(building_geom_shrunk)
-    roof_poly = largest_polygon(roof_poly)
-    return roof_poly
-
-
-# def remove_tendrils(roof_poly: Polygon, buf: float = 0.6) -> Optional[Polygon]:
-#     splitter = roof_poly.buffer(-buf, cap_style=CAP_STYLE.square, join_style=JOIN_STYLE.mitre, resolution=1)
-#     splitter = splitter.buffer(buf, cap_style=CAP_STYLE.square, join_style=JOIN_STYLE.mitre, resolution=1)
-#     splitter = largest_polygon(splitter).exterior
-#     roof_poly = largest_polygon(split_with(roof_poly, splitter))
-#     return roof_poly
-
-
-def _merge_touching(planes: List[RoofPolygon],
-                    building_geom: Polygon,
-                    min_dist_to_edge_m: float,
-                    resolution_metres: float,
-                    max_slope_diff: int = 4,
-                    pixels_xyz: Optional[np.ndarray] = None) -> List[RoofPolygon]:
-    """
-    Merge any planes that
-    a) have the same aspect
-    b) have a slope that differs less than `max_slope_diff`
-    c) intersect each other
-    d) are not flat
-    e) if `pixels_xyz` is given, are one surface: a plane fitted to both their pixels
-       fits them to within `_MERGE_MAX_MAE` (else e.g. parallel roofs either side of a
-       step would merge). The merged plane is then refitted to them.
-    """
-    z_at = _z_lookup(pixels_xyz) if pixels_xyz is not None else None
-    merged = []
-    _by_aspect = defaultdict(list)
-    for plane in planes:
-        aspect = plane['aspect']
-        _by_aspect[aspect].append(plane)
-
-    for plane_group in _by_aspect.values():
-        if len(plane_group) == 1:
-            merged.append(plane_group[0])
-            continue
-
-        checked = set()
-        for plane in plane_group:
-            if id(plane) in checked:
-                continue
-            checked.add(id(plane))
-            if plane['is_flat']:
-                if _is_valid(plane):
-                    merged.append(plane)
-                continue
-
-            slope = plane['slope']
-            poly = plane['roof_geom_27700']
-            mergeable = []
-            for p in plane_group:
-                if id(p) not in checked \
-                        and p['is_flat'] is False \
-                        and abs(p['slope'] - slope) <= max_slope_diff \
-                        and p['roof_geom_27700'].intersects(poly) \
-                        and (z_at is None or _coplanar(plane, p, z_at)):
-                    mergeable.append(p)
-
-            if len(mergeable) > 0:
-                for to_merge in mergeable:
-                    checked.add(id(to_merge))
-
-                plane['inliers_xy'] = np.concatenate([p['inliers_xy'] for p in mergeable] + [plane['inliers_xy']])
-                if z_at is not None:
-                    _refit(plane, z_at)
-                raw_roof_poly, roof_poly = _make_polygon(plane, building_geom, min_dist_to_edge_m, resolution_metres,
-                                                         pixels_xyz=pixels_xyz)
-                plane['roof_geom_27700'] = roof_poly
-                plane['roof_geom_raw_27700'] = raw_roof_poly
-
-            if _is_valid(plane):
-                merged.append(plane)
-
-    return merged
-
-
-def _z_lookup(pixels_xyz: np.ndarray):
-    z_by_xy = {(x, y): z for x, y, z in pixels_xyz}
-    return lambda xy: np.array([z_by_xy[(x, y)] for x, y in xy])
-
-
-def _lstsq_plane(xy: np.ndarray, z: np.ndarray) -> Tuple[np.ndarray, float]:
-    centre = xy.mean(axis=0)
-    a = np.column_stack([xy - centre, np.ones(len(xy))])
-    coef, *_ = np.linalg.lstsq(a, z, rcond=None)
-    mae = float(np.abs(z - a @ coef).mean())
-    return np.array([coef[0], coef[1], coef[2] - coef[0] * centre[0] - coef[1] * centre[1]]), mae
-
-
-def _coplanar(p1: RoofPolygon, p2: RoofPolygon, z_at) -> bool:
-    xy = np.concatenate([p1['inliers_xy'], p2['inliers_xy']])
-    _, mae = _lstsq_plane(xy, z_at(xy))
-    return mae <= _MERGE_MAX_MAE
-
-
-def _refit(plane: RoofPolygon, z_at) -> None:
-    (a, b, c), mae = _lstsq_plane(plane['inliers_xy'], z_at(plane['inliers_xy']))
-    plane['x_coef'], plane['y_coef'], plane['intercept'] = a, b, c
-    plane['slope'] = slope_deg(a, b)
-    plane['aspect_raw'] = aspect_deg(a, b)
-    plane['panel_slope'] = plane['slope']
-
-
-def _remove_overlaps(roof_polygons: List[RoofPolygon], debug: bool = False) -> None:
-    # TODO maybe have an rtree here?
-    for i, rp1 in enumerate(roof_polygons):
-        for j, rp2 in enumerate(roof_polygons):
-            if i > j:
-                p1, p2 = split_evenly(rp1['roof_geom_27700'], rp2['roof_geom_27700'], debug=debug)
-                rp1['roof_geom_27700'] = p1
-                rp2['roof_geom_27700'] = p2
 
 
 def _to_test_data(building_id: str, planes: List[dict], building_geom: Polygon) -> dict:

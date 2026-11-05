@@ -65,8 +65,8 @@ dumps each building's detection input once, then runs detection and polygons in-
 ```shell
 python -m solar_pv.evaluation.fast_roof_detection dump --buildings sample.gpkg --lidar ~/git/uk-buildings/data/dsm/ \
     --out sample.pkl
-python -m solar_pv.evaluation.fast_roof_detection score sample.pkl --method mincut --out base.pkl
-python -m solar_pv.evaluation.fast_roof_detection score sample.pkl --method mincut --out notrim.pkl \
+python -m solar_pv.evaluation.fast_roof_detection score sample.pkl --out base.pkl
+python -m solar_pv.evaluation.fast_roof_detection score sample.pkl --out notrim.pkl \
     --set solar_pv.roof_detection.detect_roofs._TRIM_ROUNDS=0
 python -m solar_pv.evaluation.fast_roof_detection compare base=base.pkl notrim=notrim.pkl --buildings 15507,13754
 ```
@@ -275,4 +275,6 @@ Tried and reverted (October 2026, dev sample):
 * Once these have been reviewed, consider adding skew to `confidence`.
 * Make mess rejection judge parts of planes, not whole ones (see `mess-rejection-by-part.md`), then
   revisit the off-footprint limits.
-* Retire legacy detection and polygons.
+
+Legacy and mincut detection, and legacy polygons, have since been removed, leaving segment
+detection with mincut polygons. The evaluation tools now compare runs rather than methods.

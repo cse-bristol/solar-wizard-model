@@ -6,7 +6,7 @@ import numpy as np
 from shapely import box
 
 from solar_pv.evaluation.roof_detection import _agreement, _label, _coef_from_slope_aspect, _pixel_weighted_quantile, \
-    _oversplit_pairs
+    oversplit_pairs
 from solar_pv.roof_detection.assign_pixels import grid_index, _neighbour_pairs
 from solar_pv.geos import slope_deg, aspect_deg
 
@@ -42,9 +42,9 @@ class RoofDetectionEvalTest(unittest.TestCase):
         planes = [{"is_flat": False}, {"is_flat": False}]
 
         one_face = np.column_stack([x, y, 0.5 * y])
-        self.assertEqual(_oversplit_pairs(one_face, halves, planes, lo, hi), 1)
+        self.assertEqual(len(oversplit_pairs(one_face, halves, planes, lo, hi)), 1)
         ridge = np.column_stack([x, y, 5 - 0.6 * np.abs(x - 5)])
-        self.assertEqual(_oversplit_pairs(ridge, halves, planes, lo, hi), 0)
+        self.assertEqual(oversplit_pairs(ridge, halves, planes, lo, hi), [])
 
     def test_coef_from_slope_aspect_inverts_slope_and_aspect(self):
         for a, b in [(0.6, 0.0), (-0.2, 0.5), (0.1, -0.4)]:

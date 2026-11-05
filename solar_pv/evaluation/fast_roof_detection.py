@@ -9,16 +9,16 @@ No database, PV or CLI run is needed once the sample is dumped.
     python -m solar_pv.evaluation.fast_roof_detection dump --buildings sample.gpkg --lidar tiles/ \\
         --out sample.pkl
 
-    # score a method over it (the polygon method is legacy for legacy, otherwise mincut)
-    python -m solar_pv.evaluation.fast_roof_detection score sample.pkl --method mincut --out base.pkl
-    python -m solar_pv.evaluation.fast_roof_detection score sample.pkl --method mincut --out notrim.pkl \\
+    # score detection and polygons over it, as they are and with a change
+    python -m solar_pv.evaluation.fast_roof_detection score sample.pkl --out base.pkl
+    python -m solar_pv.evaluation.fast_roof_detection score sample.pkl --out notrim.pkl \\
         --set solar_pv.roof_detection.detect_roofs._TRIM_ROUNDS=0
 
     # compare scored runs of the same sample (and, with --buildings, per building)
     python -m solar_pv.evaluation.fast_roof_detection compare base=base.pkl notrim=notrim.pkl
 
 `--set module.NAME=value` overrides a module-level constant in each worker, for trying a
-change without editing the code. Each building's RANSAC is seeded as the model seeds it.
+change without editing the code.
 
 It differs from the full evaluation in that: there's no kWh or kWp (usable area is
 computed as PV computes it); the pixels are the ones the model loads, not re-read from the
@@ -33,7 +33,6 @@ import os
 import pickle
 import tempfile
 import time
-import zlib
 from concurrent.futures import ProcessPoolExecutor
 from typing import List, Tuple
 from unittest import mock
@@ -115,27 +114,24 @@ def apply_settings(settings: List[Tuple[str, object]]) -> None:
         setattr(importlib.import_module(module), name, value)
 
 
-def detect(building_id: str, method: str) -> Tuple[List[dict], List[dict], np.ndarray]:
+def detect(building_id: str) -> Tuple[List[dict], List[dict], np.ndarray]:
     """A sample building's roof planes, rejected planes and pixels, as the model finds them."""
     building = _DATA["buildings"][building_id]
     rejected = []
-    random_state = np.random.RandomState(zlib.crc32(str(building_id).encode()))
-    found = detect_roofs._detect_building_roof_planes(building, building_id, _DATA["resolution"], method=method,
-                                                      random_state=random_state, rejected=rejected)
+    found = detect_roofs._detect_building_roof_planes(building, building_id, _DATA["resolution"], rejected=rejected)
     return found, rejected, detect_roofs._pixels_xyz(building["pixels"])
 
 
-def _score_building(job) -> dict:
-    building_id, method, polygon_method = job
+def _score_building(building_id: str) -> dict:
     building = _DATA["buildings"][building_id]
     res = _DATA["resolution"]
     footprint = building["polygon"]
     out = {"building_id": building_id, "footprint_m2": footprint.area, "methods": {}, "skew": []}
 
     start = time.process_time()
-    found, rejected, pixels_xyz = detect(building_id, method)
-    polygons = create_roof_polygons(building_id, footprint, found, resolution_metres=res, method=polygon_method,
-                                    rejected=rejected, pixels_xyz=pixels_xyz, **_POLYGON_PARAMS) if found else []
+    found, rejected, pixels_xyz = detect(building_id)
+    polygons = create_roof_polygons(building_id, footprint, found, resolution_metres=res, rejected=rejected,
+                                    **_POLYGON_PARAMS) if found else []
     out["seconds"] = time.process_time() - start
 
     xyz = pixels_xyz[shapely.contains_xy(footprint, pixels_xyz[:, 0], pixels_xyz[:, 1])]
@@ -162,13 +158,12 @@ def _score_building(job) -> dict:
     return out
 
 
-def score(sample_path: str, method: str, polygon_method: str, settings: List[Tuple[str, object]],
-          workers: int) -> List[dict]:
+def score(sample_path: str, settings: List[Tuple[str, object]], workers: int) -> List[dict]:
     _init_worker(sample_path, [])
     # biggest first, so a large building doesn't hold up the end of the run
     ids = sorted(_DATA["buildings"], key=lambda b: -len(_DATA["buildings"][b]["pixels"]))
     with ProcessPoolExecutor(workers, initializer=_init_worker, initargs=(sample_path, settings)) as ex:
-        return list(ex.map(_score_building, [(b, method, polygon_method) for b in ids], chunksize=4))
+        return list(ex.map(_score_building, ids, chunksize=4))
 
 
 # --- compare ---
@@ -247,11 +242,8 @@ def main():
     p.add_argument("--height-field")
     p.add_argument("--pg-uri", help="use this database rather than a throwaway one")
 
-    p = sub.add_parser("score", help="score a detection method over a dumped sample")
+    p = sub.add_parser("score", help="score detection and polygons over a dumped sample")
     p.add_argument("sample")
-    p.add_argument("--method", required=True, choices=["legacy", "mincut", "segment"])
-    p.add_argument("--polygons", choices=["legacy", "mincut"],
-                   help="polygon method (default: legacy for legacy detection, otherwise mincut)")
     p.add_argument("--set", dest="settings", action="append", default=[], type=_setting,
                    metavar="module.NAME=value")
     p.add_argument("--out", help="save the per-building scores here, for compare")
@@ -267,12 +259,11 @@ def main():
     if args.command == "dump":
         dump(args.buildings, args.lidar, args.out, args.id_field, args.height_field, args.pg_uri)
     elif args.command == "score":
-        polygon_method = args.polygons or ("legacy" if args.method == "legacy" else "mincut")
-        rs = score(args.sample, args.method, polygon_method, args.settings, args.workers)
+        rs = score(args.sample, args.settings, args.workers)
         if args.out:
             with open(args.out, "wb") as f:
                 pickle.dump(rs, f)
-        print(compare([(args.method, rs)]))
+        print(compare([("run", rs)]))
     else:
         runs = [(name, _load_run(path)) for name, path in (s.split("=", 1) for s in args.runs)]
         print(compare(runs, args.buildings.split(",") if args.buildings else None))

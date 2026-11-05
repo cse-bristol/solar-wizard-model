@@ -29,42 +29,34 @@ _FOUR_CONNECTED = ndimage.generate_binary_structure(2, 1)
 
 def assign_pixels(xyz: np.ndarray,
                   labels: np.ndarray,
-                  n_planes: int,
+                  coefs: Sequence[Tuple[float, float, float]],
+                  residual_scales: Sequence[float],
                   resolution_metres: float,
-                  residual_scales: Optional[Sequence[float]] = None,
                   residual_cap: float = RESIDUAL_CAP,
                   none_cost: float = NONE_COST,
                   smoothness_per_m: float = SMOOTHNESS_PER_M,
                   max_dist_m: float = 3,
-                  max_cycles: int = 5,
-                  return_energy: bool = False,
-                  coefs: Optional[Sequence[Tuple[float, float, float]]] = None,
-                  connected: bool = False):
+                  max_cycles: int = 5) -> Tuple[np.ndarray, float]:
     """
-    Reassign `labels` (per pixel of `xyz`: a plane index in [0, n_planes), or NONE).
-    `residual_scales` is per plane, 0.25m if not given.
+    Reassign `labels` (per pixel of `xyz`: a plane index in [0, len(coefs)), or NONE), and
+    return them with the energy of the starting labels. Plane k is z = a x + b y + c for
+    (a, b, c) = coefs[k], with residual scale `residual_scales[k]`.
 
-    Each plane is fitted by least squares to the pixels it starts with, and may only claim
-    pixels within `max_dist_m` of them, so a coplanar patch elsewhere on the building
-    can't be taken over. Planes that start with fewer than 3 pixels are not assigned any.
+    Each plane may only claim pixels within `max_dist_m` of those it starts with, so a
+    coplanar patch elsewhere on the building can't be taken over. Planes that start with
+    fewer than 3 pixels are not assigned any.
 
     A pixel's data cost stands for its area and a boundary's smoothness cost for its
     length, so per pixel edge the smoothness is `smoothness_per_m` scaled by 1/resolution:
     otherwise boundaries would cost relatively more at coarser resolutions, and small
     planes would lose out.
 
-    If `coefs` is given, plane k is z = a x + b y + c for (a, b, c) = coefs[k], rather than
-    a least-squares fit to its starting pixels.
-
-    If `connected`, each plane keeps only its largest 4-connected group of pixels, the
-    others being unassigned, and a move is only made if it lowers the energy after that:
-    so a plane is only cut in two (losing the smaller part) if that's worth its cost. A move
-    that would cut a plane is retried without taking any of that plane's pixels.
-
-    If `return_energy`, also returns the energy of the starting labels.
+    Each plane keeps only its largest 4-connected group of pixels, the others being
+    unassigned, and a move is only made if it lowers the energy after that: so a plane is
+    only cut in two (losing the smaller part) if that's worth its cost. A move that would
+    cut a plane is retried without taking any of that plane's pixels.
     """
-    if residual_scales is None:
-        residual_scales = [0.25] * n_planes
+    n_planes = len(coefs)
     smoothness = smoothness_per_m / resolution_metres
     max_dist_pixels = max_dist_m / resolution_metres
     xy = xyz[:, :2]
@@ -82,22 +74,18 @@ def assign_pixels(xyz: np.ndarray,
         if len(idxs) < 3:
             current[idxs] = 0
             continue
-        if coefs is None:
-            predicted = _fit_plane(xy[idxs], z[idxs])(xy)
-        else:
-            a, b, c = coefs[k - 1]
-            predicted = xy[:, 0] * a + xy[:, 1] * b + c
+        a, b, c = coefs[k - 1]
+        predicted = xy[:, 0] * a + xy[:, 1] * b + c
         data[k] = np.minimum(np.abs(z - predicted) / residual_scales[k - 1], residual_cap)
 
         allowed[k] = _within(rows, cols, rows[idxs], cols[idxs], max_dist_pixels)
 
     lo, hi = _neighbour_pairs(grid)
     start_energy = _energy(current, data, lo, hi, smoothness)
-    if connected:
-        current, _ = _largest_components(current, np.unique(current), grid, rows, cols)
+    current, _ = _largest_components(current, np.unique(current), grid, rows, cols)
     # Per label, the edges with an end it may claim - the only ones its expansions involve -
     # and the pixels at their ends, whose labels are all an expansion depends on, but for
-    # (if `connected`) the shapes of the planes there. So a rejected expansion would be
+    # the shapes of the planes there. So a rejected expansion would be
     # rejected again until one of those changes, and isn't tried till then. Changes are
     # stamped with the number of moves made so far.
     near, reach, planes_near = [None] * (n_planes + 1), [None] * (n_planes + 1), [None] * (n_planes + 1)
@@ -115,16 +103,15 @@ def assign_pixels(xyz: np.ndarray,
                 reach[alpha] = np.flatnonzero(ends)
             elif rejected_at[alpha] >= 0 and len(reach[alpha]) and \
                     pixel_changed_at[reach[alpha]].max() <= rejected_at[alpha] and \
-                    (not connected or plane_changed_at[planes_near[alpha]].max(initial=0) <= rejected_at[alpha]):
+                    plane_changed_at[planes_near[alpha]].max(initial=0) <= rejected_at[alpha]:
                 continue
             edges = near[alpha]
             candidate = _expand(alpha, current, data, allowed[alpha], lo, hi, smoothness, edges)
-            if connected:
-                candidate, cut = _connected_move(alpha, current, candidate, grid, rows, cols)
-                if cut.size and _energy_change(current, candidate, data, lo, hi, smoothness) >= -1e-9:
-                    retry = _expand(alpha, current, data, allowed[alpha] & ~np.isin(current, cut), lo, hi,
-                                    smoothness, edges)
-                    candidate, _ = _connected_move(alpha, current, retry, grid, rows, cols)
+            candidate, cut = _connected_move(alpha, current, candidate, grid, rows, cols)
+            if cut.size and _energy_change(current, candidate, data, lo, hi, smoothness) >= -1e-9:
+                retry = _expand(alpha, current, data, allowed[alpha] & ~np.isin(current, cut), lo, hi,
+                                smoothness, edges)
+                candidate, _ = _connected_move(alpha, current, retry, grid, rows, cols)
             if _energy_change(current, candidate, data, lo, hi, smoothness) < -1e-9:
                 moves += 1
                 changed = np.flatnonzero(candidate != current)
@@ -133,15 +120,12 @@ def assign_pixels(xyz: np.ndarray,
                 current, improved = candidate, True
             else:
                 rejected_at[alpha] = moves
-                if connected:
-                    # none is never cut, so its shape doesn't matter:
-                    planes_near[alpha] = np.flatnonzero(np.bincount(current[reach[alpha]], minlength=n_planes + 1)[1:]) + 1
+                # none is never cut, so its shape doesn't matter:
+                planes_near[alpha] = np.flatnonzero(np.bincount(current[reach[alpha]], minlength=n_planes + 1)[1:]) + 1
         if not improved:
             break
 
-    if return_energy:
-        return current - 1, start_energy
-    return current - 1
+    return current - 1, start_energy
 
 
 def _connected_move(alpha: int, current: np.ndarray, candidate: np.ndarray, grid: np.ndarray, rows: np.ndarray,
@@ -191,13 +175,6 @@ def grid_index(xy: np.ndarray, resolution_metres: float):
     grid = np.full((rows.max() + 1, cols.max() + 1), -1, dtype=int)
     grid[rows, cols] = np.arange(len(xy))
     return grid, rows, cols
-
-
-def _fit_plane(xy: np.ndarray, z: np.ndarray):
-    centre = xy.mean(axis=0)
-    design = np.column_stack([xy - centre, np.ones(len(xy))])
-    (a, b, c), *_ = np.linalg.lstsq(design, z, rcond=None)
-    return lambda pts: (pts - centre) @ (a, b) + c
 
 
 def _neighbour_pairs(grid: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:

@@ -3,10 +3,9 @@
 import unittest
 
 from solar_pv.constants import (
-    ROOFDET_MAX_MAE,
     FLAT_ROOF_DEGREES_THRESHOLD,
     CONFIDENCE_FULL_FIT_MAE,
-    CONFIDENCE_MAX_ASPECT_CIRC_SD,
+    CONFIDENCE_ZERO_FIT_MAE,
     CONFIDENCE_ASPECT_FULL_SLOPE,
     CONFIDENCE_SHAPE_SPAN,
     CONFIDENCE_WEIGHTS,
@@ -18,7 +17,7 @@ from solar_pv.constants import (
 )
 from solar_pv.pv.aggregate_pixel_results import P90_DERATE
 from solar_pv.pv import confidence
-from solar_pv.roof_detection.ransac import _min_thinness_ratio
+from solar_pv.roof_detection.plane_metrics import min_thinness_ratio
 
 
 class SubScoreTest(unittest.TestCase):
@@ -26,38 +25,36 @@ class SubScoreTest(unittest.TestCase):
     def test_fit_score_bounds(self):
         self.assertEqual(confidence._fit_score(CONFIDENCE_FULL_FIT_MAE), 1.0)
         self.assertEqual(confidence._fit_score(0.0), 1.0)
-        self.assertAlmostEqual(confidence._fit_score(ROOFDET_MAX_MAE), 0.0)
-        self.assertEqual(confidence._fit_score(ROOFDET_MAX_MAE + 1), 0.0)
+        self.assertAlmostEqual(confidence._fit_score(CONFIDENCE_ZERO_FIT_MAE), 0.0)
+        self.assertEqual(confidence._fit_score(CONFIDENCE_ZERO_FIT_MAE + 1), 0.0)
 
     def test_fit_score_is_log_scaled(self):
         # the geometric midpoint of the ramp scores 0.5:
-        mid = (CONFIDENCE_FULL_FIT_MAE * ROOFDET_MAX_MAE) ** 0.5
+        mid = (CONFIDENCE_FULL_FIT_MAE * CONFIDENCE_ZERO_FIT_MAE) ** 0.5
         self.assertAlmostEqual(confidence._fit_score(mid), 0.5)
         self.assertGreater(confidence._fit_score(0.1), confidence._fit_score(0.2))
 
-    def test_aspect_score_flat_roof_is_full(self):
-        self.assertEqual(confidence._aspect_score(1.4, slope=0), 1.0)
-        self.assertEqual(
-            confidence._aspect_score(1.4, slope=FLAT_ROOF_DEGREES_THRESHOLD), 1.0)
+    def test_facing_score_flat_roof_is_full(self):
+        self.assertEqual(confidence._facing_score(0.0, slope=0), 1.0)
+        self.assertEqual(confidence._facing_score(0.0, slope=FLAT_ROOF_DEGREES_THRESHOLD), 1.0)
+        self.assertEqual(confidence._facing_score(None, slope=0), 1.0)
 
-    def test_aspect_score_bounds_at_full_strength(self):
+    def test_facing_score_at_full_strength(self):
         steep = CONFIDENCE_ASPECT_FULL_SLOPE + 10
-        self.assertEqual(confidence._aspect_score(0.0, slope=steep), 1.0)
-        self.assertEqual(confidence._aspect_score(CONFIDENCE_MAX_ASPECT_CIRC_SD, slope=steep), 0.0)
-        self.assertEqual(confidence._aspect_score(CONFIDENCE_MAX_ASPECT_CIRC_SD + 1, slope=steep), 0.0)
+        self.assertEqual(confidence._facing_score(1.0, slope=steep), 1.0)
+        self.assertEqual(confidence._facing_score(0.0, slope=steep), 0.0)
+        self.assertAlmostEqual(confidence._facing_score(0.7, slope=steep), 0.7)
 
-    def test_aspect_penalty_fades_in_with_slope(self):
+    def test_facing_penalty_fades_in_with_slope(self):
         halfway = (FLAT_ROOF_DEGREES_THRESHOLD + CONFIDENCE_ASPECT_FULL_SLOPE) / 2
-        self.assertAlmostEqual(
-            confidence._aspect_score(CONFIDENCE_MAX_ASPECT_CIRC_SD, slope=halfway), 0.5)
+        self.assertAlmostEqual(confidence._facing_score(0.0, slope=halfway), 0.5)
         # continuous across the flat-roof threshold:
         just_sloped = FLAT_ROOF_DEGREES_THRESHOLD + 0.01
-        self.assertGreater(
-            confidence._aspect_score(CONFIDENCE_MAX_ASPECT_CIRC_SD, slope=just_sloped), 0.99)
+        self.assertGreater(confidence._facing_score(0.0, slope=just_sloped), 0.99)
 
     def test_shape_score_relative_to_area_minimum(self):
         for n_pixels in (15, 100, 400, 5000):
-            min_ratio = _min_thinness_ratio(n_pixels)
+            min_ratio = min_thinness_ratio(n_pixels)
             self.assertEqual(confidence._shape_score(min_ratio, n_pixels), 0.0)
             self.assertAlmostEqual(
                 confidence._shape_score(min_ratio + CONFIDENCE_SHAPE_SPAN / 2, n_pixels), 0.5)
@@ -127,20 +124,20 @@ class CombineTest(unittest.TestCase):
 class RoofPlaneConfidenceTest(unittest.TestCase):
 
     def test_good_roof_scores_high(self):
-        meta = {"score": 0.08, "aspect_circ_sd": 0.1, "thinness_ratio": 0.9}
+        meta = {"score": 0.08, "facing_share": 1.0, "thinness_ratio": 0.9, "footprint_aspect_gap": 2.0}
         score, sub = confidence.roof_plane_confidence(
             meta=meta, slope=35, resolution=0.5, area_raw=95.0, area_grown=100.0)
         self.assertGreater(score, 0.85)
         self.assertEqual(set(sub), set(CONFIDENCE_WEIGHTS))
 
-    def test_facing_share_is_scored_instead_of_aspect_spread_if_recorded(self):
-        meta = {"score": 0.08, "aspect_circ_sd": 1.4, "thinness_ratio": 0.9, "facing_share": 0.9}
+    def test_facing_share_is_scored(self):
+        meta = {"score": 0.08, "thinness_ratio": 0.9, "facing_share": 0.9, "footprint_aspect_gap": None}
         _, sub = confidence.roof_plane_confidence(
             meta=meta, slope=35, resolution=1.0, area_raw=95.0, area_grown=100.0)
         self.assertAlmostEqual(sub["aspect"], 0.9)
 
     def test_unknown_facing_share_is_not_scored(self):
-        meta = {"score": 0.08, "aspect_circ_sd": 1.4, "thinness_ratio": 0.9, "facing_share": None}
+        meta = {"score": 0.08, "thinness_ratio": 0.9, "facing_share": None, "footprint_aspect_gap": None}
         _, sub = confidence.roof_plane_confidence(
             meta=meta, slope=35, resolution=1.0, area_raw=95.0, area_grown=100.0)
         self.assertIsNone(sub["aspect"])
@@ -149,7 +146,7 @@ class RoofPlaneConfidenceTest(unittest.TestCase):
         self.assertEqual(flat["aspect"], 1.0)
 
     def test_poor_roof_scores_low(self):
-        meta = {"score": 0.9, "aspect_circ_sd": 1.4, "thinness_ratio": 0.2}
+        meta = {"score": 0.9, "facing_share": 0.2, "thinness_ratio": 0.2, "footprint_aspect_gap": 40.0}
         score, _ = confidence.roof_plane_confidence(
             meta=meta, slope=35, resolution=2.0, area_raw=40.0, area_grown=100.0)
         self.assertLess(score, 0.3)

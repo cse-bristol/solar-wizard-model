@@ -82,7 +82,7 @@ class RoofPolygonsEvalTest(unittest.TestCase):
 
         polygons = _create_roof_polygons(footprint, copy.deepcopy(planes), max_roof_slope_degrees=80,
                                          min_roof_area_m=8, min_roof_degrees_from_north=45, flat_roof_degrees=10,
-                                         min_dist_to_edge_m=0.1, resolution_metres=1.0, method="mincut")
+                                         min_dist_to_edge_m=0.1, resolution_metres=1.0)
         m, dist = polygon_metrics(footprint, planes, [(k, p["roof_geom_27700"], p["roof_geom_raw_27700"], p["usable"])
                                                       for k, p in enumerate(polygons)], triples, 1.0, 0.1)
         self.assertEqual(m["triples_shared"], 2)

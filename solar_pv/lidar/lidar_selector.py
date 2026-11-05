@@ -13,8 +13,8 @@ Details:
 - the target resolution is 1m unless 1m-or-better coverage is sparse and 2m is
   much better,
 - higher-res tiles are resampled onto the target grid and lower-res tiles are
-  never upsampled into a finer target (RANSAC reads upsampled coarse tiles as
-  flat steps),
+  never upsampled into a finer target (roof detection reads upsampled coarse
+  tiles as flat steps),
 - on overlap the newest tile wins, and for a given year the highest-res tile
   wins.
 """
@@ -56,7 +56,7 @@ def select_lidar(tiles: List[LidarTile],
     by_res = _by_resolution(tiles)
     target = _target_resolution(by_res, cov_bounds)
 
-    # Never upsample a coarser tile into a finer target (RANSAC treats an
+    # Never upsample a coarser tile into a finer target (roof detection treats an
     # upsampled 2m tile as a flat step), so only merge resolutions >= target.
     used = [t for res, res_tiles in by_res.items() if res.value <= target.value
             for t in res_tiles
