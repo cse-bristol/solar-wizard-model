@@ -17,6 +17,11 @@ No database, PV or CLI run is needed once the sample is dumped.
     # compare scored runs of the same sample (and, with --buildings, per building)
     python -m solar_pv.evaluation.fast_roof_detection compare base=base.pkl notrim=notrim.pkl
 
+    # score only the buildings with clear flat roof labelled by hand (see `roof_labels`), and
+    # against those labels too
+    python -m solar_pv.evaluation.fast_roof_detection score sample.pkl --out base_labelled.pkl \\
+        --labels flat_roof_labels.gpkg
+
 `--set module.NAME=value` overrides a module-level constant in each worker, for trying a
 change without editing the code.
 
@@ -43,6 +48,7 @@ import shapely
 from solar_pv import model_solar_pv as msp
 from solar_pv.cli import read_buildings, discover_lidar
 from solar_pv.ephemeral_postgres import ephemeral_postgres
+from solar_pv.evaluation import roof_labels
 from solar_pv.evaluation.roof_detection import MESS_REASONS, SIZES, building_context, score_planes, \
     plane_skews, summarise, summarise_skew, markdown_table
 from solar_pv.pv.aggregate_pixel_results import roof_and_panel_area
@@ -98,12 +104,14 @@ def dump(buildings_path: str, lidar_paths: List[str], out: str, id_field: str = 
 # --- score ---
 
 _DATA = None
+_LABELS = {}
 
 
-def _init_worker(sample_path: str, settings: List[Tuple[str, object]]) -> None:
-    global _DATA
+def _init_worker(sample_path: str, settings: List[Tuple[str, object]], labels_path: str = None) -> None:
+    global _DATA, _LABELS
     with open(sample_path, "rb") as f:
         _DATA = pickle.load(f)
+    _LABELS = roof_labels.load_labels(labels_path) if labels_path else {}
     apply_settings(settings)
 
 
@@ -133,6 +141,8 @@ def _score_building(building_id: str) -> dict:
     polygons = create_roof_polygons(building_id, footprint, found, resolution_metres=res, rejected=rejected,
                                     **_POLYGON_PARAMS) if found else []
     out["seconds"] = time.process_time() - start
+    if building_id in _LABELS:
+        out["label"] = roof_labels.score_against_label(footprint, polygons, _LABELS[building_id])
 
     xyz = pixels_xyz[shapely.contains_xy(footprint, pixels_xyz[:, 0], pixels_xyz[:, 1])]
     if len(xyz) < 4:
@@ -158,11 +168,13 @@ def _score_building(building_id: str) -> dict:
     return out
 
 
-def score(sample_path: str, settings: List[Tuple[str, object]], workers: int) -> List[dict]:
-    _init_worker(sample_path, [])
+def score(sample_path: str, settings: List[Tuple[str, object]], workers: int, labels_path: str = None) -> List[dict]:
+    """Per building, its scores; only the buildings labelled in `labels_path`, if given."""
+    _init_worker(sample_path, [], labels_path)
+    ids = [b for b in _DATA["buildings"] if not labels_path or b in _LABELS]
     # biggest first, so a large building doesn't hold up the end of the run
-    ids = sorted(_DATA["buildings"], key=lambda b: -len(_DATA["buildings"][b]["pixels"]))
-    with ProcessPoolExecutor(workers, initializer=_init_worker, initargs=(sample_path, settings)) as ex:
+    ids.sort(key=lambda b: -len(_DATA["buildings"][b]["pixels"]))
+    with ProcessPoolExecutor(workers, initializer=_init_worker, initargs=(sample_path, settings, labels_path)) as ex:
         return list(ex.map(_score_building, ids, chunksize=4))
 
 
@@ -200,6 +212,13 @@ def compare(runs: List[Tuple[str, List[dict]]], building_ids: List[str] = None) 
     seconds = [{"run": name, "cpu_seconds": round(sum(r.get("seconds", 0) for r in rs.values()))}
                for name, rs in zip(names, by_run)]
     tables = [markdown_table(summary), markdown_table(skew_summary), markdown_table(seconds)]
+
+    labelled = [(name, rs[b]["label"]) for b in sorted(common, key=str)
+                for name, rs in zip(names, by_run) if "label" in rs[b]]
+    if labelled:
+        random = [(name, m) for name, m in labelled if m["stratum"] == "random"]
+        tables.append(markdown_table([row for prefix in ("", "low_") for rows, label in ((labelled, "all"), (random, "random"))
+                                      for row in roof_labels.summarise(rows, label, prefix)]))
 
     if building_ids:
         rows = []
@@ -248,6 +267,8 @@ def main():
                    metavar="module.NAME=value")
     p.add_argument("--out", help="save the per-building scores here, for compare")
     p.add_argument("--workers", type=int, default=max(os.cpu_count() - 1, 1))
+    p.add_argument("--labels", help="a labels GeoPackage (see roof_labels): score only its labelled buildings, "
+                                    "and against their labels")
 
     p = sub.add_parser("compare", help="compare scored runs")
     p.add_argument("runs", nargs="+", help="name=scores.pkl")
@@ -259,7 +280,7 @@ def main():
     if args.command == "dump":
         dump(args.buildings, args.lidar, args.out, args.id_field, args.height_field, args.pg_uri)
     elif args.command == "score":
-        rs = score(args.sample, args.settings, args.workers)
+        rs = score(args.sample, args.settings, args.workers, args.labels)
         if args.out:
             with open(args.out, "wb") as f:
                 pickle.dump(rs, f)

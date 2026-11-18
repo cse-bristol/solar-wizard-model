@@ -87,6 +87,18 @@ class RemoveUnprofitableTest(unittest.TestCase):
         labels = np.where(xyz[:, 0] < 8, 0, 1)
         planes = _planes(xyz, labels)
 
-        self.assertEqual(remove_unprofitable(xyz, labels, planes, 1.0, 8.0, _scale, -1), [1])
+        self.assertEqual(remove_unprofitable(xyz, labels, planes, 1.0, 8.0, _scale, -1), [(1, False)])
         self.assertEqual(list(planes), [0])
         self.assertTrue((labels[xyz[:, 0] > 8] == -1).all())
+
+    def test_plane_messy_for_its_flat_cost_is_removed_for_mess(self):
+        xyz = _grid(lambda x, y: 5 + 0 * x)
+        labels = np.zeros(len(xyz), dtype=int)
+        planes = _planes(xyz, labels)
+        planes[0].is_flat = True
+
+        self.assertEqual(remove_unprofitable(xyz, labels, planes, 1.0, 8.0, _scale, -1), [])
+        self.assertEqual(remove_unprofitable(xyz, labels, planes, 1.0, 8.0, _scale, -1,
+                                             mess_cost=lambda coef, idxs: np.full(len(xyz), 1.95)),
+                         [(0, True)])
+        self.assertTrue((labels == -1).all())

@@ -36,6 +36,18 @@ class AssignPixelsTest(unittest.TestCase):
 
         np.testing.assert_array_equal(assigned, np.where(south, 0, 1))
 
+    def test_extra_cost_unassigns_pixels(self):
+        xyz, south, coefs = _gable()
+        messy = (xyz[:, 0] > 5) & (xyz[:, 0] < 12) & (xyz[:, 1] < 5)
+        extra = np.where(messy, 3.0, 0.0)
+        labels = np.where(south, 0, 1)
+
+        assigned = _assign(xyz, labels, coefs, extra_costs=[extra, None])
+
+        assert np.all(assigned[messy] == NONE)
+        assert np.all(assigned[south & ~messy] == 0)
+        assert np.all(assigned[~south] == 1)
+
     def test_obstacle_pixels_are_unassigned(self):
         xyz, south, coefs = _gable()
         chimney = (xyz[:, 0] > 8) & (xyz[:, 0] < 11) & (xyz[:, 1] > 1) & (xyz[:, 1] < 4)

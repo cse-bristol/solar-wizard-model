@@ -27,8 +27,9 @@ from solar_pv import tables, stage
 from solar_pv.constants import ROOFDET_MAX_CPUS, ROOFDET_MAX_AREA, \
     AZIMUTH_ALIGNMENT_THRESHOLD, FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD, FLAT_ROOF_DEGREES_THRESHOLD
 from solar_pv.roof_detection import rejections
-from solar_pv.roof_detection.mess import reject_mess
-from solar_pv.roof_detection.assign_pixels import assign_pixels, NONE
+from solar_pv.roof_detection import mess as mess_module
+from solar_pv.roof_detection.mess import reject_clutter, MessCost, obstacle_holes
+from solar_pv.roof_detection.assign_pixels import assign_pixels, NONE, NONE_COST
 from solar_pv.roof_detection.footprint import FaceIndex, closest_azimuth
 from solar_pv.roof_detection.plane_metrics import set_plane_fit, set_fit_metrics, min_thinness_ratio
 from solar_pv.roof_detection.plane_fit import PlaneFit
@@ -260,6 +261,7 @@ def _segment_and_assign(xyz: np.ndarray,
     rms = np.full(len(xyz), np.inf)
     normals[above_ground], rms[above_ground] = local_fits(xyz[above_ground], resolution_metres)
     locally_planar = rms <= _MAX_LOCAL_RMS
+    mess = MessCost(xyz, rms, above_ground, resolution_metres) if mess_module.MESS_WEIGHT > 0 else None
     face_index = FaceIndex.of(polygon)
     planes: Dict[int, Plane] = {}
 
@@ -273,7 +275,7 @@ def _segment_and_assign(xyz: np.ndarray,
         """`_refine`, marking in `removed` the pixels of the planes it drops for having too few."""
         start, plane_ids = labels, set(planes)
         new_labels = _refine(xyz, labels, planes, above_ground, resolution_metres, labels_nodata, debug=debug,
-                             rejected=rejected)
+                             rejected=rejected, mess=mess)
         removed[np.isin(start, list(plane_ids - set(planes)))] = True
         return new_labels
 
@@ -287,7 +289,7 @@ def _segment_and_assign(xyz: np.ndarray,
         labels = refine(removed)
         for _ in range(_MAX_MERGE_PASSES):
             assigned = labels != labels_nodata
-            if not _merge_and_remove(xyz, labels, planes, resolution_metres, labels_nodata, rejected, debug):
+            if not _merge_and_remove(xyz, labels, planes, resolution_metres, labels_nodata, rejected, debug, mess):
                 break
             # merging only relabels pixels, so those it unassigned were removed planes':
             removed |= assigned & (labels == labels_nodata)
@@ -295,6 +297,10 @@ def _segment_and_assign(xyz: np.ndarray,
         if round_ == _MAX_PROPOSAL_ROUNDS:
             break
         candidates = above_ground & ~removed & ~_explained(xyz, labels, planes, normals, locally_planar)
+        if mess is not None:
+            # pixels the mess cost took off a flat plane that explained them would only be
+            # left out again
+            candidates &= ~mess.left_out
         before = next_id
         next_id = propose(candidates, next_id, _MIN_REPROPOSED_PIXELS)
         if debug:
@@ -303,9 +309,12 @@ def _segment_and_assign(xyz: np.ndarray,
             break
     if len(planes) == 0:
         return []
+    _record_messy_parts(xyz, labels, mess, building_id, rejected)
     reliable_normals = np.where(locally_planar[:, None], normals, np.nan)
-    return reject_mess(_finalise(xyz, aspect, labels, planes, face_index, resolution_metres, reliable_normals),
-                       labels, xyz, resolution_metres, above_ground=above_ground, debug=debug, rejected=rejected)
+    finished = _finalise(xyz, aspect, labels, planes, face_index, resolution_metres, reliable_normals)
+    if mess is not None and mess_module.MESS_HOLES:
+        _set_obstacle_holes(finished, xyz, labels, above_ground, resolution_metres, building_id, rejected)
+    return reject_clutter(finished, labels, xyz, resolution_metres, rejected=rejected)
 
 
 def _propose(xyz: np.ndarray,
@@ -366,6 +375,43 @@ def _propose(xyz: np.ndarray,
     return plane_id
 
 
+def _set_obstacle_holes(planes: Dict[int, RoofPlane], xyz: np.ndarray, labels: np.ndarray, above_ground: np.ndarray,
+                        resolution_metres: float, building_id: str, rejected: Optional[List[dict]]) -> None:
+    """Set each flat plane's `obstacles_xy` (see `mess.obstacle_holes`), to be cut out of its
+    roof polygon, and record its own pixels among them in `rejected` as messy parts."""
+    for plane_id, plane in planes.items():
+        if not plane['is_flat']:
+            continue
+        idxs = np.flatnonzero(labels == plane_id)
+        holes = obstacle_holes(xyz, above_ground, idxs, (plane['x_coef'], plane['y_coef'], plane['intercept']),
+                               resolution_metres)
+        if not holes.any():
+            continue
+        plane['obstacles_xy'] = xyz[holes, :2]
+        own = holes & (labels == plane_id)
+        if rejected is not None and own.any():
+            rejected.append({"building_id": building_id, "inliers_xy": xyz[own, :2],
+                             "rejection_reason": rejections.MESSY_PART, "rejection_details": {}})
+
+
+def _record_messy_parts(xyz: np.ndarray, labels: np.ndarray, mess: Optional[MessCost], building_id: str,
+                        rejected: Optional[List[dict]]) -> None:
+    """Record in `rejected` the parts of flat roofs left out for mess: the pixels the mess
+    cost took off a flat plane (see `_reassign`) that are still unassigned, and aren't
+    recorded already as a messy flat roof's."""
+    if rejected is None or mess is None:
+        return
+    messy = mess.left_out & (labels < 0)
+    recorded = [r["inliers_xy"] for r in rejected if r.get("building_id") == building_id
+                and r["rejection_reason"] == rejections.MESSY_FLAT_ROOF and len(r["inliers_xy"])]
+    if recorded:
+        recorded = np.concatenate(recorded)
+        messy &= ~np.isin(xyz[:, 0] + 1j * xyz[:, 1], recorded[:, 0] + 1j * recorded[:, 1])
+    if messy.any():
+        rejected.append({"building_id": building_id, "inliers_xy": xyz[messy, :2],
+                         "rejection_reason": rejections.MESSY_PART, "rejection_details": {}})
+
+
 def _explained(xyz: np.ndarray, labels: np.ndarray, planes: Dict[int, Plane], normals: np.ndarray,
                locally_planar: np.ndarray) -> np.ndarray:
     """
@@ -403,15 +449,19 @@ def _merge_and_remove(xyz: np.ndarray,
                       resolution_metres: float,
                       labels_nodata: int,
                       rejected: Optional[List[dict]] = None,
-                      debug: bool = False) -> bool:
+                      debug: bool = False,
+                      mess: Optional[MessCost] = None) -> bool:
     """Merge, then remove, planes (in place) where that lowers the energy including
-    `_LABEL_COST` per plane. Returns whether anything changed."""
+    `_LABEL_COST` per plane, and `mess`'s cost if given. Returns whether anything changed."""
+    mess_cost = mess.cost if mess is not None else None
     merges = merge_by_energy(xyz, labels, planes, resolution_metres, _LABEL_COST, _residual_scale, _fit, _mergeable,
-                             good_enough_share=_GOOD_ENOUGH_MERGE_SHARE)
+                             good_enough_share=_GOOD_ENOUGH_MERGE_SHARE, mess_cost=mess_cost)
     kept = dict(planes)
-    removed = remove_unprofitable(xyz, labels, planes, resolution_metres, _LABEL_COST, _residual_scale, labels_nodata)
-    for plane_id in removed:
-        rejections.record(rejected, kept[plane_id].record(), rejections.UNPROFITABLE)
+    removed = remove_unprofitable(xyz, labels, planes, resolution_metres, _LABEL_COST, _residual_scale, labels_nodata,
+                                  mess_cost)
+    for plane_id, for_mess in removed:
+        rejections.record(rejected, kept[plane_id].record(),
+                          rejections.MESSY_FLAT_ROOF if for_mess else rejections.UNPROFITABLE)
     if debug:
         print(f"Merged {len(merges)} pairs of planes, removed {len(removed)}")
     return bool(merges or removed)
@@ -482,10 +532,11 @@ def _refine(xyz: np.ndarray,
             resolution_metres: float,
             labels_nodata: int,
             debug: bool = False,
-            rejected: Optional[List[dict]] = None) -> np.ndarray:
+            rejected: Optional[List[dict]] = None,
+            mess: Optional[MessCost] = None) -> np.ndarray:
     """
     Reassign pixels and refit `planes` (in place) until the labels stop changing or the
-    energy stops falling.
+    energy stops falling. `mess` is as for `_reassign`.
 
     Refitting is by least squares, not the energy `assign_pixels` minimises, so it can
     raise the energy and the rounds can cycle rather than converge.
@@ -493,7 +544,7 @@ def _refine(xyz: np.ndarray,
     last_energy = np.inf
     for round_ in range(_MAX_REFINE_ROUNDS):
         new_labels, energy = _reassign(xyz, labels, planes, above_ground, resolution_metres, labels_nodata,
-                                       rejected)
+                                       rejected, mess)
         changed = np.count_nonzero(new_labels != labels)
         labels = new_labels
         if debug:
@@ -510,27 +561,55 @@ def _reassign(xyz: np.ndarray,
               above_ground: np.ndarray,
               resolution_metres: float,
               labels_nodata: int,
-              rejected: Optional[List[dict]] = None) -> Tuple[np.ndarray, float]:
+              rejected: Optional[List[dict]] = None,
+              mess: Optional[MessCost] = None) -> Tuple[np.ndarray, float]:
     """
     Reassign `labels` to the planes as they are, each keeping only its largest 4-connected
     group of pixels (see `assign_pixels`), and refit `planes` to them (in place,
     see `_fit`). Planes left with fewer than 3 pixels are removed, and recorded in
-    `rejected`. Also returns `assign_pixels`' energy for the starting labels.
+    `rejected`: as messy if they were flat and most of their pixels had a mess cost. A flat
+    plane's pixels that `mess` takes off
+    it - pixels it explains, but that cost more on it than unassigned for their mess cost -
+    are marked in `mess.left_out`. Also returns `assign_pixels`' energy for the starting
+    labels.
     """
     plane_ids = list(planes.keys())
     idx_labels = np.full(np.count_nonzero(above_ground), NONE)
     for k, plane_id in enumerate(plane_ids):
         idx_labels[labels[above_ground] == plane_id] = k
 
+    extra_costs = None
+    # per flat plane, its pixels that cost more on it than unassigned for mess alone:
+    for_mess = {}
+    messy_share = {}
+    if mess is not None:
+        extra_costs = []
+        for plane_id in plane_ids:
+            plane = planes[plane_id]
+            start = np.flatnonzero(labels == plane_id)
+            if not plane.is_flat:
+                extra_costs.append(None)
+                continue
+            mess_cost = mess.cost(plane.coef, start)
+            extra_costs.append(mess_cost[above_ground])
+            if len(start):
+                cost = data_cost(xyz[start], plane.coef, _residual_scale(True))
+                for_mess[plane_id] = start[(cost <= 1) & (cost + mess_cost[start] > NONE_COST)]
+                messy_share[plane_id] = np.mean(mess_cost[start] > 0)
     idx_labels, energy = assign_pixels(xyz[above_ground], idx_labels, [planes[i].coef for i in plane_ids],
-                                       [_residual_scale(planes[i].is_flat) for i in plane_ids], resolution_metres)
+                                       [_residual_scale(planes[i].is_flat) for i in plane_ids], resolution_metres,
+                                       extra_costs=extra_costs)
 
     new_labels = np.full(labels.shape, labels_nodata)
     candidate_idxs = np.flatnonzero(above_ground)
     for k, plane_id in enumerate(plane_ids):
         idxs = candidate_idxs[idx_labels == k]
+        if plane_id in for_mess:
+            mess.left_out[for_mess[plane_id]] |= ~np.isin(for_mess[plane_id], idxs)
         if len(idxs) < 3:
-            rejections.record(rejected, planes.pop(plane_id).record(), rejections.TOO_FEW_PIXELS, pixels=len(idxs))
+            emptied_for_mess = messy_share.get(plane_id, 0) >= 0.5
+            reason = rejections.MESSY_FLAT_ROOF if emptied_for_mess else rejections.TOO_FEW_PIXELS
+            rejections.record(rejected, planes.pop(plane_id).record(), reason, pixels=len(idxs))
             continue
         new_labels[idxs] = plane_id
         plane = planes[plane_id]

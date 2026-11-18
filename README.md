@@ -31,8 +31,8 @@ python -m solar_pv --buildings buildings.gpkg --lidar tiles/ --out results.gpkg
     regions that failed a check: `SMALL_POOR_FIT`, `NO_CLOSE_ASPECT`, `CONVEX_HULL_RATIO`,
     `THINNESS_RATIO` or `NORMALS_DISAGREE`. Planes dropped while refining: `TOO_FEW_PIXELS`
     or `UNPROFITABLE` (their pixels may since have gone to other planes). Mess:
-    `CLUTTER`, `MESSY_FLAT_ROOF`, `SURROUNDED_BY_MESS` or `MESSY_BUILDING`; and, as
-    `OBSTACLES`, the pixels the mess check counted as obstacles. And `NO_POLYGON`, for
+    `CLUTTER` or `MESSY_FLAT_ROOF`; and, as `MESSY_PART`, the pixels of flat roofs left out
+    or cut out for mess. And `NO_POLYGON`, for
     planes roof polygon creation left with no polygon. See `solar_pv/roof_detection/rejections.py`.
 * `--pg-uri` points at an existing postGIS database; if omitted, a throwaway PostGIS cluster
   is started for the run and thrown away afterwards. That convenience uses `testing.postgresql`,

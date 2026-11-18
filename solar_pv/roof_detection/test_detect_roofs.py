@@ -67,10 +67,10 @@ _ROOF_DETECTION_CASES = [
     # Messy roofs - should find nothing
     # ("0015", 1.0, []),  # Totterdown pub - very messy non-flat roof - currently fails due to mess
     # Cotham school - messy flat roofs. Imagery says 0029 is [149], and 0028 and 0033 are
-    # [], but small planes on them that the mess checks don't reject are kept.
-    ("0029", 1.0, [61, 141, 151, 151, 235, 320]),
-    ("0028", 1.0, [152, 167, 242]),
-    ("0033", 1.0, [159, 167, 262, 336]),
+    # [], but small planes on them that the mess cost doesn't remove are kept.
+    ("0029", 1.0, [141, 146, 151, 151, 235, 320]),
+    ("0028", 1.0, [161, 165, 167]),
+    ("0033", 1.0, [159, 167, 167, 172, 257]),
 
     # Flat roofs:
     ("0023", 1.0, [138]),
@@ -86,7 +86,7 @@ _ROOF_DETECTION_CASES = [
     ("0010", 1.0, [58, 59, 238, 239]),
     ("0024", 1.0, [53, 73, 164, 253]),
     ("0002", 1.0, [71, 251, 251]),
-    ("0007", 1.0, [0, 90, 90, 180, 215, 270]),
+    ("0007", 1.0, [0, 90, 90, 180, 181, 215, 270]),
     ("0014", 1.0, [85, 175, 265, 355, 355]),
     ("0026", 1.0, [59, 59, 149, 239, 239, 329, 329]),
 
@@ -103,7 +103,7 @@ _ROOF_DETECTION_CASES = [
     ("0039", 1.0, [60, 191, 243, 270, 316]),
 
     # Large and very messy: most regions fail the gates
-    ("0040", 1.0, [3, 183, 183, 183, 183, 183, 183, 183, 183, 183, 203, 273, 313]),
+    ("0040", 1.0, [3, 180, 183, 183, 183, 183, 183, 183, 183, 273, 313]),
 ]
 
 
@@ -265,7 +265,8 @@ class SegmentReproposalTest(unittest.TestCase):
                 _detect_building_roof_planes(_load_data(join(_ROOFDET_DATA, f"{building_id}.json")), building_id,
                                              1.0, rejected=rejected)
                 removed = [set(map(tuple, np.round(r['inliers_xy'], 3).tolist())) for r in rejected
-                           if r['rejection_reason'] in (rejections.UNPROFITABLE, rejections.TOO_FEW_PIXELS)]
+                           if r['rejection_reason'] in (rejections.UNPROFITABLE, rejections.TOO_FEW_PIXELS,
+                                                        rejections.MESSY_FLAT_ROOF)]
                 self.assertGreater(len(removed), 0)
                 for i, pixels in enumerate(removed):
                     for earlier in removed[:i]:
@@ -316,3 +317,4 @@ class FinaliseTest(unittest.TestCase):
         plane = self._finalise(xs, ys, np.full(xs.shape, 10.0), box(0, 0, 40, 40))
         self.assertTrue(plane['is_flat'])
         self.assertEqual(plane['aspect'], 180)
+

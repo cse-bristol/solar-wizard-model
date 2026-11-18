@@ -28,6 +28,8 @@ class RoofPlane(TypedDict):
     y_coef: float
     intercept: float
     inliers_xy: np.ndarray
+    # on a flat roof, if any: pixels to cut out of its roof polygon (see `mess.obstacle_holes`)
+    obstacles_xy: np.ndarray
 
     r2: float
     mae: float

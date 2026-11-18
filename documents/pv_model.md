@@ -60,6 +60,7 @@ A region becomes a candidate plane only if it passes these checks:
 Pixels are assigned to planes, or to no plane, by minimising an energy (`roof_detection/assign_pixels.py`):
 
 * each pixel's distance from its plane, in units of the plane's residual scale (0.25m, or 0.1m for flat planes, as flat roofs are more likely to be covered in obstacles like HVAC units, pipes and parapets), capped at 4; or 2 for a pixel in no plane;
+* on a flat plane, plus each pixel's mess cost (see *messy roofs*);
 * plus 0.5 per metre of boundary between differently assigned pixels, so that planes are compact.
 
 This can't be solved exactly; alpha-expansion (Boykov, Veksler & Zabih, 2001) gets within a factor of 2 of the optimum, each step being one exact min-cut. A plane may only claim pixels within 3m of the ones it has, so it can't take over a coplanar patch elsewhere on the building, and each plane keeps only its largest connected group of pixels.
@@ -68,7 +69,7 @@ Each plane is then refitted to its pixels by least squares, then again to just t
 
 Planes are then merged, and removed, where that lowers the energy plus a fixed cost per plane: a plane is only worth having if it explains its pixels better than the other planes would by at least that much. Only planes that are both flat, or that face within 15.5 degrees of each other, are merged; and they are merged even if it raises the energy, if the merged plane is within its residual scale of at least 80% of their pixels, as at 1m a slightly warped roof face fits two planes better than one. Refining after merging and removing can make more planes worth merging (growing them into each other, or flattening them), so merging, removing and refining repeat until nothing more is merged or removed (at most 5 times).
 
-After that, new candidates are proposed from the pixels no plane explains well (other than those of planes just removed, which would mostly grow the same plane again), needing only 4 pixels, and the whole is repeated, up to twice.
+After that, new candidates are proposed from the pixels no plane explains well (other than those of planes just removed, which would mostly grow the same plane again, and those a flat plane would explain but for their mess cost), needing only 4 pixels, and the whole is repeated, up to twice.
 
 Finally, each plane's fit metrics, shape ratios and aspect statistics are computed from its pixels, and its orientation from just its pixels within 0.1m of it.
 
@@ -80,13 +81,11 @@ The aspect of a pitched plane is aligned to the azimuth of a building face, or a
 
 ### messy roofs
 
-Flat roofs are often covered in obstacles like HVAC units and pipes, which can lead to roof planes that don't reflect the space actually available for panels. These are found from the pixels' heights once they have been assigned to planes (`roof_detection/mess.py`):
+Flat roofs are often covered in obstacles like HVAC units, pipes and rooflights, which can lead to roof planes that don't reflect the space actually available for panels (`roof_detection/mess.py`):
 
-* Clutter: a small pitched plane within a flat roof is an obstacle (plant, vents, rooflights) that a plane has been fitted to, not a roof.
-* Obstacles on a flat plane are clutter standing on it; groups of unassigned pixels clearly above it (plant) or below it (rooflights, lightwells) and mostly surrounded by it; and groups of its own pixels a little above or below the rest of it (low plant, pipes, vents). Groups touching the edge of the building aren't counted, as they are usually parapets or taller parts of the building.
-* A flat plane is rejected as messy if obstacles cover a large share of it, or if it has many separate obstacles (at least 5, or 0.02 per m² on a large roof).
-* A small pitched plane whose surroundings within the building are mostly mess is rejected too: it is usually a plane fitted to part of the mess.
-* If most of the building is clutter, messy flat planes and obstacles, the whole building is rejected.
+* Mess cost: a pixel is rough if the best 3x3 window containing it fits a plane only to within an RMS of 0.02m; clear flat roofs at 1m are mostly within 0.01m. Each pixel costs more on a flat plane the more of the pixels within 5m of it are rough: 8 times the share of them that are rough, over 0.3. Pixels within 2m of the building's edge aren't counted, as their windows often cross a parapet, gutter or wall. As this is part of the energy, the messy parts of a flat roof are left unassigned, and a flat roof that is mostly messy isn't worth a plane. A lone obstacle costs nothing around it.
+* Obstacle holes: on each flat roof that is kept, its rough pixels (against the plane itself, extended over the pixels around it, so the walls and planes around it don't count) and the pixels it encloses (plant, rooflights, and the parts the mess cost left out) are cut out of its roof polygon, with a margin of 0.25m (see section 4).
+* Clutter: once the planes are final, a small pitched plane within a flat roof is rejected: it is an obstacle (plant, vents, rooflights) that a plane has been fitted to, not a roof.
 
 Any buildings where no roof planes were detected that passed the above tests are now marked as excluded.
 
@@ -105,8 +104,9 @@ Each grown polygon is made as follows:
 2. **Tiling.** Each plane's pixels are tiled on a grid aligned to its aspect, with tiles the size of a pixel, choosing which tiles to occupy by an exact min-cut: each tile costs its mismatch in area with the plane's pixels, plus a cost for each tile edge of boundary, which straightens the polygon's edges. Near a line, the plane may only occupy its own side of it, and gets its neighbour's pixels on its side; elsewhere, it may not occupy other planes' pixels.
 3. **Overlaps** between polygons are split along the line between the two planes if they have one, else by which plane's pixels are nearer.
 4. **Smoothing.** Boundaries that are not along a line or the building's edge are de-zigzagged, straightening the staircases left by the grid.
+5. **Obstacles.** A flat roof's obstacle holes (see *messy roofs*), grown by 0.25m, are cut out of its polygon.
 
-If a polygon has more than one part, only the largest is kept. Planes left with no polygon are dropped.
+If a polygon has more than one part, only the largest is kept, holes and all. Planes left with no polygon are dropped.
 
 Finally, planes are marked unusable if they are steeper than `max_roof_slope_degrees`, if their aspect is within `min_roof_degrees_from_north` of north, or if their area is below `min_roof_area_m`.
 

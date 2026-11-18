@@ -11,7 +11,8 @@ the method, and [GLOSSARY.md](../../GLOSSARY.md) for the terms used in the code.
 * `segment_planes.py`: local plane fits per pixel, and region growing into candidate regions.
 * `assign_pixels.py`: assigning pixels to planes by alpha-expansion (multi-label min-cut).
 * `plane_moves.py`: merging and removing planes by energy.
-* `mess.py`: rejecting clutter and messy roofs once pixels are assigned.
+* `mess.py`: mess on roofs: the mess cost on flat planes, obstacle holes in kept flat roofs,
+  and rejecting clutter once pixels are assigned.
 * `footprint.py`: the building's faces, which planes' aspects are snapped to.
 * `plane_metrics.py`, `plane_fit.py`: plane fits and their fit and shape measures.
 * `plane_skew.py`: each final plane's orientation error against its pixels (`meta['skew']`).

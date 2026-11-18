@@ -7,8 +7,6 @@ an optional `rejected` list to append to; if it's None, nothing is recorded.
 """
 from typing import List, Optional
 
-import numpy as np
-
 # Left with fewer than 3 pixels when pixels were reassigned
 TOO_FEW_PIXELS = "TOO_FEW_PIXELS"
 # Not aligned with any of the building's faces
@@ -24,19 +22,13 @@ SMALL_POOR_FIT = "SMALL_POOR_FIT"
 UNPROFITABLE = "UNPROFITABLE"
 CLUTTER = "CLUTTER"
 MESSY_FLAT_ROOF = "MESSY_FLAT_ROOF"
-SURROUNDED_BY_MESS = "SURROUNDED_BY_MESS"
-MESSY_BUILDING = "MESSY_BUILDING"
+# Not a plane: the parts of flat roofs left unassigned for mess, and the obstacles cut out
+# of kept flat roofs' polygons
+MESSY_PART = "MESSY_PART"
 NO_POLYGON = "NO_POLYGON"
-# Not a plane: the pixels counted as obstacles by the mess check
-OBSTACLES = "OBSTACLES"
 
 
 def record(rejected: Optional[List[dict]], plane: dict, reason: str, **details) -> None:
     if rejected is not None:
         rejected.append({**plane, "rejection_reason": reason, "rejection_details": details})
 
-
-def record_obstacles(rejected: Optional[List[dict]], building_id: str, obstacles_xy: np.ndarray) -> None:
-    if rejected is not None and len(obstacles_xy) > 0:
-        rejected.append({"building_id": building_id, "inliers_xy": obstacles_xy,
-                         "rejection_reason": OBSTACLES, "rejection_details": {}})

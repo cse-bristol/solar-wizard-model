@@ -36,11 +36,13 @@ def assign_pixels(xyz: np.ndarray,
                   none_cost: float = NONE_COST,
                   smoothness_per_m: float = SMOOTHNESS_PER_M,
                   max_dist_m: float = 3,
-                  max_cycles: int = 5) -> Tuple[np.ndarray, float]:
+                  max_cycles: int = 5,
+                  extra_costs: Optional[Sequence[Optional[np.ndarray]]] = None) -> Tuple[np.ndarray, float]:
     """
     Reassign `labels` (per pixel of `xyz`: a plane index in [0, len(coefs)), or NONE), and
     return them with the energy of the starting labels. Plane k is z = a x + b y + c for
-    (a, b, c) = coefs[k], with residual scale `residual_scales[k]`.
+    (a, b, c) = coefs[k], with residual scale `residual_scales[k]`, and if `extra_costs[k]`
+    isn't None, that cost per pixel of being on it too.
 
     Each plane may only claim pixels within `max_dist_m` of those it starts with, so a
     coplanar patch elsewhere on the building can't be taken over. Planes that start with
@@ -77,6 +79,8 @@ def assign_pixels(xyz: np.ndarray,
         a, b, c = coefs[k - 1]
         predicted = xy[:, 0] * a + xy[:, 1] * b + c
         data[k] = np.minimum(np.abs(z - predicted) / residual_scales[k - 1], residual_cap)
+        if extra_costs is not None and extra_costs[k - 1] is not None:
+            data[k] += extra_costs[k - 1]
 
         allowed[k] = _within(rows, cols, rows[idxs], cols[idxs], max_dist_pixels)
 

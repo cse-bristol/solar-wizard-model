@@ -70,7 +70,8 @@ ogr.UseExceptions()
 osr.UseExceptions()
 
 LABEL_COST = 8.0
-MESS_REASONS = {"MESSY_FLAT_ROOF", "CLUTTER", "SURROUNDED_BY_MESS", "MESSY_BUILDING", "OBSTACLES", "HIGH_MAE"}
+MESS_REASONS = {"MESSY_FLAT_ROOF", "MESSY_PART", "CLUTTER", "SURROUNDED_BY_MESS", "MESSY_BUILDING", "OBSTACLES",
+                "HIGH_MAE"}
 PRE_DETECTION_EXCLUSIONS = {"OUTDATED_LIDAR_COVERAGE", "NO_LIDAR_COVERAGE", "TOO_SMALL"}
 SIZES = [("<50m2", 0, 50), ("50-200m2", 50, 200), ("200-1000m2", 200, 1000), (">1000m2", 1000, np.inf)]
 METRICS = ["planes", "usable_planes", "coverage", "explained", "mae", "energy", "missed_planar_m2",

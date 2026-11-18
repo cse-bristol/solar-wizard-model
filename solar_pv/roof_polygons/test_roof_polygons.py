@@ -337,3 +337,28 @@ class SmoothTest(ParameterisedTestCase):
         self.assertLessEqual(len(smooth.exterior.coords), 5)
         # cutting the staircase's corners loses a little of its pixels
         self.assertGreater(smooth.area, len(xy) * 0.9)
+
+
+class ObstaclesTest(ParameterisedTestCase):
+
+    def _flat_roof(self, obstacle):
+        xy = _grid(0, 20, 0, 20)
+        plane = dict(_plane(xy[~obstacle(xy)], 180, 0), plane_id="p", obstacles_xy=xy[obstacle(xy)])
+        return _polygons(Polygon([(0, 0), (20, 0), (20, 20), (0, 20)]), [plane])
+
+    def test_obstacle_cut_out_with_margin(self):
+        polygons = self._flat_roof(lambda xy: (np.abs(xy[:, 0] - 10) < 1) & (np.abs(xy[:, 1] - 10) < 1))
+
+        self.assertEqual(len(polygons), 1)
+        roof = polygons[0]['roof_geom_27700']
+        self.assertEqual(len(roof.interiors), 1)
+        hole = 2 + 2 * roof_polygons.OBSTACLE_SETBACK_M
+        self.assertAlmostEqual(Polygon(roof.interiors[0]).area, hole * hole, places=6)
+
+    def test_obstacles_across_roof_leave_its_largest_piece(self):
+        polygons = self._flat_roof(lambda xy: np.abs(xy[:, 1] - 6) < 1)
+
+        self.assertEqual([p['plane_id'] for p in polygons], ["p"])
+        roof = polygons[0]['roof_geom_27700']
+        self.assertEqual(roof.geom_type, "Polygon")
+        self.assertGreaterEqual(roof.bounds[1], 7 + roof_polygons.OBSTACLE_SETBACK_M - 1e-6)

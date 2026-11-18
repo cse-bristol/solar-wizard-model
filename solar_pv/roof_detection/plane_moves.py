@@ -26,6 +26,10 @@ from solar_pv.roof_detection.assign_pixels import grid_index, _neighbour_pairs, 
     SMOOTHNESS_PER_M
 
 
+# a flat plane's extra cost per pixel, given its coefficients and pixels (see `mess.MessCost`)
+MessCostFn = Callable[[Tuple[float, float, float], np.ndarray], np.ndarray]
+
+
 @dataclass
 class Plane:
     """
@@ -57,11 +61,14 @@ class Plane:
                 'plane_type': self.plane_type, 'plane_id': self.plane_id, 'inliers_xy': self.xy}
 
 
-def data_cost(xyz: np.ndarray, coef: Tuple[float, float, float], residual_scale: float) -> np.ndarray:
-    """`assign_pixels`' cost of each pixel of `xyz` on the plane z = a x + b y + c."""
+def data_cost(xyz: np.ndarray, coef: Tuple[float, float, float], residual_scale: float,
+              extra: Optional[np.ndarray] = None) -> np.ndarray:
+    """`assign_pixels`' cost of each pixel of `xyz` on the plane z = a x + b y + c, plus
+    `extra` per pixel if given."""
     a, b, c = coef
     residual = np.abs(xyz[:, 2] - (xyz[:, 0] * a + xyz[:, 1] * b + c))
-    return np.minimum(residual / residual_scale, RESIDUAL_CAP)
+    cost = np.minimum(residual / residual_scale, RESIDUAL_CAP)
+    return cost if extra is None else cost + extra
 
 
 def adjacent_planes(xyz: np.ndarray, labels: np.ndarray, resolution_metres: float) -> Dict[Tuple[int, int], int]:
@@ -85,7 +92,8 @@ def merge_by_energy(xyz: np.ndarray,
                     residual_scale,
                     fit: Callable[[np.ndarray], Tuple[Tuple[float, float, float], bool]],
                     mergeable: Callable[[Plane, Plane], bool] = lambda p, q: True,
-                    good_enough_share: Optional[float] = None) -> List[Tuple[int, int]]:
+                    good_enough_share: Optional[float] = None,
+                    mess_cost: Optional[MessCostFn] = None) -> List[Tuple[int, int]]:
     """
     Greedily merge (in place) the adjacent pair of planes whose merge lowers the energy
     most, until no merge would. Only pairs that are `mergeable` are considered, and a pair
@@ -93,14 +101,19 @@ def merge_by_energy(xyz: np.ndarray,
     `good_enough_share` of their pixels is merged even if that raises the energy. A merged plane keeps the first plane's id, and is refitted to the
     pixels of both: `fit(xyz)` is a plane's coefficients and flatness, fitted as the planes
     are refitted when refining, so that a merge is judged on the plane it would become.
-    `residual_scale(is_flat)` is the residual scale for a plane.
+    `residual_scale(is_flat)` is the residual scale for a plane, and `mess_cost(coef, idxs)`,
+    if given, each pixel's extra cost on the flat plane `coef` whose pixels are `idxs` (see
+    `mess.MessCost`).
 
     Returns the (kept, merged away) plane ids.
     """
     smoothness = SMOOTHNESS_PER_M / resolution_metres
     idxs = {plane_id: np.flatnonzero(labels == plane_id) for plane_id in planes}
-    costs = {plane_id: data_cost(xyz[idxs[plane_id]], plane.coef, residual_scale(plane.is_flat)).sum()
-             for plane_id, plane in planes.items()}
+
+    def cost(i: np.ndarray, coef, is_flat: bool) -> np.ndarray:
+        return data_cost(xyz[i], coef, residual_scale(is_flat), _extra(mess_cost, coef, i, is_flat))
+
+    costs = {plane_id: cost(idxs[plane_id], plane.coef, plane.is_flat).sum() for plane_id, plane in planes.items()}
     edges = adjacent_planes(xyz, labels, resolution_metres)
 
     def gain(pair):
@@ -110,8 +123,9 @@ def merge_by_energy(xyz: np.ndarray,
         union = np.concatenate([idxs[p], idxs[q]])
         coef, is_flat = fit(xyz[union])
         merged = data_cost(xyz[union], coef, residual_scale(is_flat))
-        merged_cost = merged.sum()
+        merged_cost = (merged + _extra(mess_cost, coef, union, is_flat, 0)).sum()
         g = costs[p] + costs[q] + smoothness * edges[pair] + label_cost - merged_cost
+        # explained as `good_enough_share` means it: by the fit alone
         good_enough = good_enough_share is not None and np.mean(merged <= 1) >= good_enough_share
         return g, (coef, is_flat, merged_cost), g > 0 or good_enough
 
@@ -153,11 +167,14 @@ def remove_unprofitable(xyz: np.ndarray,
                         resolution_metres: float,
                         label_cost: float,
                         residual_scale,
-                        nodata: int) -> List[int]:
+                        nodata: int,
+                        mess_cost: Optional[MessCostFn] = None) -> List[Tuple[int, bool]]:
     """
     Remove (in place) planes one at a time, least profitable first, while some plane's
     pixels would cost less than `label_cost` more on its neighbouring planes or
-    unassigned. Their pixels are left unassigned (`nodata`). Returns the removed ids.
+    unassigned. Their pixels are left unassigned (`nodata`). `mess_cost` is as for
+    `merge_by_energy`. Returns the removed ids, each with whether it would have been worth
+    keeping but for `mess_cost`.
     """
     removed = []
     while planes:
@@ -167,19 +184,33 @@ def remove_unprofitable(xyz: np.ndarray,
             neighbours[p].add(q)
             neighbours[q].add(p)
         profit = {}
+        idxs_of = {plane_id: np.flatnonzero(labels == plane_id) for plane_id in planes}
         for plane_id, plane in planes.items():
-            idxs = np.flatnonzero(labels == plane_id)
+            idxs = idxs_of[plane_id]
             cost = data_cost(xyz[idxs], plane.coef, residual_scale(plane.is_flat))
+            # a pixel that costs more than unassigned for its mess cost alone is one the plane
+            # would let go (but for its shape), so it doesn't count against keeping it:
+            extra = np.clip(NONE_COST - cost, 0, _extra(mess_cost, plane.coef, idxs, plane.is_flat, 0))
             alternative = np.full(len(idxs), NONE_COST)
+            alternative_extra = np.full(len(idxs), NONE_COST)
             for other in neighbours[plane_id]:
                 other_plane = planes[other]
-                alternative = np.minimum(alternative, data_cost(xyz[idxs], other_plane.coef,
-                                                                residual_scale(other_plane.is_flat)))
-            profit[plane_id] = (alternative - cost).sum()
-        worst = min(profit, key=profit.get)
-        if profit[worst] >= label_cost:
+                other_cost = data_cost(xyz[idxs], other_plane.coef, residual_scale(other_plane.is_flat))
+                alternative = np.minimum(alternative, other_cost)
+                other_extra = 0
+                if mess_cost is not None and other_plane.is_flat:
+                    other_extra = mess_cost(other_plane.coef, idxs_of[other])[idxs]
+                alternative_extra = np.minimum(alternative_extra, other_cost + other_extra)
+            profit[plane_id] = ((alternative_extra - cost - extra).sum(), (alternative - cost).sum())
+        worst = min(profit, key=lambda plane_id: profit[plane_id][0])
+        if profit[worst][0] >= label_cost:
             break
         del planes[worst]
         labels[labels == worst] = nodata
-        removed.append(worst)
+        removed.append((worst, profit[worst][1] >= label_cost))
     return removed
+
+
+def _extra(mess_cost: Optional[MessCostFn], coef, idxs: np.ndarray, is_flat: bool, otherwise=None):
+    """The mess cost of the pixels `idxs` on the plane `coef` they're on, if it's flat."""
+    return mess_cost(coef, idxs)[idxs] if mess_cost is not None and is_flat else otherwise

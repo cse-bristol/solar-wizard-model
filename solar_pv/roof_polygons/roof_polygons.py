@@ -65,6 +65,8 @@ MEETING_WALL_MAX_TILES = 3
 SMOOTH_TOLERANCE_TILES = 0.5
 # Boundary segments at least this long are kept as they are when de-zigzagging.
 SMOOTH_MIN_KEPT_TILES = 2.5
+# Margin (m) cut out around a flat roof's obstacles, beyond their pixels (see `_cut_obstacles`).
+OBSTACLE_SETBACK_M = 0.25
 
 
 def create_roof_polygons(building_id: str,
@@ -201,6 +203,8 @@ def _make_roof_polygons(building_geom: Polygon,
                    if i in new_index and j in new_index}
     _split_overlaps(plane_polys, valid_lines, [owned_xy[i] for i in valid], tile_m)
     _smooth(plane_polys, valid_lines, building_shrunk, tile_m)
+    for plane in plane_polys:
+        _cut_obstacles(plane, tile_m)
 
     for plane in plane_polys:
         roof_poly = largest_polygon(plane['roof_geom_27700'])
@@ -212,6 +216,19 @@ def _make_roof_polygons(building_geom: Polygon,
                        max_roof_slope_degrees, min_roof_area_m, min_roof_degrees_from_north)
 
     return [p for p in plane_polys if _is_valid(p)]
+
+
+def _cut_obstacles(plane: RoofPolygon, tile_m: float) -> None:
+    """
+    Cut the plane's obstacles (`obstacles_xy`), and a margin of `OBSTACLE_SETBACK_M` around
+    them, out of its roof polygon. Where that cuts the polygon in pieces, only the largest is
+    kept (see `_make_roof_polygons`), so a plane still has one polygon.
+    """
+    obstacles_xy = plane.get('obstacles_xy')
+    if obstacles_xy is None or len(obstacles_xy) == 0 or plane['roof_geom_27700'] is None:
+        return
+    obstacles = _pixel_region(obstacles_xy, tile_m).buffer(OBSTACLE_SETBACK_M, join_style=JOIN_STYLE.mitre)
+    plane['roof_geom_27700'] = _polygonal(plane['roof_geom_27700'].difference(obstacles))
 
 
 def _pixel_region(pixels_xy: np.ndarray, resolution_metres: float):
