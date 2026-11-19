@@ -31,9 +31,6 @@ POSTGIS_TILESIZE = 256
 # of what's available)
 ROOFDET_MAX_CPUS = 100
 
-# Max area of buildings to run roof plane detection on
-ROOFDET_MAX_AREA = 50000
-
 ##
 # PV output uncertainty constants:
 ##

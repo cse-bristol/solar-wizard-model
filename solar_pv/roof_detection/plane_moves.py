@@ -26,6 +26,10 @@ from solar_pv.roof_detection.assign_pixels import grid_index, _neighbour_pairs, 
     SMOOTHNESS_PER_M
 
 
+# A merge `merge_by_energy` makes for its `good_enough_share` must explain at least this share
+# of each plane's pixels too:
+MIN_SHARE_EACH = 0.5
+
 # a flat plane's extra cost per pixel, given its coefficients and pixels (see `mess.MessCost`)
 MessCostFn = Callable[[Tuple[float, float, float], np.ndarray], np.ndarray]
 
@@ -98,9 +102,10 @@ def merge_by_energy(xyz: np.ndarray,
     Greedily merge (in place) the adjacent pair of planes whose merge lowers the energy
     most, until no merge would. Only pairs that are `mergeable` are considered, and a pair
     whose merged plane explains (has a data cost of at most 1 for) at least
-    `good_enough_share` of their pixels is merged even if that raises the energy. A merged plane keeps the first plane's id, and is refitted to the
-    pixels of both: `fit(xyz)` is a plane's coefficients and flatness, fitted as the planes
-    are refitted when refining, so that a merge is judged on the plane it would become.
+    `good_enough_share` of their pixels, and `MIN_SHARE_EACH` of each one's, is merged even
+    if that raises the energy. A merged plane keeps the first plane's id, and is refitted to
+    the pixels of both: `fit(xyz)` is a plane's coefficients and flatness, fitted as the
+    planes are refitted when refining, so that a merge is judged on the plane it would become.
     `residual_scale(is_flat)` is the residual scale for a plane, and `mess_cost(coef, idxs)`,
     if given, each pixel's extra cost on the flat plane `coef` whose pixels are `idxs` (see
     `mess.MessCost`).
@@ -125,8 +130,12 @@ def merge_by_energy(xyz: np.ndarray,
         merged = data_cost(xyz[union], coef, residual_scale(is_flat))
         merged_cost = (merged + _extra(mess_cost, coef, union, is_flat, 0)).sum()
         g = costs[p] + costs[q] + smoothness * edges[pair] + label_cost - merged_cost
-        # explained as `good_enough_share` means it: by the fit alone
-        good_enough = good_enough_share is not None and np.mean(merged <= 1) >= good_enough_share
+        # explained as `good_enough_share` means it: by the fit alone. Each plane's pixels must
+        # be too, or a large plane would take any small neighbour, however badly it fits it.
+        explained = merged <= 1
+        n_p = len(idxs[p])
+        good_enough = good_enough_share is not None and np.mean(explained) >= good_enough_share and \
+            min(np.mean(explained[:n_p]), np.mean(explained[n_p:])) >= MIN_SHARE_EACH
         return g, (coef, is_flat, merged_cost), g > 0 or good_enough
 
     gains = {pair: gain(pair) for pair in edges}

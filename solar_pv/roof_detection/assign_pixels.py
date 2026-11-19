@@ -25,6 +25,9 @@ SMOOTHNESS_PER_M = 0.5
 # maximum_flow needs int32 capacities: energy is quantized to this many steps per unit.
 _ENERGY_SCALE = 1000
 _FOUR_CONNECTED = ndimage.generate_binary_structure(2, 1)
+# Up to this many labels x pixels, data costs are tabulated rather than computed as needed:
+# quicker for small buildings, but it doesn't scale to large ones with many planes.
+_MAX_TABULATED = 2_000_000
 
 
 def assign_pixels(xyz: np.ndarray,
@@ -67,22 +70,19 @@ def assign_pixels(xyz: np.ndarray,
 
     # internally, label 0 is none and plane k is k + 1
     current = labels + 1
-    # per label, each pixel's data cost and whether it may take that label:
-    data = np.full((n_planes + 1, len(z)), none_cost)
-    allowed = np.zeros((n_planes + 1, len(z)), dtype=bool)
-    allowed[0] = True
+    # per label, the pixels it may take (None: all); a plane's data costs are computed as
+    # needed (`_DataCost`), not stored per label and pixel, which wouldn't scale to large
+    # buildings with many planes:
+    allowed = [None] + [np.empty(0, dtype=int)] * n_planes
+    live = np.zeros(n_planes + 1, dtype=bool)
     for k in range(1, n_planes + 1):
         idxs = np.flatnonzero(current == k)
         if len(idxs) < 3:
             current[idxs] = 0
             continue
-        a, b, c = coefs[k - 1]
-        predicted = xy[:, 0] * a + xy[:, 1] * b + c
-        data[k] = np.minimum(np.abs(z - predicted) / residual_scales[k - 1], residual_cap)
-        if extra_costs is not None and extra_costs[k - 1] is not None:
-            data[k] += extra_costs[k - 1]
-
-        allowed[k] = _within(rows, cols, rows[idxs], cols[idxs], max_dist_pixels)
+        live[k] = True
+        allowed[k] = _within(grid, rows[idxs], cols[idxs], max_dist_pixels)
+    data = _DataCost(xyz, coefs, residual_scales, residual_cap, none_cost, extra_costs, live)
 
     lo, hi = _neighbour_pairs(grid)
     start_energy = _energy(current, data, lo, hi, smoothness)
@@ -101,19 +101,21 @@ def assign_pixels(xyz: np.ndarray,
         improved = False
         for alpha in range(n_planes + 1):
             if near[alpha] is None:
-                near[alpha] = np.flatnonzero(allowed[alpha][lo] | allowed[alpha][hi])
-                ends = allowed[alpha].copy()
+                allowed_alpha = _mask(allowed[alpha], len(z))
+                near[alpha] = np.flatnonzero(allowed_alpha[lo] | allowed_alpha[hi])
+                ends = allowed_alpha.copy()
                 ends[lo[near[alpha]]] = ends[hi[near[alpha]]] = True
                 reach[alpha] = np.flatnonzero(ends)
             elif rejected_at[alpha] >= 0 and len(reach[alpha]) and \
                     pixel_changed_at[reach[alpha]].max() <= rejected_at[alpha] and \
                     plane_changed_at[planes_near[alpha]].max(initial=0) <= rejected_at[alpha]:
                 continue
+            allowed_alpha = _mask(allowed[alpha], len(z))
             edges = near[alpha]
-            candidate = _expand(alpha, current, data, allowed[alpha], lo, hi, smoothness, edges)
+            candidate = _expand(alpha, current, data, allowed_alpha, lo, hi, smoothness, edges)
             candidate, cut = _connected_move(alpha, current, candidate, grid, rows, cols)
             if cut.size and _energy_change(current, candidate, data, lo, hi, smoothness) >= -1e-9:
-                retry = _expand(alpha, current, data, allowed[alpha] & ~np.isin(current, cut), lo, hi,
+                retry = _expand(alpha, current, data, allowed_alpha & ~np.isin(current, cut), lo, hi,
                                 smoothness, edges)
                 candidate, _ = _connected_move(alpha, current, retry, grid, rows, cols)
             if _energy_change(current, candidate, data, lo, hi, smoothness) < -1e-9:
@@ -189,27 +191,90 @@ def _neighbour_pairs(grid: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     return lo, hi
 
 
-def _within(rows: np.ndarray, cols: np.ndarray, start_rows: np.ndarray, start_cols: np.ndarray,
-            max_dist: float) -> np.ndarray:
-    """Which pixels (`rows`, `cols`) are within `max_dist` (pixels) of a start pixel. The
-    distance transform is of just the start pixels' bounding box, grown by `max_dist`."""
+def _within(grid: np.ndarray, start_rows: np.ndarray, start_cols: np.ndarray, max_dist: float) -> np.ndarray:
+    """The pixels of `grid` (see `grid_index`) within `max_dist` (pixels) of a start pixel, in
+    order. The distance transform is of just the start pixels' bounding box, grown by `max_dist`."""
     pad = int(np.ceil(max_dist)) + 1
     r0, c0 = start_rows.min() - pad, start_cols.min() - pad
     start_image = np.zeros((start_rows.max() + pad + 1 - r0, start_cols.max() + pad + 1 - c0), dtype=bool)
     start_image[start_rows - r0, start_cols - c0] = True
-    r, c = rows - r0, cols - c0
-    inside = (r >= 0) & (r < start_image.shape[0]) & (c >= 0) & (c < start_image.shape[1])
-    within = np.zeros(len(rows), dtype=bool)
-    within[inside] = distance_transform_edt(~start_image)[r[inside], c[inside]] <= max_dist
-    return within
+    near = distance_transform_edt(~start_image) <= max_dist
+    # the part of the box within the grid:
+    gr0, gc0 = max(r0, 0), max(c0, 0)
+    gr1, gc1 = min(r0 + start_image.shape[0], grid.shape[0]), min(c0 + start_image.shape[1], grid.shape[1])
+    crop = grid[gr0:gr1, gc0:gc1]
+    within = crop[near[gr0 - r0:gr1 - r0, gc0 - c0:gc1 - c0] & (crop >= 0)]
+    return np.sort(within)
 
 
-def _energy(labels: np.ndarray, data: np.ndarray, lo: np.ndarray, hi: np.ndarray, smoothness: float) -> float:
-    return float(data[labels, np.arange(len(labels))].sum()
+def _mask(idxs: Optional[np.ndarray], n: int) -> np.ndarray:
+    """`idxs` (None: all) as a mask over `n` pixels."""
+    if idxs is None:
+        return np.ones(n, dtype=bool)
+    mask = np.zeros(n, dtype=bool)
+    mask[idxs] = True
+    return mask
+
+
+class _DataCost:
+    """
+    Each pixel's data cost on a label (0 for none, k + 1 for plane k), computed as needed:
+    `cost(labels, idxs)` is that of each pixel `idxs` on its label in `labels`. Planes that
+    aren't `live` cost as none.
+    """
+
+    def __init__(self, xyz: np.ndarray, coefs, residual_scales, residual_cap: float, none_cost: float,
+                 extra_costs, live: np.ndarray):
+        n = len(coefs) + 1
+        self.x, self.y, self.z = xyz[:, 0], xyz[:, 1], xyz[:, 2]
+        self.a, self.b, self.c, self.scale = np.zeros(n), np.zeros(n), np.zeros(n), np.ones(n)
+        for k, (a, b, c) in enumerate(coefs, start=1):
+            self.a[k], self.b[k], self.c[k] = a, b, c
+            self.scale[k] = residual_scales[k - 1]
+        self.residual_cap, self.none_cost, self.live = residual_cap, none_cost, live
+        # the distinct extra cost arrays (usually one, shared by every flat plane), and which each label has:
+        self.extra_of = np.full(n, -1)
+        extras = []
+        if extra_costs is not None:
+            for k, extra in enumerate(extra_costs, start=1):
+                if extra is None:
+                    continue
+                for e, other in enumerate(extras):
+                    if other is extra:
+                        self.extra_of[k] = e
+                        break
+                else:
+                    self.extra_of[k] = len(extras)
+                    extras.append(extra)
+        self.extras = extras
+        self.table = None
+        n_pixels = len(xyz)
+        if n * n_pixels <= _MAX_TABULATED:
+            every = np.arange(n_pixels)
+            self.table = np.stack([self(np.full(n_pixels, k), every) for k in range(n)])
+
+    def __call__(self, labels: np.ndarray, idxs: np.ndarray) -> np.ndarray:
+        if self.table is not None:
+            return self.table[labels, idxs]
+        out = np.full(len(idxs), self.none_cost)
+        on = self.live[labels]
+        k, i = labels[on], idxs[on]
+        predicted = self.x[i] * self.a[k] + self.y[i] * self.b[k] + self.c[k]
+        cost = np.minimum(np.abs(self.z[i] - predicted) / self.scale[k], self.residual_cap)
+        extra_of = self.extra_of[k]
+        for e, extra in enumerate(self.extras):
+            has = extra_of == e
+            cost[has] += extra[i[has]]
+        out[on] = cost
+        return out
+
+
+def _energy(labels: np.ndarray, data: _DataCost, lo: np.ndarray, hi: np.ndarray, smoothness: float) -> float:
+    return float(data(labels, np.arange(len(labels))).sum()
                  + smoothness * np.count_nonzero(labels[lo] != labels[hi]))
 
 
-def _energy_change(labels: np.ndarray, new_labels: np.ndarray, data: np.ndarray, lo: np.ndarray, hi: np.ndarray,
+def _energy_change(labels: np.ndarray, new_labels: np.ndarray, data: _DataCost, lo: np.ndarray, hi: np.ndarray,
                    smoothness: float) -> float:
     """The energy of `new_labels` less that of `labels`, from just the pixels that differ."""
     changed = labels != new_labels
@@ -218,14 +283,14 @@ def _energy_change(labels: np.ndarray, new_labels: np.ndarray, data: np.ndarray,
         return 0.0
     edges = np.flatnonzero(changed[lo] | changed[hi])
     l, h = lo[edges], hi[edges]
-    return float(data[new_labels[idxs], idxs].sum() - data[labels[idxs], idxs].sum()
+    return float(data(new_labels[idxs], idxs).sum() - data(labels[idxs], idxs).sum()
                  + smoothness * (np.count_nonzero(new_labels[l] != new_labels[h])
                                  - np.count_nonzero(labels[l] != labels[h])))
 
 
 def _expand(alpha: int,
             labels: np.ndarray,
-            data: np.ndarray,
+            data: _DataCost,
             allowed: np.ndarray,
             lo: np.ndarray,
             hi: np.ndarray,
@@ -254,8 +319,8 @@ def _expand(alpha: int,
     touching = movable[lo] | movable[hi]
     lo, hi = lo[touching], hi[touching]
 
-    u0 = data[labels[nodes], nodes]
-    u1 = data[alpha, nodes]
+    u0 = data(labels[nodes], nodes)
+    u1 = data(np.full(len(nodes), alpha), nodes)
 
     a, b = labels[lo], labels[hi]
     differ = smoothness * (a != b)

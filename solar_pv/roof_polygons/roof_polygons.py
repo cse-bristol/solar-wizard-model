@@ -19,12 +19,14 @@ from shapely.geometry import Polygon, CAP_STYLE, JOIN_STYLE, MultiPolygon, LineS
 from solar_pv.geos import largest_polygon
 from solar_pv.datatypes import RoofPlane, RoofPolygon
 from solar_pv.roof_detection import rejections
-from solar_pv.roof_polygons.occupancy import tile_polygon
+from solar_pv.roof_polygons.occupancy import tile_polygon, legal_window
 
 # Noding nearly coincident lines (a meeting line along the edge two polygons share) in
 # floating point can leave a gap in a ring, so that polygonizing merges the faces either
 # side of it.
 _NODING_GRID_M = 1e-6
+# Overlaps (and parts of them) narrower than this are floating-point error.
+_HAIRLINE_M = 1e-5
 
 # Module constants, so that `fast_roof_detection --set` can tune them.
 # Tile edges of boundary are charged this much each, in tiles of area (see `tile_polygon`).
@@ -65,6 +67,8 @@ MEETING_WALL_MAX_TILES = 3
 SMOOTH_TOLERANCE_TILES = 0.5
 # Boundary segments at least this long are kept as they are when de-zigzagging.
 SMOOTH_MIN_KEPT_TILES = 2.5
+# not along a grid axis, so ties are rare
+_CANONICAL_DIRECTION = np.array([1, 0.6180339887])
 # Margin (m) cut out around a flat roof's obstacles, beyond their pixels (see `_cut_obstacles`).
 OBSTACLE_SETBACK_M = 0.25
 
@@ -179,11 +183,13 @@ def _make_roof_polygons(building_geom: Polygon,
     owned_xy = [p['inliers_xy'] for p in plane_polys]
 
     lines = _meeting_lines(plane_polys, owned_xy, regions, building_shrunk, tile_m)
-    exclusions, additions = _exclusions(lines, regions, tile_m)
+    eroded, exclusions, additions = _exclusions(lines, regions, tile_m)
+    eroded_index = shapely.STRtree(eroded)
     raw_regions = _raw_regions(lines, regions)
     for i, plane in enumerate(plane_polys):
         region = shapely.union_all([regions[i]] + additions[i])
-        legal = _legal_area(building_shrunk, lines, exclusions[i], i)
+        legal = _legal_area(building_shrunk, lines, eroded, eroded_index, exclusions[i], i,
+                            legal_window(region, plane['aspect'], region.centroid, tile_m))
 
         tiled = tile_polygon(region, legal, plane['aspect'], region.centroid, tile_m, PERIMETER_LAMBDA)
         roof_poly = tiled.intersection(legal) if tiled is not None else region.intersection(legal)
@@ -666,8 +672,10 @@ def _restrict(line: _Line, tile_m: float, zone_tiles: float) -> _MeetingLine:
         near.append(LineString([line.at(line.start), line.at(lo)]))
     if line.end > hi + LINE_END_TILES * tile_m + 1e-6:
         near.append(LineString([line.at(hi), line.at(line.end)]))
-    zone = shapely.union_all(near).buffer(
-        zone_tiles * tile_m, cap_style=CAP_STYLE.square, join_style=JOIN_STYLE.mitre)
+    # buffered part by part: GEOS can make an invalid buffer (nested shells) of a collection
+    # of a polygon and lines
+    zone = shapely.union_all(shapely.buffer(
+        near, zone_tiles * tile_m, cap_style=CAP_STYLE.square, join_style=JOIN_STYLE.mitre))
     # trimmed only along the line: across it, the zone reaches as far as the buffer does
     zone = zone.intersection(_strip(line, zone.length))
     core = _strip(line, CORE_HALF_WIDTH_TILES * tile_m)
@@ -797,9 +805,11 @@ def _order_key(pixels_xy: np.ndarray) -> Tuple[float, float, int]:
 
 
 def _exclusions(lines: Dict[Tuple[int, int], _MeetingLine], regions: list,
-                tile_m: float) -> Tuple[List[List[Tuple[int, Polygon]]], List[list]]:
+                tile_m: float) -> Tuple[List[Polygon], List[List[Tuple[int, Polygon]]], List[list]]:
     """
-    For each plane, the areas it may not occupy, each with the plane it's for, and areas
+    The areas planes may not occupy, and areas to add to their regions: each plane's region
+    eroded by half a tile, which every other plane is excluded from; and for each plane,
+    the areas along its lines it's excluded from, each with the plane it's for, and areas
     to add to its region.
 
     Along an edge shared with a neighbour along a line between them, the line takes
@@ -813,37 +823,47 @@ def _exclusions(lines: Dict[Tuple[int, int], _MeetingLine], regions: list,
 
     exclusions = [[] for _ in regions]
     additions = [[] for _ in regions]
-    for i in range(len(regions)):
-        for j in range(i + 1, len(regions)):
-            exclusions[i].append((j, eroded[j]))
-            exclusions[j].append((i, eroded[i]))
-            line = lines.get((i, j))
-            if line is not None:
-                exclusions[i].append((j, line.zone.difference(line.side_1).difference(eroded[i])))
-                exclusions[j].append((i, line.zone.intersection(line.side_1).difference(eroded[j])))
-                additions[i].append(regions[j].intersection(line.zone).intersection(line.side_1))
-                additions[j].append(regions[i].intersection(line.zone).difference(line.side_1))
-                exclusions[i].append((j, line.core.difference(line.side_1)))
-                exclusions[j].append((i, line.core.intersection(line.side_1)))
-    return exclusions, additions
+    for (i, j), line in sorted(lines.items()):
+        exclusions[i].append((j, line.zone.difference(line.side_1).difference(eroded[i])))
+        exclusions[j].append((i, line.zone.intersection(line.side_1).difference(eroded[j])))
+        additions[i].append(regions[j].intersection(line.zone).intersection(line.side_1))
+        additions[j].append(regions[i].intersection(line.zone).difference(line.side_1))
+        exclusions[i].append((j, line.core.difference(line.side_1)))
+        exclusions[j].append((i, line.core.intersection(line.side_1)))
+    return eroded, exclusions, additions
 
 
-def _legal_area(building_shrunk, lines: Dict[Tuple[int, int], _MeetingLine],
-                exclusions: List[Tuple[int, Polygon]], i: int):
+def _legal_area(building_shrunk, lines: Dict[Tuple[int, int], _MeetingLine], eroded: List[Polygon],
+                eroded_index: shapely.STRtree, line_exclusions: List[Tuple[int, Polygon]], i: int, window: Polygon):
     """
-    The area plane `i` may occupy: the shrunk building minus its `exclusions`, except
-    that within the core of a line it has with a neighbour, its own side of the line is
-    excluded only by other planes.
+    The area plane `i` may occupy within `window`: the shrunk building minus the other
+    planes' `eroded` regions and its `line_exclusions` (see `_exclusions`), except that
+    within the core of a line it has with a neighbour, its own side of the line is excluded
+    only by other planes.
     """
-    legal = _polygonal(building_shrunk.difference(_polygonal(shapely.union_all([g for _, g in exclusions]))))
+    exclusions = [(int(j), eroded[j]) for j in sorted(eroded_index.query(window, predicate='intersects')) if j != i] \
+        + line_exclusions
+    area = _polygonal(building_shrunk.intersection(window))
+    legal = _polygonal(area.difference(_polygonal(_union([g for _, g in exclusions]))))
     for (a, b), line in lines.items():
         if i not in (a, b):
             continue
         j = b if i == a else a
         own_side = _polygonal(line.core.intersection(line.side_1) if i == a else line.core.difference(line.side_1))
-        others = _polygonal(shapely.union_all([g for k, g in exclusions if k != j]))
-        legal = _polygonal(legal.union(_polygonal(own_side.intersection(building_shrunk).difference(others))))
+        others = _polygonal(_union([g for k, g in exclusions if k != j]))
+        legal = _polygonal(legal.union(_polygonal(own_side.intersection(area).difference(others))))
     return legal
+
+
+def _union(geoms):
+    """
+    `shapely.union_all`, noded to `_NODING_GRID_M` if GEOS can't node it in floating point:
+    nearly coincident edges can raise a TopologyException even when every input is valid.
+    """
+    try:
+        return shapely.union_all(geoms)
+    except shapely.errors.GEOSException:
+        return shapely.union_all(geoms, grid_size=_NODING_GRID_M)
 
 
 def _own_cores(lines: Dict[Tuple[int, int], _MeetingLine], i: int):
@@ -983,8 +1003,12 @@ def _split_overlaps(planes: List[RoofPolygon], lines: Dict[Tuple[int, int], _Mee
             continue
         overlapping.add((i, j))
         line = lines.get((i, j))
-        if line is not None:
-            edges.append(line.side_1.exterior.intersection(overlap.envelope.buffer(tile_m)))
+        # floating-point error leaves hairline overlaps, and hairline spikes on real ones,
+        # which would stretch the envelope
+        solid = overlap.buffer(-_HAIRLINE_M / 2, join_style=JOIN_STYLE.mitre) \
+            .buffer(_HAIRLINE_M / 2, join_style=JOIN_STYLE.mitre)
+        if line is not None and not solid.is_empty:
+            edges.append(line.side_1.exterior.intersection(solid.envelope.buffer(tile_m)))
 
     if not overlapping:
         return
@@ -1069,14 +1093,13 @@ def _smooth_arc(coords: np.ndarray, fixed, tile_m: float) -> np.ndarray:
     straightens a staircase, and the result simplified to `SMOOTH_TOLERANCE_TILES`. The
     ends of an open arc stay put, as other arcs meet there.
     """
+    coords = _canonical_arc(coords, fixed)
     n = len(coords) - 1
     if n < 2:
         return _drop_collinear(coords)
     closed = _same_point(coords[0], coords[-1])
-    starts, ends = shapely.points(coords[:-1]), shapely.points(coords[1:])
     mids = (coords[1:] + coords[:-1]) / 2
-    on_fixed = shapely.dwithin(fixed, shapely.points(mids), 1e-4) \
-        & shapely.dwithin(fixed, starts, 1e-4) & shapely.dwithin(fixed, ends, 1e-4)
+    on_fixed = _on_fixed(coords, fixed)
     seg_len = np.linalg.norm(coords[1:] - coords[:-1], axis=1)
     kept = on_fixed | (seg_len >= SMOOTH_MIN_KEPT_TILES * tile_m)
     if kept.all():
@@ -1125,6 +1148,39 @@ def _smooth_arc(coords: np.ndarray, fixed, tile_m: float) -> np.ndarray:
             chain = np.asarray(shapely.simplify(shapely.linestrings(chain), tolerance).coords)
         out.extend(chain[1:])
     return _drop_collinear(np.array(out))
+
+
+def _canonical_arc(coords: np.ndarray, fixed) -> np.ndarray:
+    """
+    The arc without vertices on a straight line between their neighbours, except where a
+    `fixed` line ends, running from its end first along a fixed direction or, if closed,
+    anticlockwise from its vertex first along it. Overlays and noding leave such vertices,
+    and pick an arc's direction and a ring's start, by floating-point noise and the order of
+    their inputs, and each changes the smoothed arc.
+    """
+    if _same_point(coords[0], coords[-1]):
+        ring = coords[:-1]
+        if len(ring) < 3:
+            return coords
+        if shapely.linearrings(coords).is_ccw is False:
+            ring = ring[::-1]
+        # an extreme vertex isn't between its neighbours, so stays
+        ring = np.roll(ring, -int(np.argmin(ring @ _CANONICAL_DIRECTION)), axis=0)
+        coords = np.vstack([ring, ring[:1]])
+    elif coords[-1] @ _CANONICAL_DIRECTION < coords[0] @ _CANONICAL_DIRECTION:
+        coords = coords[::-1]
+    if len(coords) < 3:
+        return coords
+    on_fixed = _on_fixed(coords, fixed)
+    ends = [0] + [k for k in range(1, len(coords) - 1) if on_fixed[k - 1] != on_fixed[k]] + [len(coords) - 1]
+    return np.vstack([coords[:1]] + [_drop_collinear(coords[a:b + 1])[1:] for a, b in zip(ends, ends[1:])])
+
+
+def _on_fixed(coords: np.ndarray, fixed) -> np.ndarray:
+    """Whether each segment is along the `fixed` lines."""
+    starts, ends = shapely.points(coords[:-1]), shapely.points(coords[1:])
+    mids = shapely.points((coords[1:] + coords[:-1]) / 2)
+    return shapely.dwithin(fixed, mids, 1e-4) & shapely.dwithin(fixed, starts, 1e-4) & shapely.dwithin(fixed, ends, 1e-4)
 
 
 def _drop_collinear(coords: np.ndarray) -> np.ndarray:
@@ -1258,6 +1314,7 @@ def _write_test_data(test_data):
     """Write test data for building in the format that the roof polygon tests expect"""
     debug_data_dir = os.environ.get("DEBUG_DATA_DIR")
     if debug_data_dir:
+        os.makedirs(debug_data_dir, exist_ok=True)
         fname = join(debug_data_dir, f"roof_poly_{test_data['building_id']}.json")
         with open(fname, 'w') as f:
             json.dump(test_data, f, sort_keys=True, default=str)

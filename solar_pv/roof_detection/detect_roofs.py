@@ -17,6 +17,7 @@ from psycopg2.extras import DictCursor, execute_values, Json
 from psycopg2.sql import SQL, Identifier
 import numpy as np
 import shapely
+from scipy import ndimage
 from shapely import STRtree
 from shapely import wkt
 
@@ -24,12 +25,12 @@ from solar_pv.geos import deg_diff, slope_deg, aspect_deg
 from solar_pv.db_funcs import count, sql_command, connect, connection
 from solar_pv.postgis import pixels_for_buildings
 from solar_pv import tables, stage
-from solar_pv.constants import ROOFDET_MAX_CPUS, ROOFDET_MAX_AREA, \
+from solar_pv.constants import ROOFDET_MAX_CPUS, \
     AZIMUTH_ALIGNMENT_THRESHOLD, FLAT_ROOF_AZIMUTH_ALIGNMENT_THRESHOLD, FLAT_ROOF_DEGREES_THRESHOLD
 from solar_pv.roof_detection import rejections
 from solar_pv.roof_detection import mess as mess_module
 from solar_pv.roof_detection.mess import reject_clutter, MessCost, obstacle_holes
-from solar_pv.roof_detection.assign_pixels import assign_pixels, NONE, NONE_COST
+from solar_pv.roof_detection.assign_pixels import assign_pixels, grid_index, NONE, NONE_COST
 from solar_pv.roof_detection.footprint import FaceIndex, closest_azimuth
 from solar_pv.roof_detection.plane_metrics import set_plane_fit, set_fit_metrics, min_thinness_ratio
 from solar_pv.roof_detection.plane_fit import PlaneFit
@@ -82,8 +83,9 @@ _MIN_OFF_FOOTPRINT_PIXELS = 12
 #  region pixels to match; that needs a sample at another resolution. Tuned at 1m.
 _LABEL_COST = 8.0
 # Planes facing the same way are merged if the merged plane explains at least this share of
-# their pixels (is within its residual scale of them), even if merging raises the energy:
-# at 1m, a slightly warped roof face fits two planes better.
+# their pixels (is within its residual scale of them), and half of each one's (see
+# `merge_by_energy`), even if merging raises the energy: at 1m, a slightly warped roof face
+# fits two planes better.
 _GOOD_ENOUGH_MERGE_SHARE = 0.8
 # Regions re-proposed from poorly explained pixels can be smaller than the first ones, as
 # the energy decides whether they're worth keeping (see `plane_moves`).
@@ -313,7 +315,8 @@ def _segment_and_assign(xyz: np.ndarray,
     reliable_normals = np.where(locally_planar[:, None], normals, np.nan)
     finished = _finalise(xyz, aspect, labels, planes, face_index, resolution_metres, reliable_normals)
     if mess is not None and mess_module.MESS_HOLES:
-        _set_obstacle_holes(finished, xyz, labels, above_ground, resolution_metres, building_id, rejected)
+        finished = _split_at_obstacles(finished, xyz, aspect, labels, above_ground, face_index, resolution_metres,
+                                       reliable_normals, min_pixels, building_id, rejected)
     return reject_clutter(finished, labels, xyz, resolution_metres, rejected=rejected)
 
 
@@ -375,16 +378,32 @@ def _propose(xyz: np.ndarray,
     return plane_id
 
 
-def _set_obstacle_holes(planes: Dict[int, RoofPlane], xyz: np.ndarray, labels: np.ndarray, above_ground: np.ndarray,
-                        resolution_metres: float, building_id: str, rejected: Optional[List[dict]]) -> None:
-    """Set each flat plane's `obstacles_xy` (see `mess.obstacle_holes`), to be cut out of its
-    roof polygon, and record its own pixels among them in `rejected` as messy parts."""
+def _split_at_obstacles(planes: Dict[int, RoofPlane], xyz: np.ndarray, aspect: np.ndarray, labels: np.ndarray,
+                        above_ground: np.ndarray, face_index: FaceIndex, resolution_metres: float,
+                        reliable_normals: np.ndarray, min_pixels: int, building_id: str,
+                        rejected: Optional[List[dict]]) -> Dict[int, RoofPlane]:
+    """
+    Set each flat plane's `obstacles_xy` (see `mess.obstacle_holes`), to be cut out of its
+    roof polygon, and record its own pixels among them in `rejected` as messy parts.
+
+    Where the obstacles cut a plane in pieces of at least `min_pixels` (4-connected), each
+    piece is a plane, with the orientation of the whole, so that cutting them out of the roof
+    polygon doesn't cut it in pieces (only one of which could be kept). The rest of its
+    pixels, the obstacles and smaller pieces, go to the nearest piece: a roof polygon is
+    tiled from all of a plane's pixels before its obstacles are cut out.
+
+    Returns the planes, with any new ones (in `labels` too) under new ids.
+    """
+    grid, rows, cols = grid_index(xyz[:, :2], resolution_metres)
+    next_id = max(planes) + 1
+    out = {}
     for plane_id, plane in planes.items():
+        out[plane_id] = plane
         if not plane['is_flat']:
             continue
+        coef = (plane['x_coef'], plane['y_coef'], plane['intercept'])
         idxs = np.flatnonzero(labels == plane_id)
-        holes = obstacle_holes(xyz, above_ground, idxs, (plane['x_coef'], plane['y_coef'], plane['intercept']),
-                               resolution_metres)
+        holes = obstacle_holes(xyz, above_ground, idxs, coef, resolution_metres)
         if not holes.any():
             continue
         plane['obstacles_xy'] = xyz[holes, :2]
@@ -392,6 +411,41 @@ def _set_obstacle_holes(planes: Dict[int, RoofPlane], xyz: np.ndarray, labels: n
         if rejected is not None and own.any():
             rejected.append({"building_id": building_id, "inliers_xy": xyz[own, :2],
                              "rejection_reason": rejections.MESSY_PART, "rejection_details": {}})
+
+        pieces = [p for p in _parts(idxs[~holes[idxs]], grid, rows, cols) if len(p) >= min_pixels]
+        if len(pieces) < 2:
+            continue
+        pieces.sort(key=len, reverse=True)
+        nearest = _nearest_piece(idxs, pieces, grid.shape, rows, cols)
+        for k in range(len(pieces)):
+            piece_idxs = idxs[nearest == k]
+            piece = plane if k == 0 else {**plane, "plane_id": f"{plane['plane_id']}_PART_{k}"}
+            _finish(piece, xyz, aspect, piece_idxs, (coef, True), face_index, resolution_metres, reliable_normals)
+            if k > 0:
+                labels[piece_idxs] = next_id
+                out[next_id] = piece
+                next_id += 1
+    return out
+
+
+def _parts(idxs: np.ndarray, grid: np.ndarray, rows: np.ndarray, cols: np.ndarray) -> List[np.ndarray]:
+    """The pixels `idxs` (of the image `grid`, see `grid_index`), split into 4-connected parts."""
+    image = np.zeros(grid.shape, dtype=bool)
+    image[rows[idxs], cols[idxs]] = True
+    components, n = ndimage.label(image)
+    part_of = components[rows[idxs], cols[idxs]]
+    return [idxs[part_of == k] for k in range(1, n + 1)]
+
+
+def _nearest_piece(idxs: np.ndarray, pieces: List[np.ndarray], shape: Tuple[int, int], rows: np.ndarray,
+                   cols: np.ndarray) -> np.ndarray:
+    """For each pixel of `idxs`, the index in `pieces` of the piece with the pixel nearest it."""
+    image = np.full(shape, -1)
+    for k, piece in enumerate(pieces):
+        image[rows[piece], cols[piece]] = k
+    _, (near_rows, near_cols) = ndimage.distance_transform_edt(image < 0, return_indices=True)
+    r, c = rows[idxs], cols[idxs]
+    return image[near_rows[r, c], near_cols[r, c]]
 
 
 def _record_messy_parts(xyz: np.ndarray, labels: np.ndarray, mess: Optional[MessCost], building_id: str,
@@ -584,6 +638,8 @@ def _reassign(xyz: np.ndarray,
     messy_share = {}
     if mess is not None:
         extra_costs = []
+        # one array per distinct mess cost (all flat planes share it), not one per plane:
+        masked = {}
         for plane_id in plane_ids:
             plane = planes[plane_id]
             start = np.flatnonzero(labels == plane_id)
@@ -591,7 +647,9 @@ def _reassign(xyz: np.ndarray,
                 extra_costs.append(None)
                 continue
             mess_cost = mess.cost(plane.coef, start)
-            extra_costs.append(mess_cost[above_ground])
+            if id(mess_cost) not in masked:
+                masked[id(mess_cost)] = (mess_cost, mess_cost[above_ground])
+            extra_costs.append(masked[id(mess_cost)][1])
             if len(start):
                 cost = data_cost(xyz[start], plane.coef, _residual_scale(True))
                 for_mess[plane_id] = start[(cost <= 1) & (cost + mess_cost[start] > NONE_COST)]
@@ -663,23 +721,32 @@ def _finalise(xyz: np.ndarray,
         idxs = np.flatnonzero(labels == plane_id)
         roof_plane = {"building_id": plane.proposed["building_id"], "plane_type": plane.plane_type,
                       "plane_id": plane.plane_id, "res": resolution_metres}
-        set_plane_fit(roof_plane, xyz[idxs, :2], xyz[idxs, 2], aspect[idxs], resolution_metres)
-        coef, is_flat = _fit(xyz[idxs], _FINAL_TRIM_RESIDUAL)
-        roof_plane['x_coef'], roof_plane['y_coef'], roof_plane['intercept'] = coef
-        roof_plane['slope'] = slope_deg(coef[0], coef[1])
-        roof_plane['is_flat'] = is_flat
-        roof_plane['aspect_raw'] = aspect_deg(coef[0], coef[1])
-        xy, z = xyz[idxs, :2], xyz[idxs, 2]
-        set_fit_metrics(roof_plane, z, xy[:, 0] * coef[0] + xy[:, 1] * coef[1] + coef[2])
-        normals = reliable_normals[idxs]
-        roof_plane['facing_share'] = _facing_share(roof_plane, normals[~np.isnan(normals[:, 0])])
-        snapped, _ = _snapped_aspect(roof_plane, face_index)
-        if snapped is not None:
-            roof_plane['aspect'] = snapped
-        else:
-            roof_plane['aspect'] = 180 if is_flat else roof_plane['aspect_raw']
+        _finish(roof_plane, xyz, aspect, idxs, _fit(xyz[idxs], _FINAL_TRIM_RESIDUAL), face_index, resolution_metres,
+                reliable_normals)
         finished[plane_id] = roof_plane
     return finished
+
+
+def _finish(roof_plane: dict, xyz: np.ndarray, aspect: np.ndarray, idxs: np.ndarray,
+            fitted: Tuple[Tuple[float, float, float], bool], face_index: FaceIndex, resolution_metres: float,
+            reliable_normals: np.ndarray) -> None:
+    """Set everything on `roof_plane` that `_finalise` does, for its pixels `idxs` and its
+    plane `fitted` (coefficients and flatness)."""
+    set_plane_fit(roof_plane, xyz[idxs, :2], xyz[idxs, 2], aspect[idxs], resolution_metres)
+    coef, is_flat = fitted
+    roof_plane['x_coef'], roof_plane['y_coef'], roof_plane['intercept'] = coef
+    roof_plane['slope'] = slope_deg(coef[0], coef[1])
+    roof_plane['is_flat'] = is_flat
+    roof_plane['aspect_raw'] = aspect_deg(coef[0], coef[1])
+    xy, z = xyz[idxs, :2], xyz[idxs, 2]
+    set_fit_metrics(roof_plane, z, xy[:, 0] * coef[0] + xy[:, 1] * coef[1] + coef[2])
+    normals = reliable_normals[idxs]
+    roof_plane['facing_share'] = _facing_share(roof_plane, normals[~np.isnan(normals[:, 0])])
+    snapped, _ = _snapped_aspect(roof_plane, face_index)
+    if snapped is not None:
+        roof_plane['aspect'] = snapped
+    else:
+        roof_plane['aspect'] = 180 if is_flat else roof_plane['aspect_raw']
 
 
 def _snapped_aspect(plane: RoofPlane, face_index: FaceIndex) -> Tuple[Optional[float], bool]:
@@ -781,9 +848,7 @@ def _buildings_with_areas(pg_uri: str, job_id: int) -> List[Tuple[str, float]]:
             """SELECT building_id, ST_Area(geom_27700) as area
                FROM {buildings} 
                WHERE exclusion_reason IS NULL
-               AND ST_Area(geom_27700) <= %(max_area)s
                ORDER BY ST_Area(geom_27700) DESC;""",
-            bindings={"max_area": ROOFDET_MAX_AREA},
             buildings=Identifier(tables.schema(job_id), tables.BUILDINGS_TABLE),
             result_extractor=lambda rows: [(row['building_id'], row['area']) for row in rows])
 
@@ -1005,8 +1070,8 @@ def _clear(pg_uri: str, job_id: int):
 def _write_test_data(job_id: int, building: RoofDetBuilding):
     """Write data for building in the format that the roof detection tests expect"""
     debug_data_dir = os.environ.get("DEBUG_DATA_DIR")
-    os.makedirs(debug_data_dir, exist_ok=True)
     if debug_data_dir:
+        os.makedirs(debug_data_dir, exist_ok=True)
         fname = join(debug_data_dir, f"{job_id}_{building['building_id']}.json")
         with open(fname, 'w') as f:
             json.dump(building, f, default=str)

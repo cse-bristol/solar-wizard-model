@@ -149,6 +149,15 @@ class RoofPolygonTest(ParameterisedTestCase):
             )
         ], _do_test)
 
+    def test_union_geos_cannot_node(self):
+        # a synthetic noisy roof at 0.5m: the union of one plane's exclusions raises a
+        # TopologyException in floating point, though each of them is valid
+        planes, building_geom = _load_test_data("0021")
+        polygons = _create_roof_polygons(
+            building_geom, planes, max_roof_slope_degrees=70, min_roof_area_m=8, min_roof_degrees_from_north=45,
+            flat_roof_degrees=10, min_dist_to_edge_m=0.1, resolution_metres=0.5)
+        self.assertEqual(len(polygons), 8)
+
     def test_independent_of_plane_order(self):
         # flat, west and east faces; the meeting line between the faces nearly coincides
         # with their shared edge, which polygonizing once merged into the east face

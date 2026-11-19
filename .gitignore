@@ -6,4 +6,4 @@ result
 documents/.~lock.*
 solar_model.egg-info
 pvgis_data_uk.tar
-
+*.gpkg

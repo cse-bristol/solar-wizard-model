@@ -248,13 +248,15 @@ def oversplit_pairs(xyz: np.ndarray, labels: np.ndarray, planes: List[dict], lo:
                     hi: np.ndarray) -> List[dict]:
     """
     Adjacent planes that look like one face split in two: their own least-squares fits are
-    within 5° of each other, and one plane fitted to both pixel sets is within 2cm on MAE and
-    explains under 5 percentage points fewer of their pixels. The measures above reward
+    within 5° of each other, and one plane fitted to both pixel sets is, on each plane's
+    pixels, within 2cm of its own fit on MAE and explains under 5 percentage points fewer of
+    them. Each plane separately, or a large plane would pass with any small neighbour (at
+    another level, say), however badly one plane fits it. The measures above reward
     splitting (it lowers residuals for only `LABEL_COST` a plane), so this checks for it.
 
-    Each pair is the two planes' indices (`p` < `q`), the angle between their fits, how much
-    worse the MAE of one plane fitted to both is, and the share of their pixels it explains
-    fewer of.
+    Each pair is the two planes' indices (`p` < `q`), the angle between their fits, and of
+    the two planes, the most that one plane fitted to both worsens the MAE, and the largest
+    share of their pixels it explains fewer of.
     """
     a, b = labels[lo], labels[hi]
     touching = (a >= 0) & (b >= 0) & (a != b)
@@ -266,13 +268,14 @@ def oversplit_pairs(xyz: np.ndarray, labels: np.ndarray, planes: List[dict], lo:
             continue
         cp, rp = _lstsq_plane(xyz[in_p])
         cq, rq = _lstsq_plane(xyz[in_q])
-        _, ru = _lstsq_plane(xyz[in_p | in_q])
-        n = (in_p | in_q).sum()
+        union = in_p | in_q
+        _, ru = _lstsq_plane(xyz[union])
+        on_p = in_p[union]
         angle = np.degrees(np.arccos(np.clip(abs(_normal(*cp[:2]) @ _normal(*cq[:2])), 0, 1)))
-        separate_mae = (np.abs(rp).sum() + np.abs(rq).sum()) / n
         scale = _scale(planes[p]["is_flat"] and planes[q]["is_flat"])
-        explained_loss = ((np.abs(rp) <= scale).sum() + (np.abs(rq) <= scale).sum() - (np.abs(ru) <= scale).sum()) / n
-        mae_loss = np.abs(ru).mean() - separate_mae
+        mae_loss = max(np.abs(ru[on_p]).mean() - np.abs(rp).mean(), np.abs(ru[~on_p]).mean() - np.abs(rq).mean())
+        explained_loss = max(np.mean(np.abs(rp) <= scale) - np.mean(np.abs(ru[on_p]) <= scale),
+                             np.mean(np.abs(rq) <= scale) - np.mean(np.abs(ru[~on_p]) <= scale))
         if angle < 5 and mae_loss < 0.02 and explained_loss < 0.05:
             found.append({"p": int(p), "q": int(q), "angle_deg": float(angle), "mae_loss_m": float(mae_loss),
                           "explained_loss": float(explained_loss)})

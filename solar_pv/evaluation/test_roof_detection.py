@@ -46,6 +46,19 @@ class RoofDetectionEvalTest(unittest.TestCase):
         ridge = np.column_stack([x, y, 5 - 0.6 * np.abs(x - 5)])
         self.assertEqual(oversplit_pairs(ridge, halves, planes, lo, hi), [])
 
+    def test_oversplit_pairs_does_not_count_a_small_plane_at_another_level(self):
+        # a 40x10m flat roof, with a 2x2m flat plant top 0.3m above it: one plane through both
+        # misses only 1% of their pixels, but all the plant top's
+        xs, ys = np.meshgrid(np.arange(40) + 0.5, np.arange(10) + 0.5)
+        x, y = xs.ravel(), ys.ravel()
+        plant = (x > 19) & (x < 21) & (y > 4) & (y < 6)
+        labels = plant.astype(int)
+        lo, hi = _neighbour_pairs(grid_index(np.column_stack([x, y]), 1.0)[0])
+        planes = [{"is_flat": True}, {"is_flat": True}]
+
+        xyz = np.column_stack([x, y, np.where(plant, 10.3, 10.0)])
+        self.assertEqual(oversplit_pairs(xyz, labels, planes, lo, hi), [])
+
     def test_coef_from_slope_aspect_inverts_slope_and_aspect(self):
         for a, b in [(0.6, 0.0), (-0.2, 0.5), (0.1, -0.4)]:
             x, y = _coef_from_slope_aspect(slope_deg(a, b), aspect_deg(a, b))

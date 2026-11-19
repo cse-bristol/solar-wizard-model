@@ -11,7 +11,7 @@ from shapely import wkt, box, LineString
 
 from solar_pv.paths import TEST_DATA
 from solar_pv.roof_detection.detect_roofs import _detect_building_roof_planes, _create_adaptive_batches, \
-    _set_skew, _facing_share, _implausible, _set_footprint_aspect_gap, _finalise, _snapped_aspect, _fit
+    _set_skew, _facing_share, _implausible, _set_footprint_aspect_gap, _finalise, _split_at_obstacles, _snapped_aspect, _fit
 from solar_pv.geos import slope_deg
 from solar_pv.roof_detection.footprint import FaceIndex
 from solar_pv.roof_detection.plane_metrics import set_plane_fit
@@ -69,7 +69,7 @@ _ROOF_DETECTION_CASES = [
     # Cotham school - messy flat roofs. Imagery says 0029 is [149], and 0028 and 0033 are
     # [], but small planes on them that the mess cost doesn't remove are kept.
     ("0029", 1.0, [141, 146, 151, 151, 235, 320]),
-    ("0028", 1.0, [161, 165, 167]),
+    ("0028", 1.0, [69, 165, 167]),
     ("0033", 1.0, [159, 167, 167, 172, 257]),
 
     # Flat roofs:
@@ -318,3 +318,57 @@ class FinaliseTest(unittest.TestCase):
         self.assertTrue(plane['is_flat'])
         self.assertEqual(plane['aspect'], 180)
 
+
+class SplitAtObstaclesTest(unittest.TestCase):
+
+    def _split(self, zs: np.ndarray):
+        """A 30m square flat roof at 1m, with elevations `zs`, as one plane, split at its obstacles."""
+        xs, ys = np.meshgrid(np.arange(30) + 0.5, np.arange(30) + 0.5)
+        xyz = np.column_stack([xs.ravel(), ys.ravel(), zs.ravel()])
+        aspect = np.full(len(xyz), 180.0)
+        labels = np.zeros(len(xyz), dtype=int)
+        planes = {0: Plane(coef=(0.0, 0.0, 10.0), is_flat=True, plane_type="segmented", plane_id="segmented_0",
+                           xy=xyz[:, :2], proposed={'building_id': "0"})}
+        normals, rms = local_fits(xyz, 1.0)
+        reliable_normals = np.where((rms <= 0.1)[:, None], normals, np.nan)
+        face_index = FaceIndex.of(box(0, 0, 30, 30))
+        finished = _finalise(xyz, aspect, labels, planes, face_index, 1.0, reliable_normals)
+        rejected = []
+        split = _split_at_obstacles(finished, xyz, aspect, labels, np.ones(len(xyz), dtype=bool), face_index, 1.0,
+                                    reliable_normals, 8, "0", rejected)
+        return xs, ys, labels, split, rejected
+
+    def test_roof_cut_in_pieces_by_obstacles_is_a_plane_per_piece(self):
+        xs, ys = np.meshgrid(np.arange(30) + 0.5, np.arange(30) + 0.5)
+        # a ring of rough roof 3m wide round a 10m square of clear roof:
+        from_centre = np.maximum(abs(xs - 15), abs(ys - 15))
+        ring = (from_centre > 5) & (from_centre < 8)
+        checkerboard = (np.floor(xs) + np.floor(ys)) % 2 * 2 - 1
+        zs = np.where(ring, 10.0 + 0.1 * checkerboard, 10.0)
+
+        xs, ys, labels, split, rejected = self._split(zs)
+
+        self.assertEqual(len(split), 2)
+        inner = labels.reshape(xs.shape)[15, 15]
+        self.assertTrue((labels.reshape(xs.shape)[from_centre < 5] == inner).all())
+        self.assertTrue((labels.reshape(xs.shape)[from_centre > 8] != inner).all())
+        # every pixel is in a piece, and each piece has the orientation of the whole:
+        self.assertEqual(sum(len(p['inliers_xy']) for p in split.values()), 900)
+        for plane_id, plane in split.items():
+            self.assertEqual(len(plane['inliers_xy']), np.count_nonzero(labels == plane_id))
+            self.assertTrue(plane['is_flat'])
+            self.assertEqual((plane['x_coef'], plane['y_coef']), (split[0]['x_coef'], split[0]['y_coef']))
+            self.assertGreater(len(plane['obstacles_xy']), 0)
+        self.assertEqual({r['rejection_reason'] for r in rejected}, {rejections.MESSY_PART})
+
+    def test_roof_not_cut_in_pieces_is_one_plane(self):
+        xs, ys = np.meshgrid(np.arange(30) + 0.5, np.arange(30) + 0.5)
+        checkerboard = (np.floor(xs) + np.floor(ys)) % 2 * 2 - 1
+        rough = (abs(xs - 15) < 2) & (abs(ys - 15) < 2)
+        zs = np.where(rough, 10.0 + 0.1 * checkerboard, 10.0)
+
+        xs, ys, labels, split, _ = self._split(zs)
+
+        self.assertEqual(list(split), [0])
+        self.assertEqual(len(split[0]['inliers_xy']), 900)
+        self.assertGreater(len(split[0]['obstacles_xy']), 0)

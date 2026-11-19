@@ -32,6 +32,9 @@ _ENERGY_SCALE = 10_000
 # Fill cost for a tile with no legal area. Only has to beat the largest perimeter saving
 # a tile can buy (4 * lambda).
 _FORBID = 1000.0
+# The tile grid extends this many tiles past the region's bounds (and up to one more, to fit
+# whole tiles):
+_GRID_MARGIN_TILES = 2
 
 
 def tile_polygon(region: Union[Polygon, MultiPolygon],
@@ -55,8 +58,9 @@ def tile_polygon(region: Union[Polygon, MultiPolygon],
         return None
 
     minx, miny, maxx, maxy = rot.bounds
-    minx, miny = minx - 2 * tile_m, miny - 2 * tile_m
-    maxx, maxy = maxx + 2 * tile_m, maxy + 2 * tile_m
+    margin = _GRID_MARGIN_TILES * tile_m
+    minx, miny = minx - margin, miny - margin
+    maxx, maxy = maxx + margin, maxy + margin
     ncol = int(math.ceil((maxx - minx) / tile_m))
     nrow = int(math.ceil((maxy - miny) / tile_m))
     if nrow < 2 or ncol < 2:
@@ -82,6 +86,18 @@ def tile_polygon(region: Union[Polygon, MultiPolygon],
     # union leaves a vertex at every tile corner along a straight edge
     tiled = shapely.union_all(tiles).simplify(0)
     return _rotate_valid(tiled, -angle_deg, origin)
+
+
+def legal_window(region: Union[Polygon, MultiPolygon], angle_deg: float, origin: Point, tile_m: float) -> Polygon:
+    """
+    A rectangle that `tile_polygon`'s grid for `region` (rotated by `angle_deg` about
+    `origin`) is within: `legal` only matters within it.
+    """
+    minx, miny, maxx, maxy = affinity.rotate(region, angle_deg, origin=origin).bounds
+    # the grid's margin, up to a tile more to fit whole tiles, and a tile to spare:
+    margin = (_GRID_MARGIN_TILES + 2) * tile_m
+    window = shapely.box(minx - margin, miny - margin, maxx + margin, maxy + margin)
+    return affinity.rotate(window, -angle_deg, origin=origin)
 
 
 def _rotate_valid(geom, angle_deg: float, origin: Point):
@@ -123,7 +139,9 @@ def _cell_fractions(geom, minx: float, maxy: float, fpix: float, nrow: int, ncol
     edge = shapely.intersects(geom, cells) & ~inside
     window = np.zeros(cells.shape)
     window[inside] = 1.0
-    window[edge] = shapely.area(shapely.intersection(cells[edge], geom)) / (fpix * fpix)
+    # Rounded, as regions are made of pixels, so many cells are exactly half covered, and
+    # which way floating-point error falls mustn't decide them:
+    window[edge] = np.round(shapely.area(shapely.intersection(cells[edge], geom)) / (fpix * fpix), 9)
     fracs[r0:r1, c0:c1] = np.minimum(window, 1.0)
     return fracs
 
